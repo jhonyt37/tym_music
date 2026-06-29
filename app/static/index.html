@@ -459,10 +459,17 @@ async function doBoost(id){
   if(j.ok){if(j.session)sess=j.session;toast(j.already?'Ya tiene prioridad':'⚡ ¡Impulsada!');refreshBal();poll();}
   else toast(j.error||'Error');
 }
+const PS_ICON={pending:'⏳',playing:'🎵',played:'✅',requeued:'↩️',skipped:'⏭️'};
+function playStatusBadge(it){
+  const ps=it.play_status;if(!ps||ps==='pending')return '';
+  const icon=PS_ICON[ps]||'';
+  const rc=it.requeue_count>0?' (re-encolada '+it.requeue_count+'x)':'';
+  return `<span style="font-size:11px;margin-left:6px;opacity:.7">${icon}${rc}</span>`;
+}
 function songRow(it,opts){
   const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
   const tag=it.super?'⏫ ':(it.priority?'⚡ ':'');
-  div.innerHTML=`<img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}</div><div class="a">${tag+(it.table||it.artist||'')}</div></div>`;
+  div.innerHTML=`<img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+(it.table||it.artist||'')}</div></div>`;
   if(opts&&opts.boost){
     if(!it.priority){const b=document.createElement('button');b.className='btn sm gold';b.textContent='⚡ Impulsar';b.onclick=()=>boost(it.id);div.appendChild(b);}
     if(jumpAvail&&!it.super){const jb=document.createElement('button');jb.className='btn sm';jb.style.background='#7c3aed';jb.textContent='⏫ #1';jb.title='Saltar al primer lugar';jb.onclick=()=>jump(it.id);div.appendChild(jb);}

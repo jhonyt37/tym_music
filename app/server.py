@@ -309,10 +309,22 @@ def queue_view():
 def pending_view():
     return [i for i in STATE["items"] if i["status"] == "pending"]
 
-def promote_next():
-    if STATE["now_playing"]:
-        STATE["history"].insert(0, STATE["now_playing"])
-        STATE["history"] = STATE["history"][:30]
+def promote_next(manual=False):
+    old = STATE["now_playing"]
+    if old:
+        if old.get("fallback"):
+            # Canción del local: siempre a historial sin re-encolar
+            STATE["history"].insert(0, old); STATE["history"] = STATE["history"][:30]
+        elif manual or old.get("played_enough") or old.get("requeue_count", 0) >= 2:
+            # Sonó suficiente, admin la saltó, o ya re-encolamos 2 veces: finalizar
+            old["play_status"] = "skipped" if (manual and not old.get("played_enough")) else "played"
+            STATE["history"].insert(0, old); STATE["history"] = STATE["history"][:30]
+        else:
+            # No sonó suficiente (< 50%) y no fue salto manual: re-encolar
+            old["requeue_count"] = old.get("requeue_count", 0) + 1
+            old["play_status"] = "requeued"
+            old["position"] = 0; old["played_at"] = None; old["played_enough"] = False
+            STATE["items"].append(old)   # vuelve a la cola manteniendo su prioridad original
     now = time.time()
     q = queue_view()
     if q:
@@ -327,6 +339,8 @@ def promote_next():
             nxt["charged"] = True  # marcar siempre para no reintentar
         nxt["position"] = 0
         nxt["played_at"] = now
+        nxt["played_enough"] = False
+        nxt["play_status"] = "playing"
         STATE["now_playing"] = nxt
     else:
         # Nunca silencio: fallback de la lista del local (shuffle o secuencial)
@@ -403,6 +417,8 @@ def public_item(it, token):
             "yt": it["yt"], "table": it.get("table", ""), "priority": it.get("priority", False),
             "super": it.get("super", False),
             "duration": it.get("duration", DEFAULT_DUR), "mine": bool(token) and it.get("token") == token,
+            "play_status": it.get("play_status", "pending"),
+            "requeue_count": it.get("requeue_count", 0),
             "reactions": counts, "my_reacts": mine, "react_total": total}
 
 def public_state(token=None, admin=False):
@@ -799,6 +815,7 @@ class H(BaseHTTPRequestHandler):
                         "token": d.get("token"), "table": table, "priority": priority,
                         "super": sup, "mode": mode, "duration": dur,
                         "status": "approved" if STATE["settings"]["auto_approve"] else "pending",
+                        "play_status": "pending", "played_enough": False, "requeue_count": 0,
                         "ts": time.time(), "charge_on_play": charge, "charged": False, "charge_kind": ckind}
                 STATE["items"].append(item)
                 bump_count(yt, title, artist)
@@ -928,9 +945,13 @@ class H(BaseHTTPRequestHandler):
             if path == "/api/progress":
                 if STATE["now_playing"]:
                     try:
-                        STATE["now_playing"]["position"] = max(0, int(float(d.get("position", 0))))
+                        pos = max(0, int(float(d.get("position", 0))))
+                        STATE["now_playing"]["position"] = pos
                         if d.get("duration"):
                             STATE["now_playing"]["duration"] = max(1, int(float(d["duration"])))
+                        dur = STATE["now_playing"].get("duration") or DEFAULT_DUR
+                        if pos >= dur * 0.5 and not STATE["now_playing"].get("played_enough"):
+                            STATE["now_playing"]["played_enough"] = True
                     except Exception:
                         pass
                 return self._send(200, {"ok": True})
@@ -952,7 +973,7 @@ class H(BaseHTTPRequestHandler):
                             STATE["learned_end"][d["yt"]] = int(pos)
                     except Exception:
                         pass
-                return self._send(200, {"ok": True, "now_playing": promote_next()})
+                return self._send(200, {"ok": True, "now_playing": promote_next(manual=bool(d.get("manual")))})
 
             # ---- Dueno ----
             if path == "/api/admin/approve":
