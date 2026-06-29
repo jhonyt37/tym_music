@@ -159,6 +159,17 @@ function applyTheme(t){
 }
 // Apuntar QR al venue correcto
 $('qrImg').src='/api/qr'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
+
+// Wake Lock: evita que el computador entre en reposo/hibernación mientras la TV está activa
+let _wl=null;
+async function keepAwake(){
+  if(!('wakeLock' in navigator)) return;
+  try{ _wl=await navigator.wakeLock.request('screen'); }catch(e){}
+}
+keepAwake();
+// Re-adquirir cuando la pestaña vuelve a estar visible (el SO libera el lock al minimizar)
+document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') keepAwake(); });
+
 let player,ready=false,curYt=null,curId=null,wantAudio=false,topLoved=[],lastReactTotal=0,lastReacts={},lastReactId=null,authok=false;
 let isPrimary=true;   // false → esta pestaña es secundaria: nunca llama advance
 let advancingId=undefined; // id de la canción para la que ya enviamos advance (evita doble llamada)

@@ -457,11 +457,12 @@ def public_state(token=None, admin=False):
             a["total"] += tot
     top_loved = sorted(agg.values(), key=lambda x: -x["total"])[:5]
     out = {
-        "settings": dict({k: s[k] for k in ("venue_name", "price_priority", "style", "auto_approve",
+        "settings": dict({k: s.get(k) for k in ("venue_name", "price_priority", "style", "auto_approve",
                                        "genre", "credit_packages", "time_pass",
                                        "repeat_block_min", "repeat_block_songs", "trim_end_secs",
                                        "free_per_window", "free_window_min", "jump_multiplier",
-                                       "venue_logo", "max_priority_queue_min", "fallback_shuffle")},
+                                       "venue_logo", "max_priority_queue_min", "fallback_shuffle",
+                                       "theme")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "tables": [t["name"] for t in STATE["tables"]],
         "now_playing": np_pub,
