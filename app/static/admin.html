@@ -11,16 +11,34 @@
 .pinrow .pin{font-size:22px;font-weight:800;letter-spacing:3px;color:var(--gold)}
 .pkgrow{display:flex;gap:8px;align-items:center;margin-top:8px}
 .pkgrow input{width:90px}
-.grp{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0;font-size:14px}
+.grp{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:7px 0;font-size:14px}
 .kpis{display:flex;gap:12px;flex-wrap:wrap}
 .kpibox{flex:1;min-width:120px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px}
 .kpibox .n{font-size:22px;font-weight:800}
 .abar{display:flex;align-items:center;gap:6px;margin:2px 0;font-size:12px}
 .abar .lbl{width:34px;color:var(--mut);text-align:right;font-size:11px}
 .abar .fill{height:12px;background:var(--pri);border-radius:3px;min-width:2px}
+/* ---- Tab nav ---- */
+.tabnav{display:flex;gap:4px;padding:8px 14px;background:var(--bg2);border-bottom:2px solid var(--line);overflow-x:auto;position:sticky;top:52px;z-index:20;scrollbar-width:none}
+.tabnav::-webkit-scrollbar{display:none}
+.tabBtn{padding:9px 18px;border-radius:9px;border:none;background:transparent;color:var(--mut);font-size:13px;font-weight:700;cursor:pointer;white-space:nowrap;transition:background .15s,color .15s;position:relative;font-family:inherit;flex-shrink:0}
+.tabBtn:hover{background:var(--bg);color:var(--fg)}
+.tabBtn.active{background:var(--pri);color:#fff}
+.tabBadge{display:none;position:absolute;top:4px;right:5px;background:#dc2626;color:#fff;border-radius:10px;font-size:10px;font-weight:900;padding:1px 5px;min-width:16px;text-align:center;line-height:14px;pointer-events:none}
+.tabBadge.show{display:inline-block}
+/* ---- Panels ---- */
+.tabpanel{display:none}
+.tabpanel.active{display:block}
+/* ---- Section titles ---- */
+.sec{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 12px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+/* ---- Urgency ---- */
+.urgentCard{border-color:#dc2626!important}
+.urgentCard .sec{color:#dc2626}
 </style>
 </head>
 <body>
+
+<!-- Login Gate -->
 <div id="loginGate" style="position:fixed;inset:0;background:#0b0f1a;z-index:100;display:none;align-items:center;justify-content:center;padding:24px">
   <div style="max-width:340px;width:100%;text-align:center">
     <div class="logo" style="font-size:30px">TY<b>M</b> Music</div>
@@ -32,6 +50,8 @@
     <div class="small" style="margin-top:14px;color:var(--mut)">Demo: bardemo / tym1234</div>
   </div>
 </div>
+
+<!-- Header -->
 <header class="bar">
   <div class="logo">TY<b>M</b> Music</div>
   <div class="tag" id="venueTag">Panel del dueño</div>
@@ -40,114 +60,216 @@
   <a class="tag" href="#" onclick="logout();return false">Salir</a>
 </header>
 
-<div class="wrap wide">
-  <div class="grid2">
-    <div class="card">
-      <h2>Cobros a la cuenta</h2>
-      <div class="kpi gold" id="total">$0</div>
-      <div class="small">Total a sumar a las cuentas de los clientes</div>
-      <div id="byTable" style="margin-top:12px"></div>
-      <h2 style="margin-top:16px">Movimientos recientes</h2>
-      <div class="list" id="ledger"><div class="empty">Sin cobros aún.</div></div>
-    </div>
-    <div class="card">
-      <h2>Ajustes del local</h2>
-      <label class="small">Nombre del local</label><input class="field" id="venue">
-      <label class="small">Precio por prioridad (COP)</label><input class="field" id="price" type="number" step="100">
-      <label class="small">Estilo / mensaje al cliente</label><input class="field" id="style">
-      <label class="small">Género (para recomendadas)</label><input class="field" id="genre">
-      <label class="opt" style="margin-top:12px"><div><b>Auto-aprobar pedidos</b><div class="small">Si está apagado, tú apruebas cada canción</div></div><input type="checkbox" id="auto" style="width:22px;height:22px"></label>
+<!-- Tab navigation -->
+<nav class="tabnav" role="tablist">
+  <button class="tabBtn active" onclick="showTab('live')" id="tbtn-live">
+    🎚️ En vivo
+    <span class="tabBadge" id="liveBadge"></span>
+  </button>
+  <button class="tabBtn" onclick="showTab('settings')" id="tbtn-settings">⚙️ Ajustes</button>
+  <button class="tabBtn" onclick="showTab('tables')" id="tbtn-tables">🍽️ Mesas</button>
+  <button class="tabBtn" onclick="showTab('content')" id="tbtn-content">🎵 Contenido</button>
+  <button class="tabBtn" onclick="showTab('reports')" id="tbtn-reports">📊 Informes</button>
+</nav>
 
-      <h2 style="margin-top:16px">No repetir canciones</h2>
+<!-- ============================================================
+     TAB 1: EN VIVO
+     ============================================================ -->
+<div id="tab-live" class="tabpanel active">
+  <div class="wrap wide">
+    <div class="grid2" style="align-items:start">
+
+      <!-- LEFT: Reproducción + Pendientes -->
+      <div style="display:flex;flex-direction:column;gap:14px">
+
+        <!-- Asistencia (solo visible si hay pedidos) -->
+        <div class="card urgentCard" id="assistCard" style="display:none">
+          <p class="sec">🔔 Asistencia en mesa (<span id="acount">0</span>)</p>
+          <div class="list" id="assistList"></div>
+        </div>
+
+        <!-- Sonando ahora & cola -->
+        <div class="card">
+          <p class="sec">Sonando ahora &amp; cola</p>
+          <div class="list" id="queue"><div class="empty">Nada en cola.</div></div>
+        </div>
+
+        <!-- Por aprobar -->
+        <div class="card">
+          <p class="sec">Por aprobar (<span id="pcount">0</span>)</p>
+          <div class="list" id="pending"><div class="empty">No hay pedidos pendientes.</div></div>
+        </div>
+
+      </div>
+
+      <!-- RIGHT: Cobros del turno -->
+      <div style="display:flex;flex-direction:column;gap:14px">
+
+        <div class="card">
+          <p class="sec">Cobros del turno</p>
+          <div class="kpi gold" id="total" style="font-size:30px;margin:2px 0 6px">$0</div>
+          <div class="small" style="color:var(--mut);margin-bottom:12px">Total acumulado en este turno</div>
+          <div id="byTable"></div>
+        </div>
+
+        <div class="card">
+          <p class="sec">Movimientos recientes</p>
+          <div class="list" id="ledger"><div class="empty">Sin cobros aún.</div></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     TAB 2: AJUSTES
+     ============================================================ -->
+<div id="tab-settings" class="tabpanel">
+  <div class="wrap" style="max-width:560px">
+    <div class="card">
+
+      <p class="sec">Información del local</p>
+      <label class="small">Nombre del local</label>
+      <input class="field" id="venue">
+      <label class="small">Precio por prioridad (COP)</label>
+      <input class="field" id="price" type="number" step="100">
+      <label class="small">Estilo / mensaje al cliente</label>
+      <input class="field" id="style">
+      <label class="small">Género (para recomendadas)</label>
+      <input class="field" id="genre">
+      <label class="opt" style="margin-top:12px">
+        <div><b>Auto-aprobar pedidos</b><div class="small">Si está apagado, tú apruebas cada canción</div></div>
+        <input type="checkbox" id="auto" style="width:22px;height:22px">
+      </label>
+
+      <p class="sec" style="margin-top:22px">Reproducción y restricciones</p>
       <div class="pkgrow"><span class="small" style="flex:1">No repetir la misma en (minutos, 0=sin límite)</span><input class="field" id="repMin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Ni dentro de las últimas N canciones</span><input class="field" id="repSongs" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Cortar últimos seg del video (silencios)</span><input class="field" id="trimEnd" type="number"></div>
+      <label class="opt" style="margin-top:12px">
+        <div><b>Lista del local en orden aleatorio</b><div class="small">Si está apagado, sigue el orden en que añadiste las canciones</div></div>
+        <input type="checkbox" id="fbShuffle" style="width:22px;height:22px">
+      </label>
 
-      <h2 style="margin-top:16px">Límites y premium</h2>
+      <p class="sec" style="margin-top:22px">Límites y premium</p>
       <div class="pkgrow"><span class="small" style="flex:1">Canciones gratis por mesa</span><input class="field" id="freeN" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">...cada (minutos)</span><input class="field" id="freeWin" type="number"></div>
-      <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (x precio)</span><input class="field" id="jumpMult" type="number"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (× precio)</span><input class="field" id="jumpMult" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Bloquear nuevas prioridades si la cola supera (minutos, 0=sin límite)</span><input class="field" id="maxPrioMin" type="number"></div>
-      <label class="opt" style="margin-top:10px"><div><b>Reproducir lista del local en orden aleatorio</b><div class="small">Si está apagado, sigue el orden en que añadiste las canciones</div></div><input type="checkbox" id="fbShuffle" style="width:22px;height:22px"></label>
 
-      <h2 style="margin-top:16px">Tema de color</h2>
+      <p class="sec" style="margin-top:22px">Tema de color</p>
       <div style="display:flex;gap:8px;margin:8px 0" id="themeRow">
         <div onclick="pickTheme('azul')" data-t="azul" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #3b82f6;background:#0e1320;color:#3b82f6">Azul</div>
         <div onclick="pickTheme('purpura')" data-t="purpura" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #a855f7;background:#0e0b1e;color:#a855f7">Púrpura</div>
         <div onclick="pickTheme('verde')" data-t="verde" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #10b981;background:#081411;color:#10b981">Verde</div>
       </div>
 
-      <h2 style="margin-top:16px">Marca y redes (salen en el TV / cliente)</h2>
-      <label class="small">Logo TYM (imagen)</label><input type="file" id="tymLogoFile" accept="image/*" class="field">
-      <label class="small">Logo del bar (imagen)</label><input type="file" id="venueLogoFile" accept="image/*" class="field">
-      <div id="logoPrev" style="display:flex;gap:14px;align-items:center;margin:6px 0"></div>
-      <label class="small">Instagram (URL)</label><input class="field" id="soIg" placeholder="https://instagram.com/...">
-      <label class="small">TikTok (URL)</label><input class="field" id="soTt" placeholder="https://tiktok.com/@...">
-      <label class="small">Web (URL)</label><input class="field" id="soWeb" placeholder="https://...">
-
-      <h2 style="margin-top:16px">Paquetes de prioridades</h2>
-      <div id="pkgs"></div>
-      <div class="pkgrow"><span class="small" style="flex:1">Pase (min / precio)</span>
-        <input class="field" id="passMin" type="number"><input class="field" id="passPrice" type="number" step="100"></div>
-
-      <button class="btn block" style="margin-top:14px" onclick="save()">Guardar ajustes</button>
+      <button class="btn block" style="margin-top:22px" onclick="save()">Guardar ajustes</button>
       <button class="btn ghost block sm" style="margin-top:8px" onclick="reset()">Reiniciar demo</button>
     </div>
   </div>
+</div>
 
-  <div class="grid2">
+<!-- ============================================================
+     TAB 3: MESAS
+     ============================================================ -->
+<div id="tab-tables" class="tabpanel">
+  <div class="wrap" style="max-width:480px">
     <div class="card">
-      <h2>Mesas y códigos (PIN)</h2>
-      <div class="small">Imprime y pega el código en cada mesa.</div>
-      <div class="list" id="tables" style="margin-top:10px"></div>
-      <button class="btn ghost block sm" style="margin-top:10px" onclick="addTable()">+ Agregar mesa</button>
+      <p class="sec">Mesas y códigos (PIN)</p>
+      <div class="small" style="margin-bottom:12px">Imprime y pega el código en cada mesa.</div>
+      <div class="list" id="tables"></div>
+      <button class="btn ghost block sm" style="margin-top:12px" onclick="addTable()">+ Agregar mesa</button>
     </div>
-    <div class="card">
-      <h2>Recomendadas del local</h2>
-      <input class="search" id="curq" placeholder="Buscar para añadir…" autocomplete="off">
-      <div class="list" id="curResults" style="margin-top:8px;max-height:170px;overflow:auto"></div>
-      <h2 style="margin-top:14px">En tu lista</h2>
-      <div class="list" id="curList"></div>
-    </div>
-  </div>
-
-  <!-- ===== INFORMES DEL LOCAL ===== -->
-  <div class="card">
-    <h2>Informes del local 📊</h2>
-    <div class="kpis" id="analKpis" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px"></div>
-    <div class="grid2">
-      <div>
-        <h3 style="font-size:14px;font-weight:700;margin-bottom:8px;color:var(--mut)">Horas pico (ingresos)</h3>
-        <div id="analHours"></div>
-      </div>
-      <div>
-        <h3 style="font-size:14px;font-weight:700;margin-bottom:8px;color:var(--mut)">Canciones más pedidas</h3>
-        <div class="list" id="analSongs"></div>
-      </div>
-    </div>
-    <h3 style="font-size:14px;font-weight:700;margin:14px 0 8px;color:var(--mut)">Cuentas recientes</h3>
-    <div class="list" id="analAccts"><div class="empty">Sin cuentas aún.</div></div>
-  </div>
-
-  <div class="card">
-    <h2>Correos capturados (<span id="subCount">0</span>)</h2>
-    <div class="list" id="subList"><div class="empty">Aún no hay correos.</div></div>
-  </div>
-
-  <div class="card" id="assistCard" style="border-color:#dc2626;display:none">
-    <h2 style="color:#dc2626">🔔 Asistencia en mesa (<span id="acount">0</span>)</h2>
-    <div class="list" id="assistList"></div>
-  </div>
-
-  <div class="card">
-    <h2>Por aprobar (<span id="pcount">0</span>)</h2>
-    <div class="list" id="pending"><div class="empty">No hay pedidos pendientes.</div></div>
-  </div>
-  <div class="card">
-    <h2>Sonando ahora & cola</h2>
-    <div class="list" id="queue"><div class="empty">Nada en cola.</div></div>
   </div>
 </div>
+
+<!-- ============================================================
+     TAB 4: CONTENIDO
+     ============================================================ -->
+<div id="tab-content" class="tabpanel">
+  <div class="wrap wide">
+    <div class="grid2" style="align-items:start">
+
+      <!-- Curated playlist -->
+      <div class="card">
+        <p class="sec">Recomendadas del local</p>
+        <input class="search" id="curq" placeholder="Buscar para añadir…" autocomplete="off">
+        <div class="list" id="curResults" style="margin-top:8px;max-height:170px;overflow:auto"></div>
+        <h2 style="margin-top:14px;font-size:14px;font-weight:700">En tu lista</h2>
+        <div class="list" id="curList"></div>
+      </div>
+
+      <!-- Brand + packages -->
+      <div style="display:flex;flex-direction:column;gap:14px">
+
+        <div class="card">
+          <p class="sec">Marca y redes</p>
+          <label class="small">Logo TYM (imagen)</label>
+          <input type="file" id="tymLogoFile" accept="image/*" class="field">
+          <label class="small">Logo del bar (imagen)</label>
+          <input type="file" id="venueLogoFile" accept="image/*" class="field">
+          <div id="logoPrev" style="display:flex;gap:14px;align-items:center;margin:6px 0"></div>
+          <label class="small">Instagram (URL)</label>
+          <input class="field" id="soIg" placeholder="https://instagram.com/...">
+          <label class="small">TikTok (URL)</label>
+          <input class="field" id="soTt" placeholder="https://tiktok.com/@...">
+          <label class="small">Web (URL)</label>
+          <input class="field" id="soWeb" placeholder="https://...">
+          <button class="btn block" style="margin-top:12px" onclick="save()">Guardar</button>
+        </div>
+
+        <div class="card">
+          <p class="sec">Paquetes de prioridades</p>
+          <div id="pkgs"></div>
+          <div class="pkgrow">
+            <span class="small" style="flex:1">Pase de tiempo (min / precio)</span>
+            <input class="field" id="passMin" type="number">
+            <input class="field" id="passPrice" type="number" step="100">
+          </div>
+          <button class="btn block" style="margin-top:12px" onclick="save()">Guardar</button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================
+     TAB 5: INFORMES
+     ============================================================ -->
+<div id="tab-reports" class="tabpanel">
+  <div class="wrap wide">
+
+    <div class="card" style="margin-bottom:14px">
+      <p class="sec">Resumen del local 📊</p>
+      <div class="kpis" id="analKpis" style="margin-bottom:18px"></div>
+      <div class="grid2">
+        <div>
+          <h3 style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--mut)">Horas pico (ingresos)</h3>
+          <div id="analHours"></div>
+        </div>
+        <div>
+          <h3 style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--mut)">Canciones más pedidas</h3>
+          <div class="list" id="analSongs"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:14px">
+      <p class="sec">Cuentas recientes</p>
+      <div class="list" id="analAccts"><div class="empty">Sin cuentas aún.</div></div>
+    </div>
+
+    <div class="card">
+      <p class="sec">Correos capturados (<span id="subCount">0</span>)</p>
+      <div class="list" id="subList"><div class="empty">Aún no hay correos.</div></div>
+    </div>
+
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -155,6 +277,15 @@ const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 let editing=false, formLoaded=false, curTimer=null, packages=[], pass_obj={minutes:30,price:5000}, curTheme='azul';
+
+function showTab(id){
+  document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('active'));
+  document.querySelectorAll('.tabBtn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  document.getElementById('tbtn-'+id).classList.add('active');
+  try{sessionStorage.setItem('adminTab',id);}catch(e){}
+}
+
 const THEMES={
   azul:   {pri:'#3b82f6',pri2:'#2563eb',bg:'#0e1320',bg2:'#161d2e',card:'#1b2435',line:'#2a3550'},
   purpura:{pri:'#a855f7',pri2:'#9333ea',bg:'#0e0b1e',bg2:'#16112e',card:'#1d163c',line:'#2e2252'},
@@ -174,12 +305,15 @@ function pickTheme(t){
     el.style.outlineOffset='2px';
   });
 }
+
 let tymLogoData=null, venueLogoData=null, curSettings={};
 function readImg(f,cb){if(!f)return;const r=new FileReader();r.onload=()=>cb(r.result);r.readAsDataURL(f);}
-function renderLogoPrev(){const p=$('logoPrev');if(!p)return;p.innerHTML='';
+function renderLogoPrev(){
+  const p=$('logoPrev');if(!p)return;p.innerHTML='';
   const t=tymLogoData||curSettings.tym_logo,v=venueLogoData||curSettings.venue_logo;
   if(t)p.innerHTML+='<img src="'+t+'" style="height:34px">';
-  if(v)p.innerHTML+='<img src="'+v+'" style="height:38px;border-radius:6px">';}
+  if(v)p.innerHTML+='<img src="'+v+'" style="height:38px;border-radius:6px">';
+}
 document.addEventListener('focusin',e=>{if(e.target.matches('.field, input'))editing=true;});
 document.addEventListener('focusout',()=>setTimeout(()=>editing=false,500));
 
@@ -216,7 +350,11 @@ async function save(){
   await post('/api/admin/settings',payload);
   toast('Ajustes guardados');editing=false;
 }
-async function reset(){if(confirm('¿Reiniciar la demo? Borra cola, cobros y sesiones.')){await post('/api/admin/reset',{});formLoaded=false;tick();toast('Demo reiniciada');}}
+async function reset(){
+  if(confirm('¿Reiniciar la demo? Borra cola, cobros y sesiones.')){
+    await post('/api/admin/reset',{});formLoaded=false;tick();toast('Demo reiniciada');
+  }
+}
 async function closeTable(t,v){
   if(confirm('¿Cerrar la cuenta de '+t+' por '+cop(v)+'? Se cobra al cliente y se libera la mesa.')){
     await post('/api/admin/close_table',{table:t});toast('Cuenta de '+t+' cerrada ('+cop(v)+')');tick();
@@ -227,35 +365,44 @@ async function closeTable(t,v){
 async function loadTables(){
   const t=await (await fetch('/api/admin/tables')).json();
   const box=$('tables');box.innerHTML='';
-  t.forEach(m=>{const r=document.createElement('div');r.className='pinrow';
+  t.forEach(m=>{
+    const r=document.createElement('div');r.className='pinrow';
     r.innerHTML=`<div class="name">${m.name}</div><div class="pin">${m.pin}</div>`;
-    const rg=document.createElement('button');rg.className='btn ghost sm';rg.textContent='↻';rg.title='Nuevo PIN';rg.onclick=async()=>{await post('/api/admin/tables',{action:'regen',name:m.name});loadTables();};
-    const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';rm.onclick=async()=>{await post('/api/admin/tables',{action:'remove',name:m.name});loadTables();};
-    r.appendChild(rg);r.appendChild(rm);box.appendChild(r);});
+    const rg=document.createElement('button');rg.className='btn ghost sm';rg.textContent='↻';rg.title='Nuevo PIN';
+    rg.onclick=async()=>{await post('/api/admin/tables',{action:'regen',name:m.name});loadTables();};
+    const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';
+    rm.onclick=async()=>{await post('/api/admin/tables',{action:'remove',name:m.name});loadTables();};
+    r.appendChild(rg);r.appendChild(rm);box.appendChild(r);
+  });
 }
 async function addTable(){await post('/api/admin/tables',{action:'add'});loadTables();}
 
 // Curadas
-$('curq')&&$('curq').addEventListener('input',e=>{
+$('curq').addEventListener('input',e=>{
   clearTimeout(curTimer);const term=e.target.value.trim();
   if(!term){$('curResults').innerHTML='';return;}
   curTimer=setTimeout(async()=>{
     const list=await (await fetch('/api/search?q='+encodeURIComponent(term))).json();
     const box=$('curResults');box.innerHTML='';
-    list.slice(0,8).forEach(s=>{const r=document.createElement('div');r.className='row';
+    list.slice(0,8).forEach(s=>{
+      const r=document.createElement('div');r.className='row';
       r.innerHTML=`<img class="mini" src="${img(s.yt)}"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div>`;
       const a=document.createElement('button');a.className='btn green sm';a.textContent='+ Añadir';
       a.onclick=async()=>{await post('/api/admin/curated',{action:'add',yt:s.yt,title:s.title,artist:s.artist,length:s.length});toast('Añadida');renderCurated(window._cur||[]);tick();};
-      r.appendChild(a);box.appendChild(r);});
+      r.appendChild(a);box.appendChild(r);
+    });
   },350);
 });
 function renderCurated(list){
   window._cur=list;const box=$('curList');box.innerHTML='';
   if(!list.length){box.innerHTML='<div class="empty">Aún no has añadido recomendadas.</div>';return;}
-  list.forEach(c=>{const r=document.createElement('div');r.className='row';
+  list.forEach(c=>{
+    const r=document.createElement('div');r.className='row';
     r.innerHTML=`<img class="mini" src="${img(c.yt)}"><div class="info"><div class="t">${c.title}</div><div class="a">${c.artist||''}</div></div>`;
-    const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';x.onclick=async()=>{await post('/api/admin/curated',{action:'remove',yt:c.yt});tick();};
-    r.appendChild(x);box.appendChild(r);});
+    const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';
+    x.onclick=async()=>{await post('/api/admin/curated',{action:'remove',yt:c.yt});tick();};
+    r.appendChild(x);box.appendChild(r);
+  });
 }
 
 async function tick(){
@@ -278,62 +425,89 @@ async function tick(){
       formLoaded=true;
     }
     curSettings=s.settings;renderLogoPrev();
-    // correos capturados
+
+    // Correos
     const subs=s.subscribers||[];$('subCount').textContent=subs.length;
     const sl=$('subList');
     if(!subs.length)sl.innerHTML='<div class="empty">Aún no hay correos.</div>';
     else{sl.innerHTML='';subs.forEach(x=>{const r=document.createElement('div');r.className='row';
       r.innerHTML=`<div class="info"><div class="t">${x.email}</div><div class="a">${x.table||''}</div></div>`;sl.appendChild(r);});}
+
     renderCurated(s.curated||[]);
-    // Solicitudes de asistencia
+
+    // Asistencia
     const assists=s.assists||[];$('acount').textContent=assists.length;
     const ac=$('assistCard'),al=$('assistList');
-    if(assists.length){ac.style.display='';al.innerHTML='';
-      assists.forEach(a=>{const r=document.createElement('div');r.className='row';r.style.borderLeft='4px solid #dc2626';r.style.paddingLeft='10px';
+    if(assists.length){
+      ac.style.display='';al.innerHTML='';
+      assists.forEach(a=>{
+        const r=document.createElement('div');r.className='row';r.style.borderLeft='4px solid #dc2626';r.style.paddingLeft='10px';
         const ts=new Date(a.ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
         r.innerHTML=`<div class="info"><div class="t">${a.table}</div><div class="a">${ts}</div></div>`;
         const b=document.createElement('button');b.className='btn green sm';b.textContent='✓ Resolver';b.onclick=()=>resolveAssist(a.id);
-        r.appendChild(b);al.appendChild(r);});
+        r.appendChild(b);al.appendChild(r);
+      });
     }else{ac.style.display='none';}
-    // ledger
+
+    // Ledger / cobros
     $('total').textContent=cop(s.ledger_total);
     const byT={};(s.ledger||[]).forEach(l=>{byT[l.table]=(byT[l.table]||0)+l.amount;});
-    const bt=$('byTable');bt.innerHTML='';Object.entries(byT).forEach(([t,v])=>{
+    const bt=$('byTable');bt.innerHTML='';
+    Object.entries(byT).forEach(([t,v])=>{
       const d=document.createElement('div');d.className='grp';
       d.innerHTML=`<span style="flex:1">${t}</span><span class="price" style="color:var(--gold)">${cop(v)}</span>`;
       const b=document.createElement('button');b.className='btn red sm';b.textContent='Cerrar cuenta';b.style.marginLeft='10px';
-      b.onclick=()=>closeTable(t,v);d.appendChild(b);bt.appendChild(d);});
+      b.onclick=()=>closeTable(t,v);d.appendChild(b);bt.appendChild(d);
+    });
     const L=$('ledger');const lg=s.ledger||[];
     if(!lg.length)L.innerHTML='<div class="empty">Sin cobros aún.</div>';
     else{L.innerHTML='';lg.forEach(x=>{const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<div class="info"><div class="t">${x.table} · <span class="small">${x.kind}</span></div><div class="a">${x.title}</div></div><div class="chip pri">${cop(x.amount)}</div>`;L.appendChild(r);});}
-    // pending
+      r.innerHTML=`<div class="info"><div class="t">${x.table} · <span class="small">${x.kind}</span></div><div class="a">${x.title}</div></div><div class="chip pri">${cop(x.amount)}</div>`;
+      L.appendChild(r);});}
+
+    // Pendientes de aprobación
     const P=$('pending');const pend=s.pending||[];$('pcount').textContent=pend.length;
     if(!pend.length)P.innerHTML='<div class="empty">No hay pedidos pendientes.</div>';
-    else{P.innerHTML='';pend.forEach(it=>{const r=document.createElement('div');r.className='row';
+    else{P.innerHTML='';pend.forEach(it=>{
+      const r=document.createElement('div');r.className='row';
       r.innerHTML=`<img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title} ${it.priority?'<span class="chip pri">⚡</span>':''}</div><div class="a">${it.table}</div></div>`;
       const ok=document.createElement('button');ok.className='btn green sm';ok.textContent='Aprobar';ok.onclick=()=>approve(it.id);
       const no=document.createElement('button');no.className='btn red sm';no.textContent='✕';no.onclick=()=>reject(it.id);
-      r.appendChild(ok);r.appendChild(no);P.appendChild(r);});}
-    // now + queue
+      r.appendChild(ok);r.appendChild(no);P.appendChild(r);
+    });}
+
+    // Sonando + cola
     const Q=$('queue');Q.innerHTML='';const np=s.now_playing;
-    if(np){const r=document.createElement('div');r.className='row';r.style.borderColor='var(--pri)';
+    if(np){
+      const r=document.createElement('div');r.className='row';r.style.borderColor='var(--pri)';
       r.innerHTML=`<span class="pulse"></span><img class="mini" src="${img(np.yt)}"><div class="info"><div class="t">${np.title}</div><div class="a">${np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+np.table)}</div></div>`;
-      const sk=document.createElement('button');sk.className='btn ghost sm';sk.textContent='⏭';sk.onclick=skip;r.appendChild(sk);Q.appendChild(r);}
+      const sk=document.createElement('button');sk.className='btn ghost sm';sk.textContent='⏭';sk.onclick=skip;r.appendChild(sk);Q.appendChild(r);
+    }
     const q=s.queue||[];
     if(!q.length&&!np)Q.innerHTML='<div class="empty">Nada en cola.</div>';
-    q.forEach((it,i)=>{const r=document.createElement('div');r.className='row';
+    q.forEach((it,i)=>{
+      const r=document.createElement('div');r.className='row';
       r.innerHTML=`<div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}</div><div class="a">${it.table}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
-      const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';rm.onclick=()=>remove(it.id);r.appendChild(rm);Q.appendChild(r);});
+      const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';rm.onclick=()=>remove(it.id);r.appendChild(rm);Q.appendChild(r);
+    });
+
+    // Badge de alertas en el tab "En vivo"
+    const badgeN=pend.length+assists.length;
+    const badge=$('liveBadge');
+    if(badgeN>0){badge.textContent=badgeN;badge.classList.add('show');}
+    else{badge.classList.remove('show');}
   }catch(e){}
 }
+
 function renderPkgInputs(){
   const box=$('pkgs');box.innerHTML='';
   (packages.length?packages:[{qty:1,price:1000},{qty:3,price:2500},{qty:6,price:4500}]).forEach(p=>{
     const r=document.createElement('div');r.className='pkgrow';
     r.innerHTML=`<input class="field q" type="number" value="${p.qty}" title="cantidad"><span class="small">x prioridad =</span><input class="field p" type="number" step="100" value="${p.price}">`;
-    box.appendChild(r);});
+    box.appendChild(r);
+  });
 }
+
 async function loadAnalytics(){
   try{
     const d=await (await fetch('/api/admin/analytics')).json();
@@ -346,42 +520,53 @@ async function loadAnalytics(){
      {n:d.orders_free,l:'Pedidos gratis'}].forEach(k=>{
       const b=document.createElement('div');b.className='kpibox';
       b.innerHTML=`<div class="n${k.gold?' gold':''}">${k.n}</div><div class="small">${k.l}</div>`;
-      kbox.appendChild(b);});
+      kbox.appendChild(b);
+    });
     // Horas pico
     const hv=d.hora_pico_ingresos||{};const hmax=Math.max(1,...Object.values(hv));
     const hbox=$('analHours');hbox.innerHTML='';
-    for(let i=0;i<24;i++){const val=hv[i]||0;if(!val&&hmax===1)continue;
+    for(let i=0;i<24;i++){
+      const val=hv[i]||0;if(!val&&hmax===1)continue;
       const row=document.createElement('div');row.className='abar';
       row.innerHTML=`<span class="lbl">${String(i).padStart(2,'0')}h</span><div class="fill" style="width:${Math.round(140*val/hmax)}px"></div><span class="small">${val?cop2(val):''}</span>`;
-      hbox.appendChild(row);}
+      hbox.appendChild(row);
+    }
     if(!hbox.children.length)hbox.innerHTML='<div class="empty">Sin datos aún.</div>';
     // Canciones top
     const sbox=$('analSongs');sbox.innerHTML='';
     const songs=d.canciones_top||[];
     if(!songs.length)sbox.innerHTML='<div class="empty">Sin pedidos aún.</div>';
-    songs.forEach((s,i)=>{const r=document.createElement('div');r.className='row';
+    songs.forEach((s,i)=>{
+      const r=document.createElement('div');r.className='row';
       r.innerHTML=`<div class="pos">${i+1}</div><div class="info"><div class="t">${s.title}</div></div><div class="chip">${s.count} pedido${s.count!==1?'s':''}</div>`;
-      sbox.appendChild(r);});
+      sbox.appendChild(r);
+    });
     // Cuentas recientes
     const abox=$('analAccts');const accts=d.cuentas_recientes||[];abox.innerHTML='';
     const hm2=ts=>{if(!ts)return '—';const dt=new Date(ts*1000);return dt.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'});};
     if(!accts.length)abox.innerHTML='<div class="empty">Sin cuentas aún.</div>';
-    accts.forEach(a=>{const r=document.createElement('div');r.className='row';
+    accts.forEach(a=>{
+      const r=document.createElement('div');r.className='row';
       r.innerHTML=`<div class="info"><div class="t">${a.table}</div><div class="a">Abrió ${hm2(a.opened_at)} · Cerró ${hm2(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop2(a.total)}</div>`;
-      abox.appendChild(r);});
+      abox.appendChild(r);
+    });
   }catch(e){}
 }
+
 $('tymLogoFile').onchange=e=>readImg(e.target.files[0],d=>{tymLogoData=d;renderLogoPrev();});
 $('venueLogoFile').onchange=e=>readImg(e.target.files[0],d=>{venueLogoData=d;renderLogoPrev();});
+
 async function doLogin(){
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});
   if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';
 }
 async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
+
 (async()=>{
   const me=await fetch('/api/me');
   if(!me.ok){$('loginGate').style.display='flex';return;}
   const j=await me.json();$('venueTag').textContent=j.venue_name;
+  try{const t=sessionStorage.getItem('adminTab');if(t)showTab(t);}catch(e){}
   loadTables();tick();setInterval(tick,2500);
   loadAnalytics();setInterval(loadAnalytics,15000);
 })();
