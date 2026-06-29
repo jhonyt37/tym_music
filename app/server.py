@@ -933,6 +933,14 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True})
 
             if path == "/api/advance":
+                # Idempotencia: el cliente envía from_id (el id de la canción que cree que suena).
+                # Si ya avanzamos (otra pestaña/llamada duplicada), devolvemos el estado actual sin cambios.
+                from_id = d.get("from_id")  # None = no enviado (cliente viejo); "" = nada sonando
+                if from_id is not None:
+                    cur = STATE.get("now_playing")
+                    cur_id = cur.get("id") if cur else ""
+                    if cur_id != from_id:
+                        return self._send(200, {"ok": True, "now_playing": cur, "noop": True})
                 # Trim aprendido: si el local salta cerca del final, aprende ese punto para esa canción
                 if d.get("manual") and d.get("yt"):
                     try:

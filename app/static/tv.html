@@ -125,9 +125,12 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   <p style="color:#9aa7c2;margin-bottom:28px;font-size:14px">¿Quieres activar el TV aquí también?</p>
   <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
     <button onclick="rejectDupl()" style="padding:14px 24px;border:1px solid #2a3550;border-radius:12px;background:transparent;color:#fff;font-size:16px;cursor:pointer">No, continuar en la otra</button>
-    <button onclick="acceptDupl()" style="padding:14px 24px;border:none;border-radius:12px;background:#3b82f6;color:#fff;font-size:16px;font-weight:700;cursor:pointer">Sí, ver aquí también</button>
+    <button onclick="acceptDupl()" style="padding:14px 24px;border:none;border-radius:12px;background:#3b82f6;color:#fff;font-size:16px;font-weight:700;cursor:pointer">Usar esta pestaña (pausa la otra)</button>
   </div>
+  <p style="color:#ef4444;margin-top:20px;font-size:13px">⚠ Tener dos TVs activas al mismo tiempo puede saltarse canciones y perder pagos</p>
 </div>
+<!-- Aviso silencioso cuando esta pestaña queda como secundaria -->
+<div id="duplWarn" style="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#b45309;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;z-index:34;display:none">📺 Pestaña secundaria — solo visualización, no controla audio</div>
 
 <!-- Notificación de asistencia (rojo, persistente) -->
 <div id="assistBar" style="position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:14px 24px;z-index:36;display:none;font-size:17px;font-weight:800;text-align:center;letter-spacing:.4px;animation:pulse 2s ease-in-out infinite"></div>
@@ -150,6 +153,8 @@ function applyTheme(t){
 // Apuntar QR al venue correcto
 $('qrImg').src='/api/qr'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
 let player,ready=false,curYt=null,curId=null,wantAudio=false,topLoved=[],lastReactTotal=0,lastReacts={},lastReactId=null,authok=false;
+let isPrimary=true;   // false → esta pestaña es secundaria: nunca llama advance
+let advancingId=undefined; // id de la canción para la que ya enviamos advance (evita doble llamada)
 async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:document.getElementById('lgUser').value.trim(),pass:document.getElementById('lgPass').value})});if(r.ok)location.reload();else document.getElementById('lgErr').textContent='Usuario o contraseña incorrectos';}
 (async()=>{const me=await fetch('/api/me');if(!me.ok){document.getElementById('loginGate').style.display='flex';return;}authok=true;if(ready)tick();})();
 const EMO=['❤️','🔥','👍'];
@@ -169,17 +174,34 @@ if(isRawIP&&!isLocal){
   document.body.appendChild(b);
 }
 
-// TV Singleton: detecta si ya hay otra pestaña corriendo esta página
+// TV Singleton: una sola pestaña controla la reproducción
+let _tvc=null;
 try{
-  const tvc=new BroadcastChannel('tym_tv');
-  tvc.onmessage=e=>{
-    if(e.data==='tv_ping') tvc.postMessage('tv_here');
-    if(e.data==='tv_here'){$('duplModal').style.display='flex';}
+  _tvc=new BroadcastChannel('tym_tv');
+  _tvc.onmessage=e=>{
+    if(e.data==='tv_ping'){_tvc.postMessage('tv_here');}
+    if(e.data==='tv_here'){isPrimary=false;$('duplModal').style.display='flex';}
+    if(e.data==='tv_takeover'){
+      // Otra pestaña toma control: esta pasa a secundaria silenciosa
+      isPrimary=false;
+      if(player&&player.pauseVideo){try{player.pauseVideo();}catch(e){}}
+      const w=$('duplWarn');if(w)w.style.display='';
+    }
   };
-  tvc.postMessage('tv_ping');
+  _tvc.postMessage('tv_ping');
 }catch(e){}
-function acceptDupl(){$('duplModal').style.display='none';}
-function rejectDupl(){$('duplModal').style.display='none';$('start').innerHTML='<div class="big">📺 TV activa en otra pestaña</div><div class="sub">Vuelve a la pestaña donde ya está corriendo la TV.</div>';}
+function acceptDupl(){
+  // Esta pestaña toma el control; la otra se silencia
+  isPrimary=true;
+  advancingId=undefined;
+  $('duplModal').style.display='none';
+  if(_tvc)_tvc.postMessage('tv_takeover');
+}
+function rejectDupl(){
+  isPrimary=false;
+  $('duplModal').style.display='none';
+  $('start').innerHTML='<div class="big">📺 TV activa en otra pestaña</div><div class="sub">Vuelve a la pestaña donde ya está corriendo la TV.</div>';
+}
 
 // ---------- YouTube ----------
 function onYouTubeIframeAPIReady(){
@@ -187,9 +209,24 @@ function onYouTubeIframeAPIReady(){
     host:'https://www.youtube-nocookie.com',
     playerVars:{autoplay:1,playsinline:1,rel:0,controls:0,modestbranding:1,enablejsapi:1,origin:location.origin},
     events:{onReady:()=>{ready=true;if(authok)tick();},onStateChange:e=>{if(e.data===YT.PlayerState.ENDED)advance();},
-            onError:()=>{ if(!isRawIP||isLocal) setTimeout(advance,1200); }}});
+            onError:()=>{ if(!isRawIP||isLocal) setTimeout(()=>advance(),1200); }}});
 }
-async function advance(){await fetch('/api/advance',{method:'POST'});tick();}
+async function advance(manual=false){
+  if(!isPrimary) return;                            // pestaña secundaria: nunca avanza
+  const snapId = curId !== null ? curId : "";       // "" = nada sonaba cuando se llamó
+  if(advancingId===snapId) return;                  // ya enviamos advance para esta canción
+  advancingId=snapId;
+  const body={from_id:snapId};
+  if(manual&&curYt){
+    try{body.yt=curYt;body.position=player.getCurrentTime();body.duration=player.getDuration();body.manual=true;}catch(e){}
+  }
+  try{
+    await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  }finally{
+    advancingId=undefined;
+  }
+  tick();
+}
 function load(np){
   if(!np){$('title').textContent='Esperando canciones…';$('artist').textContent='';$('who').textContent='';curYt=null;return;}
   const changed = np.yt!==curYt;
@@ -241,7 +278,16 @@ async function tick(){
   try{
     const s=await (await fetch('/api/state')).json();
     applyBrand(s.settings);
-    if(!s.now_playing){await fetch('/api/advance',{method:'POST'});const s2=await (await fetch('/api/state')).json();load(s2.now_playing);paintNext(s2.queue,s2.queue_count);return;}
+    if(!s.now_playing){
+      if(isPrimary){
+        const snapId="";
+        if(advancingId!==snapId){
+          advancingId=snapId;
+          try{await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_id:snapId})});}finally{advancingId=undefined;}
+        }
+      }
+      const s2=await (await fetch('/api/state')).json();load(s2.now_playing);paintNext(s2.queue,s2.queue_count);return;
+    }
     load(s.now_playing);paintNext(s.queue,s.queue_count);
   }catch(e){}
 }
