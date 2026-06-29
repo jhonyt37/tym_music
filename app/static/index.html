@@ -506,6 +506,7 @@ function renderLoved(items){
 }
 
 // ---------- Poll ----------
+let _lastNpId=null;
 async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
@@ -517,8 +518,13 @@ async function poll(){
     if(!sess){$('gate').style.display='flex';$('tableTag').textContent=s.settings.style;}
     else{$('gate').style.display='none';$('tableTag').textContent='📍 '+sess.table;}
     refreshBal();renderPackages();
-    // now playing
+    // Detectar cambio de canción: si es una prioridad que acaba de sonar, refrescar cuenta al instante
     const np=s.now_playing;
+    if(np&&np.id!==_lastNpId){
+      _lastNpId=np.id;
+      if(np.priority&&sess) setTimeout(poll,400); // cobro recién registrado → re-poll rápido
+    }
+    // now playing
     if(np){$('nowImg').src=img(np.yt);$('nowT').textContent=np.title;$('nowA').textContent=np.artist||'';
       $('nowW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+np.table);
       const dur=np.duration||1,pos=Math.min(np.position||0,dur);

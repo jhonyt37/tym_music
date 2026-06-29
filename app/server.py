@@ -319,9 +319,12 @@ def promote_next():
         nxt = q[0]
         STATE["items"] = [i for i in STATE["items"] if i["id"] != nxt["id"]]
         if nxt.get("charge_on_play", 0) > 0 and not nxt.get("charged"):
-            log_charge(nxt.get("charge_table", nxt["table"]), nxt.get("token"),
-                       nxt["charge_on_play"], nxt.get("charge_kind", "prioridad"), nxt["title"])
-            nxt["charged"] = True
+            tok = nxt.get("token")
+            # Solo cobrar si el token sigue con sesión activa (cuenta no cerrada antes de sonar)
+            if tok and tok in STATE.get("sessions", {}):
+                log_charge(nxt.get("charge_table", nxt["table"]), tok,
+                           nxt["charge_on_play"], nxt.get("charge_kind", "prioridad"), nxt["title"])
+            nxt["charged"] = True  # marcar siempre para no reintentar
         nxt["position"] = 0
         nxt["played_at"] = now
         STATE["now_playing"] = nxt
@@ -1040,6 +1043,12 @@ class H(BaseHTTPRequestHandler):
                 tbl = d.get("table")
                 total = close_accounts(CUR_VID, tbl)   # marca cuentas cerradas (hora fin) + total
                 STATE["ledger"] = [l for l in STATE["ledger"] if l["table"] != tbl]
+                # Cancela canciones pendientes de esa mesa: si aún no sonaron, no se cobran
+                STATE["items"] = [i for i in STATE["items"] if i.get("table") != tbl]
+                # Si la canción que suena ahora es de esa mesa y tiene cobro pendiente, cancelar
+                np = STATE.get("now_playing")
+                if np and np.get("table") == tbl and np.get("charge_on_play", 0) > 0 and not np.get("charged"):
+                    np["charge_on_play"] = 0
                 # libera tokens/sesiones de esa mesa: el próximo cliente entra con saldo en cero
                 for t, se in list(STATE["sessions"].items()):
                     if se["table"] == tbl:
