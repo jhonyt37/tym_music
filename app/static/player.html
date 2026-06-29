@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TYM · Pantalla del local</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<div id="loginGate" style="position:fixed;inset:0;background:#0b0f1a;z-index:100;display:none;align-items:center;justify-content:center;padding:24px">
+  <div style="max-width:340px;width:100%;text-align:center">
+    <div class="logo" style="font-size:30px">TY<b>M</b> Music</div>
+    <h2 style="margin:10px 0">Ingreso del local</h2>
+    <input class="field" id="lgUser" placeholder="Usuario">
+    <input class="field" id="lgPass" type="password" placeholder="Contraseña" style="margin-top:8px">
+    <button class="btn block" style="margin-top:12px" onclick="doLogin()">Entrar</button>
+    <div class="small" id="lgErr" style="color:var(--red);margin-top:8px;min-height:16px"></div>
+    <div class="small" style="margin-top:14px;color:var(--mut)">Demo: bardemo / tym1234</div>
+  </div>
+</div>
+<header class="bar">
+  <div class="logo">TY<b>M</b> Music</div>
+  <div class="tag">Pantalla del local</div>
+  <div class="spacer"></div>
+  <div class="tag" id="venueTag">…</div>
+</header>
+
+<div class="wrap wide">
+  <div class="player-stage">
+    <div class="video">
+      <div id="yt"></div>
+      <div class="bignow" id="bigT">Esperando canciones…</div>
+      <div class="a" id="bigA"></div>
+      <div class="who" id="bigW"></div>
+      <div style="margin-top:14px;display:flex;gap:10px">
+        <button class="btn" onclick="startAudio()">▶ Activar audio</button>
+        <button class="btn ghost" onclick="skip()">⏭ Saltar</button>
+      </div>
+      <div class="small" style="margin-top:8px">Si no suena, toca “Activar audio” (los navegadores bloquean el autoplay con sonido).</div>
+    </div>
+    <div class="side">
+      <div class="card">
+        <h2>A continuación</h2>
+        <div class="list" id="up"><div class="empty">Cola vacía — sonará la lista del local.</div></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.youtube.com/iframe_api"></script>
+<script>
+const $=id=>document.getElementById(id);
+const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
+let player,ready=false,curId=null,curYt=null,wantAudio=false,authok=false;
+async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';}
+(async()=>{const me=await fetch('/api/me');if(!me.ok){$('loginGate').style.display='flex';return;}authok=true;if(ready)tick();})();
+const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
+if(!isLocal){
+  const b=document.createElement('div');
+  b.style.cssText='background:#b45309;color:#fff;padding:10px 16px;text-align:center;font-weight:600;font-size:14px';
+  b.innerHTML='⚠ Para que suene la música, abre esta pantalla EN EL COMPUTADOR del local: <b>http://localhost:8000/player</b> &nbsp;(YouTube no reproduce desde una IP). Los clientes sí usan el QR normal.';
+  document.body.insertBefore(b, document.body.firstChild);
+}
+function showLocalHint(){
+  $('bigT').textContent='Abre esta pantalla en el computador del local';
+  $('bigA').innerHTML='YouTube no reproduce desde una IP. Usa <b>http://localhost:8000/player</b> en el computador del local. Los clientes siguen usando el QR.';
+  $('bigW').textContent='';
+}
+
+function onYouTubeIframeAPIReady(){
+  player=new YT.Player('yt',{height:'100%',width:'100%',
+    host:'https://www.youtube-nocookie.com',
+    playerVars:{autoplay:1,playsinline:1,rel:0,modestbranding:1,enablejsapi:1,origin:location.origin},
+    events:{onReady:()=>{ready=true;if(authok)tick();},onStateChange:onState,onError:onErr}});
+}
+function onState(e){ if(e.data===YT.PlayerState.ENDED){ advance(); } }
+function onErr(){ if(!isLocal){ showLocalHint(); return; } setTimeout(advance,1200); }
+function startAudio(){wantAudio=true; if(player){player.unMute();player.setVolume(100);player.playVideo();}}
+
+async function advance(body){ await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); tick(); }
+async function skip(){ // salto manual: el servidor APRENDE el punto (silencios/outros)
+  let body={};
+  try{ if(player&&player.getCurrentTime&&curYt) body={manual:true,yt:curYt,position:player.getCurrentTime(),duration:player.getDuration()}; }catch(e){}
+  await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}); tick();
+}
+
+function load(np){
+  if(!np){curId=null;curYt=null;$('bigT').textContent='Esperando canciones…';$('bigA').textContent='';$('bigW').textContent='';
+    if(ready&&player&&player.stopVideo)player.stopVideo();return;}
+  $('bigT').textContent=np.title;$('bigA').textContent=np.artist||'';
+  $('bigW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+(np.table||''));
+  if(np.yt!==curYt){curYt=np.yt;curId=np.id;
+    if(ready){player.loadVideoById(np.yt);if(wantAudio){player.unMute();player.playVideo();}}}
+  curId=np.id;
+}
+
+async function tick(){
+  try{
+    const s=await (await fetch('/api/state')).json();
+    $('venueTag').textContent=s.settings.venue_name;
+    if(!s.now_playing){ await fetch('/api/advance',{method:'POST'});
+      const s2=await (await fetch('/api/state')).json(); load(s2.now_playing); paintUp(s2);return; }
+    load(s.now_playing); paintUp(s);
+  }catch(e){}
+}
+function paintUp(s){
+  const up=$('up');const q=s.queue||[];
+  if(!q.length){up.innerHTML='<div class="empty">Cola vacía — sonará la lista del local.</div>';return;}
+  up.innerHTML='';q.slice(0,8).forEach((it,i)=>{
+    const r=document.createElement('div');r.className='row';
+    r.innerHTML=`<div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}</div><div class="a">${it.table||''}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
+    up.appendChild(r);});
+}
+
+// Refresca cola y detecta saltos externos
+setInterval(async()=>{
+  if(!authok)return;
+  try{
+    const s=await (await fetch('/api/state')).json();
+    $('venueTag').textContent=s.settings.venue_name;
+    // Watchdog: nunca silencio — si no hay nada o el video terminó, avanza solo
+    if(!s.now_playing || (ready&&player&&player.getPlayerState&&player.getPlayerState()===YT.PlayerState.ENDED)){await advance();return;}
+    // Trim APRENDIDO (punto donde el local salta esta canción)
+    {const le=s.now_playing.learned_end||0;
+     if(le>0&&ready&&player&&player.getCurrentTime&&player.getCurrentTime()>=le&&player.getPlayerState()===YT.PlayerState.PLAYING){await advance();return;}}
+    // Corte ciego opcional
+    {const te=s.settings.trim_end_secs||0;
+     if(te>0&&ready&&player&&player.getDuration){const cur=player.getCurrentTime()||0,d=player.getDuration()||0;
+       if(d>30&&cur>=d-te&&player.getPlayerState()===YT.PlayerState.PLAYING){await advance();return;}}}
+    if(s.now_playing.id!==curId) load(s.now_playing);
+    paintUp(s);
+  }catch(e){}
+},2500);
+
+// Reporta progreso real al servidor (alimenta "cuánto falta" del cliente)
+setInterval(()=>{
+  if(authok&&ready&&player&&player.getCurrentTime&&curYt){
+    try{
+      const pos=player.getCurrentTime(),dur=player.getDuration();
+      if(dur>0) fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({position:pos,duration:dur})});
+    }catch(e){}
+  }
+},2000);
+</script>
+</body>
+</html>

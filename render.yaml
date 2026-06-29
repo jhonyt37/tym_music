@@ -1,0 +1,15 @@
+# Render Blueprint — deploy gratis. Sube el repo a GitHub y conéctalo en render.com (New → Blueprint).
+services:
+  - type: web
+    name: tym-music
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app/server.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.4"
+      # Después del primer deploy, copia la URL pública (https://tym-music.onrender.com)
+      # y ponla aquí para que el QR apunte al dominio real:
+      # - key: PUBLIC_URL
+      #   value: https://tym-music.onrender.com

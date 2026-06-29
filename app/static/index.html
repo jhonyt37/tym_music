@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0e1320">
+<title>TYM Music</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+.prog{height:6px;background:#2a3550;border-radius:4px;overflow:hidden;margin-top:12px}
+.prog-fill{height:100%;background:var(--pri);width:0%;transition:width .8s linear}
+.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:8px}
+.chipt{white-space:nowrap;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--mut);font-size:13px;font-weight:600;cursor:pointer}
+.chipt.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+.gate{position:fixed;inset:0;background:rgba(8,11,18,.98);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px}
+.gate .box{max-width:360px;width:100%;text-align:center}
+.gate h2{font-size:22px;margin:6px 0;color:var(--txt);text-transform:none;letter-spacing:0}
+.pin{width:100%;text-align:center;font-size:30px;letter-spacing:10px;padding:14px;border-radius:14px;border:1px solid var(--line);background:var(--card);color:var(--txt);margin:14px 0}
+.bal{display:flex;gap:8px}
+.bal .b{flex:1;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px;text-align:center}
+.bal .b .n{font-size:20px;font-weight:800}
+.pkg{display:flex;justify-content:space-between;align-items:center;border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:10px;background:var(--card)}
+.pkg .p{font-weight:800;color:var(--gold)}
+.wait{background:rgba(59,130,246,.12);border:1px solid rgba(59,130,246,.4);border-radius:12px;padding:10px 12px;margin-top:10px;font-size:14px;font-weight:600;color:#bcd4ff}
+.reacts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
+.rbtn{display:inline-flex;align-items:center;gap:5px;background:var(--bg2);border:1px solid var(--line);border-radius:999px;padding:6px 11px;font-size:15px;color:var(--txt);cursor:pointer}
+.rbtn.on{border-color:var(--pri);background:rgba(59,130,246,.2)}
+.rbtn span{font-weight:800;font-size:13px}
+.rank{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.rank .n{font-weight:800;color:var(--gold);width:22px;text-align:center}
+.rank .love{margin-left:auto;font-weight:800;color:#ff5a7a;white-space:nowrap}
+body{padding-bottom:80px}
+.tab{display:none}
+.tab.on{display:block}
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:15;display:flex;max-width:520px;margin:0 auto;
+  background:rgba(14,19,32,.97);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+.nav button{position:relative;flex:1;background:none;border:none;color:var(--mut);font-size:11px;font-weight:700;
+  padding:9px 4px 11px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px}
+.nav button span{font-size:21px;line-height:1}
+.nav button.on{color:var(--pri)}
+.badge{position:absolute;top:4px;right:50%;margin-right:-22px;background:var(--pri);color:#fff;font-size:10px;
+  font-weight:800;border-radius:999px;padding:1px 6px;font-style:normal}
+.badge.gold{background:var(--gold);color:#1a1300}
+#fx{position:fixed;inset:0;pointer-events:none;z-index:40;overflow:hidden}
+.fxe{position:absolute;bottom:90px;will-change:transform,opacity;animation:floatUp 2.6s ease-out forwards}
+@keyframes floatUp{0%{transform:translateY(0) scale(.5);opacity:0}15%{opacity:1;transform:translateY(-20px) scale(1.1)}100%{transform:translateY(-62vh) scale(1.25);opacity:0}}
+</style>
+</head>
+<body>
+<header class="bar">
+  <div class="logo">TY<b>M</b> Music</div>
+  <div class="spacer"></div>
+  <div class="tag" id="acctTag" style="display:none;cursor:pointer" onclick="showTab('prio')"></div>
+  <div class="tag" id="balTag" style="display:none"></div>
+  <div class="tag" id="tableTag">…</div>
+</header>
+
+<!-- Gate de mesa -->
+<div class="gate" id="gate">
+  <div class="box">
+    <div class="logo" style="font-size:26px">TY<b>M</b> Music</div>
+    <h2>¿En qué mesa estás?</h2>
+    <div class="muted">Ingresa el código que está en tu mesa</div>
+    <input class="pin" id="pinInput" inputmode="numeric" maxlength="4" placeholder="••••">
+    <button class="btn block" onclick="enterPin()">Entrar</button>
+    <div class="small" id="pinErr" style="color:var(--red);margin-top:10px;min-height:16px"></div>
+  </div>
+</div>
+
+<div class="wrap">
+  <!-- ===== PEDIR ===== -->
+  <section class="tab on" id="tab-pedir">
+    <div class="card">
+      <h2>Pon tu canción 🎵</h2>
+      <input class="search" id="q" placeholder="Buscar canción o artista…" autocomplete="off">
+      <div class="muted" style="margin:8px 2px">o pega un link de YouTube:</div>
+      <input class="search" id="link" placeholder="https://youtu.be/…" autocomplete="off">
+      <button class="btn ghost block sm" style="margin-top:8px" onclick="fromLink()">Pedir desde el link</button>
+      <div id="recoBox" style="margin-top:14px">
+        <div class="chips" id="recoChips"></div>
+        <div class="list" id="results"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== SUENA ===== -->
+  <section class="tab" id="tab-suena">
+    <div class="card">
+      <h2><span class="pulse"></span>Sonando ahora</h2>
+      <div class="now">
+        <img class="thumb" id="nowImg" alt="">
+        <div style="flex:1;min-width:0">
+          <div class="t" id="nowT">—</div>
+          <div class="a" id="nowA"></div>
+          <div class="who" id="nowW"></div>
+        </div>
+      </div>
+      <div class="prog"><div class="prog-fill" id="progFill"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:6px" class="small">
+        <span id="nowPos">0:00</span><span id="nowRem"></span>
+      </div>
+      <div class="wait" id="queueInfo">Cargando cola…</div>
+      <div class="wait" id="myInfo" style="display:none"></div>
+      <div class="reacts" id="nowReacts"></div>
+    </div>
+    <div class="card">
+      <h2>Vienen en cola 🎶 (<span id="qcount">0</span>)</h2>
+      <div class="list" id="queueList"><div class="empty">Nada en cola — suena la lista del local.</div></div>
+    </div>
+  </section>
+
+  <!-- ===== SOCIAL ===== -->
+  <section class="tab" id="tab-social">
+    <div class="card">
+      <h2>❤️ Lo más querido de la noche</h2>
+      <div class="list" id="lovedList"><div class="empty">Aún sin reacciones. ¡Sé el primero en reaccionar!</div></div>
+    </div>
+    <div class="card">
+      <h2>Ya sonaron 🕑</h2>
+      <div class="list" id="historyList"><div class="empty">Todavía no ha sonado nada.</div></div>
+    </div>
+    <div class="card">
+      <h2>Síguenos 🎶</h2>
+      <div class="small">Llévate TYM Music a donde vayas — síguenos y entérate de novedades.</div>
+      <div id="socialLinks" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
+      <div style="margin-top:14px">
+        <div class="small" style="margin-bottom:6px">Déjanos tu correo para novedades y la app 🚀</div>
+        <input class="field" id="subEmail" type="email" placeholder="tucorreo@email.com" autocomplete="email">
+        <button class="btn block" style="margin-top:8px" onclick="subscribe()">Quiero novedades</button>
+      </div>
+      <div class="small" style="margin-top:12px;text-align:center">📲 Próximamente: app TYM Music</div>
+    </div>
+  </section>
+
+  <!-- ===== PRIORIDAD ===== -->
+  <section class="tab" id="tab-prio">
+    <div class="card">
+      <h2>Tus prioridades ⚡</h2>
+      <div class="bal">
+        <div class="b"><div class="n" id="credN">0</div><div class="small">créditos</div></div>
+        <div class="b"><div class="n" id="passN">—</div><div class="small">pase</div></div>
+      </div>
+      <div id="pkgList"></div>
+      <div class="small" style="margin-top:8px">Las prioridades se suman a la cuenta de tu mesa.</div>
+    </div>
+    <div class="card">
+      <h2>Tu cuenta de la mesa 🧾</h2>
+      <div class="kpi gold" id="tabTotal">$0</div>
+      <div class="small">Esto se suma a tu cuenta del bar (coincide con lo que ve el local)</div>
+      <div class="list" id="tabList" style="margin-top:10px"><div class="empty">Sin cargos todavía.</div></div>
+    </div>
+  </section>
+</div>
+
+<nav class="nav" id="nav">
+  <button data-tab="pedir" class="on"><span>🔎</span>Pedir</button>
+  <button data-tab="suena"><span>▶️</span>Suena<i class="badge" id="badgeQ" style="display:none">0</i></button>
+  <button data-tab="social"><span>❤️</span>Social</button>
+  <button data-tab="prio"><span>⚡</span>Prioridad<i class="badge gold" id="badgeC" style="display:none">0</i></button>
+</nav>
+
+<!-- Sheet pedir -->
+<div class="sheet-bg" id="sheet">
+  <div class="sheet">
+    <h3 id="sTitle">Canción</h3>
+    <div class="muted" id="sArtist"></div>
+    <div class="opt sel" id="optNormal" onclick="pick('normal')">
+      <div><b>En cola normal</b><div class="small">Suena cuando llegue su turno</div></div>
+      <div class="price" style="color:var(--green)">Gratis</div>
+    </div>
+    <div class="opt" id="optPri" onclick="pick('pri')">
+      <div><b>⚡ Prioridad</b><div class="small" id="priSub">Suena antes</div></div>
+      <div class="price" id="priPrice">$1.000</div>
+    </div>
+    <div class="opt" id="optSuper" onclick="pick('super')" style="display:none">
+      <div><b>⏫ Al frente (#1)</b><div class="small">Suena de primera, ¡ya mismo!</div></div>
+      <div class="price" id="superPrice" style="color:#a78bfa">$3.000</div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn ghost" style="flex:1" onclick="closeSheet()">Cancelar</button>
+      <button class="btn" style="flex:2" id="confirmBtn" onclick="confirmReq()">Pedir canción</button>
+    </div>
+  </div>
+</div>
+<!-- Modal de confirmación (cobros claros) -->
+<div class="sheet-bg" id="confirmBg" style="z-index:30">
+  <div class="sheet">
+    <h3 id="cfTitle">Confirmar</h3>
+    <div class="muted" id="cfMsg" style="margin-top:6px;font-size:15px"></div>
+    <div style="display:flex;gap:10px;margin-top:18px">
+      <button class="btn ghost" style="flex:1" onclick="cfNo()">Cancelar</button>
+      <button class="btn gold" style="flex:2" id="cfYes">Confirmar</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<div id="fx"></div>
+
+<script>
+let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0;
+const VENUE=new URLSearchParams(location.search).get('v')||'';   // bar (multi-tenant) desde el QR
+let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], pass_obj={minutes:30,price:5000};
+let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='';
+const $=id=>document.getElementById(id);
+const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
+const cop=n=>'$'+(n||0).toLocaleString('es-CO');
+const mm=s=>{s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
+
+async function boot(){
+  CAT=await (await fetch('/api/catalog')).json();
+  $('q').addEventListener('input',e=>onSearch(e.target.value));
+  $('pinInput').addEventListener('keydown',e=>{if(e.key==='Enter')enterPin();});
+  document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+  loadReco();
+  poll(); setInterval(poll,2000);
+}
+function showTab(name){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.id==='tab-'+name));
+  document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===name));
+  window.scrollTo(0,0);
+}
+
+async function enterPin(){
+  const pin=$('pinInput').value.trim();
+  if(pin.length<4){$('pinErr').textContent='Ingresa los 4 dígitos';return;}
+  const r=await fetch('/api/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin,v:VENUE})});
+  const j=await r.json();
+  if(j.ok){token=j.token;localStorage.setItem('tym_token_'+VENUE,token);sess=j.session;$('gate').style.display='none';poll();}
+  else{$('pinErr').textContent=j.error||'Código incorrecto';}
+}
+
+// ---------- Recomendadas ----------
+const RECO_TABS=[['mas_pedido','Más pedido aquí'],['del_local','Del local'],['populares','Populares'],['genero','Por género']];
+async function loadReco(){
+  try{reco=await (await fetch('/api/recommendations?v='+encodeURIComponent(VENUE))).json();}catch(e){reco={};}
+  renderChips(); if(!$('q').value.trim()) renderReco();
+}
+function renderChips(){
+  const c=$('recoChips');c.innerHTML='';
+  RECO_TABS.forEach(([k,label])=>{
+    const b=document.createElement('div');b.className='chipt'+(k===recoTab?' on':'');b.textContent=label;
+    b.onclick=()=>{recoTab=k;renderChips();renderReco();};c.appendChild(b);
+  });
+}
+function renderReco(){
+  const list=(reco&&reco[recoTab])||[];
+  renderResults(list.length?list:CAT);
+}
+
+// ---------- Busqueda ----------
+function onSearch(term){
+  clearTimeout(searchTimer);
+  if(!term.trim()){$('recoChips').style.display='flex';renderReco();return;}
+  $('recoChips').style.display='none';
+  $('results').innerHTML='<div class="empty">Buscando…</div>';
+  lastTerm=term;
+  searchTimer=setTimeout(async()=>{
+    try{const list=await (await fetch('/api/search?q='+encodeURIComponent(term))).json();
+      if(term!==lastTerm)return; renderResults(list);
+    }catch(e){$('results').innerHTML='<div class="empty">No se pudo buscar. Pega un link abajo.</div>';}
+  },350);
+}
+function renderResults(list){
+  const res=$('results');res.innerHTML='';
+  if(!list||!list.length){res.innerHTML='<div class="empty">Sin resultados. Prueba otro nombre o pega un link.</div>';return;}
+  list.slice(0,12).forEach(s=>{
+    const r=document.createElement('div');r.className='row';
+    const sub=[s.artist,s.length].filter(Boolean).join(' · ');
+    r.innerHTML=`<img class="mini" src="${img(s.yt)}"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div><button class="btn sm">Pedir</button>`;
+    r.querySelector('button').onclick=()=>openSheet(s);
+    res.appendChild(r);
+  });
+}
+
+// ---------- Pedir ----------
+function openSheet(s){chosen={yt:s.yt,title:s.title,artist:s.artist||'',length:s.length||''};mode='normal';
+  $('sTitle').textContent=s.title;$('sArtist').textContent=s.artist||'';
+  $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
+  updatePriOption();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
+  $('sheet').classList.add('open');}
+function fromLink(){const l=$('link').value.trim();if(!l){toast('Pega un link primero');return;}
+  chosen={link:l,title:'Tu canción (link)'};mode='normal';
+  $('sTitle').textContent='Canción desde link';$('sArtist').textContent=l.slice(0,42);
+  $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
+  updatePriOption();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');$('sheet').classList.add('open');}
+function updatePriOption(){
+  const now=Date.now()/1000;
+  if(sess&&sess.pass_until>now){$('priSub').textContent='Incluida en tu pase activo';$('priPrice').textContent='Pase';}
+  else if(sess&&sess.credits>0){$('priSub').textContent='Usa 1 crédito (te quedan '+(sess.credits-1)+')';$('priPrice').textContent='1 créd.';}
+  else{$('priSub').textContent='Suena antes — se suma a tu cuenta';$('priPrice').textContent=cop(price);}
+  $('optSuper').style.display = jumpAvail ? '' : 'none';
+  $('superPrice').textContent=cop(jumpPrice);
+}
+function pick(m){mode=m;
+  $('optNormal').classList.toggle('sel',m==='normal');
+  $('optPri').classList.toggle('sel',m==='pri');
+  $('optSuper').classList.toggle('sel',m==='super');
+  const c=$('confirmBtn');
+  c.textContent = m==='super'?'Saltar al #1 ⏫':(m==='pri'?'Pedir con prioridad ⚡':'Pedir canción');
+  c.classList.toggle('gold',m!=='normal');}
+function closeSheet(){$('sheet').classList.remove('open');}
+function confirmReq(){
+  if(!token){toast('Ingresa el código de tu mesa');return;}
+  if(mode==='super'){
+    confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> y suena de primera. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+'. Solo <b>una vez por canción</b>.',doReq);
+  } else if(mode==='pri'){
+    const now=Date.now()/1000;let msg;
+    if(sess&&sess.pass_until>now) msg='Tu <b>pase activo</b> cubre esta prioridad (sin cargo extra).';
+    else if(sess&&sess.credits>0) msg='Usarás <b>1 crédito</b> de prioridad (te quedan '+(sess.credits-1)+').';
+    else msg='Se cobrará <b>'+cop(price)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+'.';
+    confirmModal('Pedir con prioridad ⚡',msg,doReq);
+  } else doReq();
+}
+async function doReq(){
+  closeSheet();
+  const body=Object.assign({},chosen,{priority:mode==='pri',super:mode==='super',token});
+  const r=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const j=await r.json();
+  if(j.ok){if(j.session)sess=j.session;
+    toast(mode==='super'?'⏫ ¡Tu canción al frente!':(mode==='pri'?'⚡ ¡Pedida con prioridad!':'¡Canción pedida!'));
+    $('link').value='';$('q').value='';$('recoChips').style.display='flex';renderReco();refreshBal();}
+  else toast(j.error||'Error');
+}
+let cfCb=null;
+function confirmModal(title,msg,cb){$('cfTitle').textContent=title;$('cfMsg').innerHTML=msg;$('confirmBg').classList.add('open');$('cfYes').onclick=()=>{cfNo();cb&&cb();};}
+function cfNo(){$('confirmBg').classList.remove('open');}
+function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
+
+// ---------- Paquetes ----------
+function renderPackages(){
+  const box=$('pkgList');box.innerHTML='';
+  packages.forEach((p,i)=>{
+    const d=document.createElement('div');d.className='pkg';
+    const unit=Math.round(p.price/p.qty);
+    d.innerHTML=`<div><b>${p.qty} prioridad${p.qty>1?'es':''}</b><div class="small">${cop(unit)} c/u</div></div>`;
+    const b=document.createElement('button');b.className='btn sm gold';b.textContent=cop(p.price);b.onclick=()=>buy('credits',i);
+    d.appendChild(b);box.appendChild(d);
+  });
+  const d=document.createElement('div');d.className='pkg';
+  d.innerHTML=`<div><b>Pase ${pass_obj.minutes} min</b><div class="small">prioridad ilimitada</div></div>`;
+  const b=document.createElement('button');b.className='btn sm';b.textContent=cop(pass_obj.price);b.onclick=()=>buy('pass');
+  d.appendChild(b);box.appendChild(d);
+}
+function buy(kind,index){
+  if(!token){toast('Ingresa el código de tu mesa');return;}
+  let msg;
+  if(kind==='pass') msg='Se cobrará <b>'+cop(pass_obj.price)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+' por el pase de '+pass_obj.minutes+' min (prioridad ilimitada).';
+  else{const p=packages[index];msg='Se cobrará <b>'+cop(p.price)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+' por '+p.qty+' prioridad'+(p.qty>1?'es':'')+'.';}
+  confirmModal('Confirmar compra',msg,()=>doBuy(kind,index));
+}
+async function doBuy(kind,index){
+  const r=await fetch('/api/buy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,kind,index})});
+  const j=await r.json();
+  if(j.ok){sess=j.session;toast(kind==='pass'?'¡Pase activado!':'¡Paquete agregado a tu cuenta!');refreshBal();}
+  else toast(j.error||'Error');
+}
+function refreshBal(){
+  if(!sess){$('balTag').style.display='none';return;}
+  const now=Date.now()/1000;const passOn=sess.pass_until>now;
+  $('credN').textContent=sess.credits||0;
+  $('passN').textContent=passOn?mm(sess.pass_until-now):'—';
+  $('balTag').style.display='';
+  $('balTag').textContent=(passOn?'⏱ pase':((sess.credits||0)+' créd.'));
+}
+
+// ---------- Reacciones / social ----------
+const EMOJIS=['❤️','🔥','👍'];
+function reactHtml(it){
+  if(!it||it.id==null)return '';
+  return EMOJIS.map(e=>{
+    const c=(it.reactions&&it.reactions[e])||0;const on=(it.my_reacts||[]).includes(e);
+    return `<button class="rbtn${on?' on':''}" onclick="react(${it.id},'${e}')">${e}${c?'<span>'+c+'</span>':''}</button>`;
+  }).join('');
+}
+function spawnEmoji(e){
+  const s=document.createElement('div');s.className='fxe';s.textContent=e;
+  s.style.left=(15+Math.random()*60)+'%';s.style.fontSize=(30+Math.random()*22)+'px';
+  s.style.animationDuration=(2.2+Math.random()*1)+'s';
+  $('fx').appendChild(s);setTimeout(()=>s.remove(),3400);
+}
+async function react(id,emoji){
+  if(!token){toast('Ingresa el código de tu mesa');return;}
+  spawnEmoji(emoji);
+  await fetch('/api/react',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id,emoji})});poll();
+}
+function boost(id){
+  if(!token){toast('Ingresa el código de tu mesa');return;}
+  const now=Date.now()/1000;let msg;
+  if(sess&&sess.pass_until>now) msg='Se impulsará con tu <b>pase activo</b> (sin cargo extra).';
+  else if(sess&&sess.credits>0) msg='Usarás <b>1 crédito</b> (te quedan '+(sess.credits-1)+'). La prioridad se cobra a <b>tu</b> mesa.';
+  else msg='Esta prioridad se cobrará a <b>TU mesa</b>'+(sess?' ('+sess.table+')':'')+': <b>'+cop(price)+'</b>.';
+  confirmModal('Impulsar canción ⚡',msg,()=>doBoost(id));
+}
+async function doBoost(id){
+  const j=await (await fetch('/api/boost',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id})})).json();
+  if(j.ok){if(j.session)sess=j.session;toast(j.already?'Ya tiene prioridad':'⚡ ¡Impulsada!');refreshBal();poll();}
+  else toast(j.error||'Error');
+}
+function songRow(it,opts){
+  const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
+  const tag=it.super?'⏫ ':(it.priority?'⚡ ':'');
+  div.innerHTML=`<img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}</div><div class="a">${tag+(it.table||it.artist||'')}</div></div>`;
+  if(opts&&opts.boost){
+    if(!it.priority){const b=document.createElement('button');b.className='btn sm gold';b.textContent='⚡ Impulsar';b.onclick=()=>boost(it.id);div.appendChild(b);}
+    if(jumpAvail&&!it.super){const jb=document.createElement('button');jb.className='btn sm';jb.style.background='#7c3aed';jb.textContent='⏫ #1';jb.title='Saltar al primer lugar';jb.onclick=()=>jump(it.id);div.appendChild(jb);}
+  }
+  const rr=document.createElement('div');rr.className='reacts';rr.style.flexBasis='100%';rr.innerHTML=reactHtml(it);div.appendChild(rr);
+  return div;
+}
+function jump(id){
+  if(!token){toast('Ingresa el código de tu mesa');return;}
+  if(!jumpAvail){toast('El salto ya se usó esta canción. Disponible en la próxima 🎵');return;}
+  confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> de la cola. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu mesa'+(sess?' ('+sess.table+')':'')+'. Solo se permite <b>una vez por canción</b>.',()=>doJump(id));
+}
+async function doJump(id){
+  const j=await (await fetch('/api/jump',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id})})).json();
+  if(j.ok){toast('⏫ ¡Tu canción al frente!');refreshBal();poll();} else toast(j.error||'Error');
+}
+function renderSocials(soc){
+  const box=$('socialLinks');if(!box)return;box.innerHTML='';
+  const map=[['instagram','📸 Instagram'],['tiktok','🎵 TikTok'],['web','🌐 Web']];
+  let any=false;
+  map.forEach(([k,label])=>{const u=soc&&soc[k];if(u){any=true;const a=document.createElement('a');a.className='btn ghost sm';a.href=u;a.target='_blank';a.textContent=label;box.appendChild(a);}});
+  if(!any)box.innerHTML='<div class="small">Pronto en redes 🔜</div>';
+}
+async function subscribe(){
+  const email=($('subEmail').value||'').trim();
+  if(email.indexOf('@')<1||email.indexOf('.')<0){toast('Escribe un correo válido');return;}
+  const j=await (await fetch('/api/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,email})})).json();
+  if(j.ok){toast('¡Gracias! Te avisaremos 🚀');$('subEmail').value='';}else toast(j.error||'Error');
+}
+function renderList(elId,items,opts){
+  const box=$(elId);box.innerHTML='';
+  if(!items||!items.length){box.innerHTML='<div class="empty">'+((opts&&opts.empty)||'Nada aún.')+'</div>';return;}
+  items.forEach(it=>box.appendChild(songRow(it,opts)));
+}
+function renderLoved(items){
+  const box=$('lovedList');box.innerHTML='';
+  if(!items||!items.length){box.innerHTML='<div class="empty">Aún sin reacciones. ¡Sé el primero en reaccionar!</div>';return;}
+  items.forEach((it,i)=>{const d=document.createElement('div');d.className='rank';
+    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div><div class="love">❤️ ${it.total}</div>`;
+    box.appendChild(d);});
+}
+
+// ---------- Poll ----------
+async function poll(){
+  try{
+    const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
+    price=s.settings.price_priority;packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
+    jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;renderSocials(s.settings.socials);
+    document.title='TYM · '+s.settings.venue_name;
+    sess=s.session;
+    if(!sess){$('gate').style.display='flex';$('tableTag').textContent=s.settings.style;}
+    else{$('gate').style.display='none';$('tableTag').textContent='📍 '+sess.table;}
+    refreshBal();renderPackages();
+    // now playing
+    const np=s.now_playing;
+    if(np){$('nowImg').src=img(np.yt);$('nowT').textContent=np.title;$('nowA').textContent=np.artist||'';
+      $('nowW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+np.table);
+      const dur=np.duration||1,pos=Math.min(np.position||0,dur);
+      $('progFill').style.width=(100*pos/dur)+'%';
+      $('nowPos').textContent=mm(pos);$('nowRem').textContent='faltan '+mm(dur-pos);
+    }else{$('nowT').textContent='—';$('nowA').textContent='Nadie ha puesto música aún';$('nowW').textContent='';
+      $('nowImg').removeAttribute('src');$('progFill').style.width='0%';$('nowPos').textContent='0:00';$('nowRem').textContent='';}
+    // cola
+    $('queueInfo').textContent=`${s.queue_count} en cola · ~${mm(s.queue_total_secs)} de música`;
+    if(s.my_pos){$('myInfo').style.display='';$('myInfo').innerHTML=`⭐ Tu canción: puesto #${s.my_pos} · suena en ~${mm(s.my_wait_secs)}`;}
+    else $('myInfo').style.display='none';
+    // reacciones + social
+    $('nowReacts').innerHTML = np ? reactHtml(np) : '';
+    $('qcount').textContent = s.queue_count;
+    renderList('queueList', s.queue, {boost:true, empty:'Nada en cola — suena la lista del local.'});
+    renderList('historyList', s.history, {empty:'Todavía no ha sonado nada.'});
+    renderLoved(s.top_loved);
+    // badges de navegación
+    $('badgeQ').style.display=s.queue_count?'':'none';$('badgeQ').textContent=s.queue_count;
+    const creds=(sess&&sess.credits)||0;$('badgeC').style.display=creds?'':'none';$('badgeC').textContent=creds;
+    // chip de cuenta en la barra superior (transparencia, clickeable)
+    $('acctTag').style.display = sess?'':'none';
+    $('acctTag').textContent='🧾 '+cop(s.my_tab_total||0);
+    // tu cuenta de la mesa (coincide con la del bar)
+    $('tabTotal').textContent=cop(s.my_tab_total||0);
+    const items=s.my_tab||[],tl=$('tabList');
+    if(!items.length)tl.innerHTML='<div class="empty">Sin cargos todavía.</div>';
+    else{tl.innerHTML='';items.forEach(x=>{const r=document.createElement('div');r.className='row';
+      r.innerHTML=`<div class="info"><div class="t">${x.title}</div><div class="a">${x.kind}</div></div><div class="chip pri">${cop(x.amount)}</div>`;tl.appendChild(r);});}
+    // aviso al autor
+    if(typeof s.my_likes_total==='number'){
+      if(myLikes!==null && s.my_likes_total>myLikes) toast('❤️ ¡A '+s.my_likes_total+' les gusta tu música!');
+      myLikes=s.my_likes_total;
+    }
+  }catch(e){}
+}
+boot();
+</script>
+</body>
+</html>

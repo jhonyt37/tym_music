@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TYM · Panel del dueño</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+.pinrow{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
+.pinrow .name{flex:1;font-weight:600}
+.pinrow .pin{font-size:22px;font-weight:800;letter-spacing:3px;color:var(--gold)}
+.pkgrow{display:flex;gap:8px;align-items:center;margin-top:8px}
+.pkgrow input{width:90px}
+.grp{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0;font-size:14px}
+</style>
+</head>
+<body>
+<div id="loginGate" style="position:fixed;inset:0;background:#0b0f1a;z-index:100;display:none;align-items:center;justify-content:center;padding:24px">
+  <div style="max-width:340px;width:100%;text-align:center">
+    <div class="logo" style="font-size:30px">TY<b>M</b> Music</div>
+    <h2 style="margin:10px 0">Ingreso del local</h2>
+    <input class="field" id="lgUser" placeholder="Usuario" autocomplete="username">
+    <input class="field" id="lgPass" type="password" placeholder="Contraseña" style="margin-top:8px" autocomplete="current-password">
+    <button class="btn block" style="margin-top:12px" onclick="doLogin()">Entrar</button>
+    <div class="small" id="lgErr" style="color:var(--red);margin-top:8px;min-height:16px"></div>
+    <div class="small" style="margin-top:14px;color:var(--mut)">Demo: bardemo / tym1234</div>
+  </div>
+</div>
+<header class="bar">
+  <div class="logo">TY<b>M</b> Music</div>
+  <div class="tag" id="venueTag">Panel del dueño</div>
+  <div class="spacer"></div>
+  <a class="tag" href="/player" target="_blank">Abrir pantalla ▶</a>
+  <a class="tag" href="#" onclick="logout();return false">Salir</a>
+</header>
+
+<div class="wrap wide">
+  <div class="grid2">
+    <div class="card">
+      <h2>Cobros a la cuenta</h2>
+      <div class="kpi gold" id="total">$0</div>
+      <div class="small">Total a sumar a las cuentas de los clientes</div>
+      <div id="byTable" style="margin-top:12px"></div>
+      <h2 style="margin-top:16px">Movimientos recientes</h2>
+      <div class="list" id="ledger"><div class="empty">Sin cobros aún.</div></div>
+    </div>
+    <div class="card">
+      <h2>Ajustes del local</h2>
+      <label class="small">Nombre del local</label><input class="field" id="venue">
+      <label class="small">Precio por prioridad (COP)</label><input class="field" id="price" type="number" step="100">
+      <label class="small">Estilo / mensaje al cliente</label><input class="field" id="style">
+      <label class="small">Género (para recomendadas)</label><input class="field" id="genre">
+      <label class="opt" style="margin-top:12px"><div><b>Auto-aprobar pedidos</b><div class="small">Si está apagado, tú apruebas cada canción</div></div><input type="checkbox" id="auto" style="width:22px;height:22px"></label>
+
+      <h2 style="margin-top:16px">No repetir canciones</h2>
+      <div class="pkgrow"><span class="small" style="flex:1">No repetir la misma en (minutos, 0=sin límite)</span><input class="field" id="repMin" type="number"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">Ni dentro de las últimas N canciones</span><input class="field" id="repSongs" type="number"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">Cortar últimos seg del video (silencios)</span><input class="field" id="trimEnd" type="number"></div>
+
+      <h2 style="margin-top:16px">Límites y premium</h2>
+      <div class="pkgrow"><span class="small" style="flex:1">Canciones gratis por mesa</span><input class="field" id="freeN" type="number"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">...cada (minutos)</span><input class="field" id="freeWin" type="number"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (x precio)</span><input class="field" id="jumpMult" type="number"></div>
+
+      <h2 style="margin-top:16px">Marca y redes (salen en el TV / cliente)</h2>
+      <label class="small">Logo TYM (imagen)</label><input type="file" id="tymLogoFile" accept="image/*" class="field">
+      <label class="small">Logo del bar (imagen)</label><input type="file" id="venueLogoFile" accept="image/*" class="field">
+      <div id="logoPrev" style="display:flex;gap:14px;align-items:center;margin:6px 0"></div>
+      <label class="small">Instagram (URL)</label><input class="field" id="soIg" placeholder="https://instagram.com/...">
+      <label class="small">TikTok (URL)</label><input class="field" id="soTt" placeholder="https://tiktok.com/@...">
+      <label class="small">Web (URL)</label><input class="field" id="soWeb" placeholder="https://...">
+
+      <h2 style="margin-top:16px">Paquetes de prioridades</h2>
+      <div id="pkgs"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">Pase (min / precio)</span>
+        <input class="field" id="passMin" type="number"><input class="field" id="passPrice" type="number" step="100"></div>
+
+      <button class="btn block" style="margin-top:14px" onclick="save()">Guardar ajustes</button>
+      <button class="btn ghost block sm" style="margin-top:8px" onclick="reset()">Reiniciar demo</button>
+    </div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>Mesas y códigos (PIN)</h2>
+      <div class="small">Imprime y pega el código en cada mesa.</div>
+      <div class="list" id="tables" style="margin-top:10px"></div>
+      <button class="btn ghost block sm" style="margin-top:10px" onclick="addTable()">+ Agregar mesa</button>
+    </div>
+    <div class="card">
+      <h2>Recomendadas del local</h2>
+      <input class="search" id="curq" placeholder="Buscar para añadir…" autocomplete="off">
+      <div class="list" id="curResults" style="margin-top:8px;max-height:170px;overflow:auto"></div>
+      <h2 style="margin-top:14px">En tu lista</h2>
+      <div class="list" id="curList"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Correos capturados (<span id="subCount">0</span>)</h2>
+    <div class="list" id="subList"><div class="empty">Aún no hay correos.</div></div>
+  </div>
+
+  <div class="card">
+    <h2>Por aprobar (<span id="pcount">0</span>)</h2>
+    <div class="list" id="pending"><div class="empty">No hay pedidos pendientes.</div></div>
+  </div>
+  <div class="card">
+    <h2>Sonando ahora & cola</h2>
+    <div class="list" id="queue"><div class="empty">Nada en cola.</div></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
+const cop=n=>'$'+(n||0).toLocaleString('es-CO');
+let editing=false, formLoaded=false, curTimer=null, packages=[], pass_obj={minutes:30,price:5000};
+let tymLogoData=null, venueLogoData=null, curSettings={};
+function readImg(f,cb){if(!f)return;const r=new FileReader();r.onload=()=>cb(r.result);r.readAsDataURL(f);}
+function renderLogoPrev(){const p=$('logoPrev');if(!p)return;p.innerHTML='';
+  const t=tymLogoData||curSettings.tym_logo,v=venueLogoData||curSettings.venue_logo;
+  if(t)p.innerHTML+='<img src="'+t+'" style="height:34px">';
+  if(v)p.innerHTML+='<img src="'+v+'" style="height:38px;border-radius:6px">';}
+document.addEventListener('focusin',e=>{if(e.target.matches('.field, input'))editing=true;});
+document.addEventListener('focusout',()=>setTimeout(()=>editing=false,500));
+
+async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})})).json();}
+function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2000);}
+
+async function approve(id){await post('/api/admin/approve',{id});tick();}
+async function reject(id){await post('/api/admin/reject',{id});tick();}
+async function remove(id){await post('/api/admin/remove',{id});tick();}
+async function skip(){await post('/api/advance',{});tick();}
+
+function readPackages(){
+  const rows=document.querySelectorAll('#pkgs .pkgrow');const out=[];
+  rows.forEach(r=>{const q=+r.querySelector('.q').value,p=+r.querySelector('.p').value;if(q>0)out.push({qty:q,price:p});});
+  return out;
+}
+async function save(){
+  const payload={
+    venue_name:$('venue').value,price_priority:parseInt($('price').value||0),
+    style:$('style').value,genre:$('genre').value,auto_approve:$('auto').checked,
+    repeat_block_min:parseInt($('repMin').value||0),repeat_block_songs:parseInt($('repSongs').value||0),
+    trim_end_secs:parseInt($('trimEnd').value||0),
+    free_per_window:parseInt($('freeN').value||0),free_window_min:parseInt($('freeWin').value||0),
+    jump_multiplier:parseInt($('jumpMult').value||0),
+    socials:{instagram:$('soIg').value,tiktok:$('soTt').value,web:$('soWeb').value},
+    credit_packages:readPackages(),
+    time_pass:{minutes:parseInt($('passMin').value||30),price:parseInt($('passPrice').value||0)}};
+  if(tymLogoData)payload.tym_logo=tymLogoData;
+  if(venueLogoData)payload.venue_logo=venueLogoData;
+  await post('/api/admin/settings',payload);
+  toast('Ajustes guardados');editing=false;
+}
+async function reset(){if(confirm('¿Reiniciar la demo? Borra cola, cobros y sesiones.')){await post('/api/admin/reset',{});formLoaded=false;tick();toast('Demo reiniciada');}}
+async function closeTable(t,v){
+  if(confirm('¿Cerrar la cuenta de '+t+' por '+cop(v)+'? Se cobra al cliente y se libera la mesa.')){
+    await post('/api/admin/close_table',{table:t});toast('Cuenta de '+t+' cerrada ('+cop(v)+')');tick();
+  }
+}
+
+// Mesas
+async function loadTables(){
+  const t=await (await fetch('/api/admin/tables')).json();
+  const box=$('tables');box.innerHTML='';
+  t.forEach(m=>{const r=document.createElement('div');r.className='pinrow';
+    r.innerHTML=`<div class="name">${m.name}</div><div class="pin">${m.pin}</div>`;
+    const rg=document.createElement('button');rg.className='btn ghost sm';rg.textContent='↻';rg.title='Nuevo PIN';rg.onclick=async()=>{await post('/api/admin/tables',{action:'regen',name:m.name});loadTables();};
+    const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';rm.onclick=async()=>{await post('/api/admin/tables',{action:'remove',name:m.name});loadTables();};
+    r.appendChild(rg);r.appendChild(rm);box.appendChild(r);});
+}
+async function addTable(){await post('/api/admin/tables',{action:'add'});loadTables();}
+
+// Curadas
+$('curq')&&$('curq').addEventListener('input',e=>{
+  clearTimeout(curTimer);const term=e.target.value.trim();
+  if(!term){$('curResults').innerHTML='';return;}
+  curTimer=setTimeout(async()=>{
+    const list=await (await fetch('/api/search?q='+encodeURIComponent(term))).json();
+    const box=$('curResults');box.innerHTML='';
+    list.slice(0,8).forEach(s=>{const r=document.createElement('div');r.className='row';
+      r.innerHTML=`<img class="mini" src="${img(s.yt)}"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div>`;
+      const a=document.createElement('button');a.className='btn green sm';a.textContent='+ Añadir';
+      a.onclick=async()=>{await post('/api/admin/curated',{action:'add',yt:s.yt,title:s.title,artist:s.artist,length:s.length});toast('Añadida');renderCurated(window._cur||[]);tick();};
+      r.appendChild(a);box.appendChild(r);});
+  },350);
+});
+function renderCurated(list){
+  window._cur=list;const box=$('curList');box.innerHTML='';
+  if(!list.length){box.innerHTML='<div class="empty">Aún no has añadido recomendadas.</div>';return;}
+  list.forEach(c=>{const r=document.createElement('div');r.className='row';
+    r.innerHTML=`<img class="mini" src="${img(c.yt)}"><div class="info"><div class="t">${c.title}</div><div class="a">${c.artist||''}</div></div>`;
+    const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';x.onclick=async()=>{await post('/api/admin/curated',{action:'remove',yt:c.yt});tick();};
+    r.appendChild(x);box.appendChild(r);});
+}
+
+async function tick(){
+  try{
+    const s=await (await fetch('/api/state?admin=1')).json();
+    packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
+    if(!formLoaded){
+      $('venue').value=s.settings.venue_name;$('price').value=s.settings.price_priority;
+      $('style').value=s.settings.style;$('genre').value=s.settings.genre;$('auto').checked=s.settings.auto_approve;
+      $('repMin').value=s.settings.repeat_block_min;$('repSongs').value=s.settings.repeat_block_songs;
+      $('trimEnd').value=s.settings.trim_end_secs;
+      $('freeN').value=s.settings.free_per_window;$('freeWin').value=s.settings.free_window_min;
+      $('jumpMult').value=s.settings.jump_multiplier;
+      const so=s.settings.socials||{};$('soIg').value=so.instagram||'';$('soTt').value=so.tiktok||'';$('soWeb').value=so.web||'';
+      $('passMin').value=pass_obj.minutes;$('passPrice').value=pass_obj.price;
+      renderPkgInputs();
+      formLoaded=true;
+    }
+    curSettings=s.settings;renderLogoPrev();
+    // correos capturados
+    const subs=s.subscribers||[];$('subCount').textContent=subs.length;
+    const sl=$('subList');
+    if(!subs.length)sl.innerHTML='<div class="empty">Aún no hay correos.</div>';
+    else{sl.innerHTML='';subs.forEach(x=>{const r=document.createElement('div');r.className='row';
+      r.innerHTML=`<div class="info"><div class="t">${x.email}</div><div class="a">${x.table||''}</div></div>`;sl.appendChild(r);});}
+    renderCurated(s.curated||[]);
+    // ledger
+    $('total').textContent=cop(s.ledger_total);
+    const byT={};(s.ledger||[]).forEach(l=>{byT[l.table]=(byT[l.table]||0)+l.amount;});
+    const bt=$('byTable');bt.innerHTML='';Object.entries(byT).forEach(([t,v])=>{
+      const d=document.createElement('div');d.className='grp';
+      d.innerHTML=`<span style="flex:1">${t}</span><span class="price" style="color:var(--gold)">${cop(v)}</span>`;
+      const b=document.createElement('button');b.className='btn red sm';b.textContent='Cerrar cuenta';b.style.marginLeft='10px';
+      b.onclick=()=>closeTable(t,v);d.appendChild(b);bt.appendChild(d);});
+    const L=$('ledger');const lg=s.ledger||[];
+    if(!lg.length)L.innerHTML='<div class="empty">Sin cobros aún.</div>';
+    else{L.innerHTML='';lg.forEach(x=>{const r=document.createElement('div');r.className='row';
+      r.innerHTML=`<div class="info"><div class="t">${x.table} · <span class="small">${x.kind}</span></div><div class="a">${x.title}</div></div><div class="chip pri">${cop(x.amount)}</div>`;L.appendChild(r);});}
+    // pending
+    const P=$('pending');const pend=s.pending||[];$('pcount').textContent=pend.length;
+    if(!pend.length)P.innerHTML='<div class="empty">No hay pedidos pendientes.</div>';
+    else{P.innerHTML='';pend.forEach(it=>{const r=document.createElement('div');r.className='row';
+      r.innerHTML=`<img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title} ${it.priority?'<span class="chip pri">⚡</span>':''}</div><div class="a">${it.table}</div></div>`;
+      const ok=document.createElement('button');ok.className='btn green sm';ok.textContent='Aprobar';ok.onclick=()=>approve(it.id);
+      const no=document.createElement('button');no.className='btn red sm';no.textContent='✕';no.onclick=()=>reject(it.id);
+      r.appendChild(ok);r.appendChild(no);P.appendChild(r);});}
+    // now + queue
+    const Q=$('queue');Q.innerHTML='';const np=s.now_playing;
+    if(np){const r=document.createElement('div');r.className='row';r.style.borderColor='var(--pri)';
+      r.innerHTML=`<span class="pulse"></span><img class="mini" src="${img(np.yt)}"><div class="info"><div class="t">${np.title}</div><div class="a">${np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+np.table)}</div></div>`;
+      const sk=document.createElement('button');sk.className='btn ghost sm';sk.textContent='⏭';sk.onclick=skip;r.appendChild(sk);Q.appendChild(r);}
+    const q=s.queue||[];
+    if(!q.length&&!np)Q.innerHTML='<div class="empty">Nada en cola.</div>';
+    q.forEach((it,i)=>{const r=document.createElement('div');r.className='row';
+      r.innerHTML=`<div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}</div><div class="a">${it.table}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
+      const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';rm.onclick=()=>remove(it.id);r.appendChild(rm);Q.appendChild(r);});
+  }catch(e){}
+}
+function renderPkgInputs(){
+  const box=$('pkgs');box.innerHTML='';
+  (packages.length?packages:[{qty:1,price:1000},{qty:3,price:2500},{qty:6,price:4500}]).forEach(p=>{
+    const r=document.createElement('div');r.className='pkgrow';
+    r.innerHTML=`<input class="field q" type="number" value="${p.qty}" title="cantidad"><span class="small">x prioridad =</span><input class="field p" type="number" step="100" value="${p.price}">`;
+    box.appendChild(r);});
+}
+$('tymLogoFile').onchange=e=>readImg(e.target.files[0],d=>{tymLogoData=d;renderLogoPrev();});
+$('venueLogoFile').onchange=e=>readImg(e.target.files[0],d=>{venueLogoData=d;renderLogoPrev();});
+async function doLogin(){
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});
+  if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';
+}
+async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
+(async()=>{
+  const me=await fetch('/api/me');
+  if(!me.ok){$('loginGate').style.display='flex';return;}
+  const j=await me.json();$('venueTag').textContent=j.venue_name;
+  loadTables();tick();setInterval(tick,2500);
+})();
+</script>
+</body>
+</html>

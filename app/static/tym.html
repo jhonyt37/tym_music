@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TYM · Dashboard global</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+.kpis{display:flex;gap:14px;flex-wrap:wrap}
+.kpibox{flex:1;min-width:150px;background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:14px}
+.kpibox .n{font-size:26px;font-weight:800}
+.barrow{display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px}
+.barrow .lbl{width:38px;color:var(--mut);text-align:right}
+.barrow .bar{height:14px;background:var(--pri);border-radius:3px;min-width:2px}
+.grp{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:7px 0;font-size:14px}
+</style>
+</head>
+<body>
+<div id="loginGate" style="position:fixed;inset:0;background:#0b0f1a;z-index:100;display:none;align-items:center;justify-content:center;padding:24px">
+  <div style="max-width:340px;width:100%;text-align:center">
+    <div class="logo" style="font-size:30px">TY<b>M</b> Music</div>
+    <h2 style="margin:10px 0">Dashboard TYM (global)</h2>
+    <input class="field" id="lgUser" placeholder="Usuario">
+    <input class="field" id="lgPass" type="password" placeholder="Contraseña" style="margin-top:8px">
+    <button class="btn block" style="margin-top:12px" onclick="doLogin()">Entrar</button>
+    <div class="small" id="lgErr" style="color:var(--red);margin-top:8px;min-height:16px"></div>
+    <div class="small" style="margin-top:14px;color:var(--mut)">Demo: tym / tymmaster</div>
+  </div>
+</div>
+
+<header class="bar">
+  <div class="logo">TY<b>M</b> Music</div>
+  <div class="tag">Dashboard global</div>
+  <div class="spacer"></div>
+  <a class="tag" href="#" onclick="logout();return false">Salir</a>
+</header>
+
+<div class="wrap wide">
+  <div class="kpis">
+    <div class="kpibox"><div class="n gold" id="kFact">$0</div><div class="small">Facturación total</div></div>
+    <div class="kpibox"><div class="n" id="kPrem">0</div><div class="small">Pedidos premium</div></div>
+    <div class="kpibox"><div class="n" id="kFree">0</div><div class="small">Pedidos gratis</div></div>
+    <div class="kpibox"><div class="n" id="kAcc">0</div><div class="small">Cuentas (mesas)</div></div>
+  </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>Facturación por local</h2>
+      <div id="factLocal"></div>
+    </div>
+    <div class="card">
+      <h2>Horas pico (ingresos)</h2>
+      <div id="hours"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Cuentas de mesa (apertura / cierre)</h2>
+    <div class="list" id="accts"></div>
+  </div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const cop=n=>'$'+(n||0).toLocaleString('es-CO');
+const hm=ts=>{if(!ts)return '—';const d=new Date(ts*1000);return d.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'});};
+let VENMAP={};
+async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';}
+async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
+
+async function load(){
+  const r=await fetch('/api/tym/analytics');
+  if(!r.ok){$('loginGate').style.display='flex';return;}
+  const d=await r.json();VENMAP=d.venues||{};
+  $('kFact').textContent=cop(d.facturacion_total);
+  $('kPrem').textContent=d.orders_premium;$('kFree').textContent=d.orders_free;
+  $('kAcc').textContent=Object.keys(d.cuentas).length||d.cuentas.length;
+  // facturación por local
+  const fl=$('factLocal');fl.innerHTML='';
+  const ent=Object.entries(d.facturacion_por_local||{});
+  if(!ent.length)fl.innerHTML='<div class="empty">Sin facturación aún.</div>';
+  ent.sort((a,b)=>b[1]-a[1]).forEach(([v,amt])=>{const e=document.createElement('div');e.className='grp';
+    e.innerHTML=`<span>${VENMAP[v]||v}</span><span class="gold" style="font-weight:800">${cop(amt)}</span>`;fl.appendChild(e);});
+  // horas pico
+  const hv=d.hora_pico_ingresos||{};const max=Math.max(1,...Object.values(hv));
+  const h=$('hours');h.innerHTML='';
+  for(let i=0;i<24;i++){const val=hv[i]||0;if(val<=0&&max===1&&i!==0)continue;
+    const row=document.createElement('div');row.className='barrow';
+    row.innerHTML=`<span class="lbl">${String(i).padStart(2,'0')}h</span><div class="bar" style="width:${Math.round(180*val/max)}px"></div><span>${val?cop(val):''}</span>`;h.appendChild(row);}
+  // cuentas
+  const ac=$('accts');const list=d.cuentas||[];ac.innerHTML='';
+  if(!list.length)ac.innerHTML='<div class="empty">Sin cuentas aún.</div>';
+  list.forEach(a=>{const r=document.createElement('div');r.className='row';
+    r.innerHTML=`<div class="info"><div class="t">${VENMAP[a.venue]||a.venue} · ${a.table}</div><div class="a">Abrió ${hm(a.opened_at)} · Cerró ${hm(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop(a.total)}</div>`;
+    ac.appendChild(r);});
+}
+load();setInterval(load,4000);
+</script>
+</body>
+</html>
