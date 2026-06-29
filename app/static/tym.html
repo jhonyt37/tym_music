@@ -58,6 +58,26 @@
     <h2>Cuentas de mesa (apertura / cierre)</h2>
     <div class="list" id="accts"></div>
   </div>
+
+  <div class="grid2">
+    <div class="card">
+      <h2>Locales registrados (<span id="venueCount">0</span>)</h2>
+      <div class="list" id="venueList"><div class="empty">Cargando…</div></div>
+    </div>
+    <div class="card">
+      <h2>Registrar nuevo local</h2>
+      <label class="small">Nombre del local</label>
+      <input class="field" id="nName" placeholder="Ej: La Zona Bar">
+      <label class="small">ID único (letras/números, sin espacios)</label>
+      <input class="field" id="nVid" placeholder="ej: lazona" oninput="this.value=this.value.toLowerCase().replace(/[^a-z0-9_-]/g,'')">
+      <label class="small">Usuario del dueño</label>
+      <input class="field" id="nUser" placeholder="ej: lazona" autocomplete="off">
+      <label class="small">Contraseña del dueño</label>
+      <input class="field" id="nPass" type="password" placeholder="Contraseña" autocomplete="new-password">
+      <button class="btn block" style="margin-top:12px" onclick="createVenue()">Registrar local</button>
+      <div class="small" id="nErr" style="color:var(--red);margin-top:8px;min-height:16px"></div>
+    </div>
+  </div>
 </div>
 
 <script>
@@ -71,10 +91,12 @@ async function logout(){await fetch('/api/logout',{method:'POST'});location.relo
 async function load(){
   const r=await fetch('/api/tym/analytics');
   if(!r.ok){$('loginGate').style.display='flex';return;}
-  const d=await r.json();VENMAP=d.venues||{};
+  const d=await r.json();
+  const vmap=d.venues||{};
+  VENMAP=Object.fromEntries(Object.entries(vmap).map(([k,v])=>[k,v.name||v]));
   $('kFact').textContent=cop(d.facturacion_total);
   $('kPrem').textContent=d.orders_premium;$('kFree').textContent=d.orders_free;
-  $('kAcc').textContent=Object.keys(d.cuentas).length||d.cuentas.length;
+  $('kAcc').textContent=(d.cuentas||[]).length;
   // facturación por local
   const fl=$('factLocal');fl.innerHTML='';
   const ent=Object.entries(d.facturacion_por_local||{});
@@ -90,9 +112,31 @@ async function load(){
   // cuentas
   const ac=$('accts');const list=d.cuentas||[];ac.innerHTML='';
   if(!list.length)ac.innerHTML='<div class="empty">Sin cuentas aún.</div>';
-  list.forEach(a=>{const r=document.createElement('div');r.className='row';
-    r.innerHTML=`<div class="info"><div class="t">${VENMAP[a.venue]||a.venue} · ${a.table}</div><div class="a">Abrió ${hm(a.opened_at)} · Cerró ${hm(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop(a.total)}</div>`;
-    ac.appendChild(r);});
+  list.forEach(a=>{const row=document.createElement('div');row.className='row';
+    row.innerHTML=`<div class="info"><div class="t">${VENMAP[a.venue]||a.venue} · ${a.table}</div><div class="a">Abrió ${hm(a.opened_at)} · Cerró ${hm(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop(a.total)}</div>`;
+    ac.appendChild(row);});
+  // locales registrados
+  const vl=$('venueList');vl.innerHTML='';const venues=Object.entries(vmap);
+  $('venueCount').textContent=venues.length;
+  if(!venues.length)vl.innerHTML='<div class="empty">Sin locales.</div>';
+  const owners=d.owners||[];
+  venues.forEach(([vid,info])=>{
+    const own=owners.find(o=>o.venue===vid);
+    const row=document.createElement('div');row.className='row';
+    row.innerHTML=`<div class="info"><div class="t">${info.name||info} <span class="tag" style="font-size:11px;background:rgba(59,130,246,.2);border-radius:4px;padding:2px 6px">${vid}</span></div><div class="a">👤 ${own?own.username:'—'} · ${info.tables||0} mesas · <a href="/?v=${vid}" target="_blank" class="small">Ver app</a></div></div>`;
+    vl.appendChild(row);
+  });
+}
+async function createVenue(){
+  const vid=$('nVid').value.trim(),name=$('nName').value.trim();
+  const username=$('nUser').value.trim(),password=$('nPass').value;
+  $('nErr').textContent='';
+  if(!vid||!name||!username||!password){$('nErr').textContent='Completa todos los campos';return;}
+  const r=await fetch('/api/tym/create_venue',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({vid,name,username,password})});
+  const j=await r.json();
+  if(j.ok){$('nVid').value='';$('nName').value='';$('nUser').value='';$('nPass').value='';load();}
+  else $('nErr').textContent=j.error||'Error';
 }
 load();setInterval(load,4000);
 </script>

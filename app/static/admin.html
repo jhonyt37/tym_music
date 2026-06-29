@@ -12,6 +12,12 @@
 .pkgrow{display:flex;gap:8px;align-items:center;margin-top:8px}
 .pkgrow input{width:90px}
 .grp{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding:6px 0;font-size:14px}
+.kpis{display:flex;gap:12px;flex-wrap:wrap}
+.kpibox{flex:1;min-width:120px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:12px}
+.kpibox .n{font-size:22px;font-weight:800}
+.abar{display:flex;align-items:center;gap:6px;margin:2px 0;font-size:12px}
+.abar .lbl{width:34px;color:var(--mut);text-align:right;font-size:11px}
+.abar .fill{height:12px;background:var(--pri);border-radius:3px;min-width:2px}
 </style>
 </head>
 <body>
@@ -61,6 +67,8 @@
       <div class="pkgrow"><span class="small" style="flex:1">Canciones gratis por mesa</span><input class="field" id="freeN" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">...cada (minutos)</span><input class="field" id="freeWin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (x precio)</span><input class="field" id="jumpMult" type="number"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">Bloquear nuevas prioridades si la cola supera (minutos, 0=sin límite)</span><input class="field" id="maxPrioMin" type="number"></div>
+      <label class="opt" style="margin-top:10px"><div><b>Reproducir lista del local en orden aleatorio</b><div class="small">Si está apagado, sigue el orden en que añadiste las canciones</div></div><input type="checkbox" id="fbShuffle" style="width:22px;height:22px"></label>
 
       <h2 style="margin-top:16px">Marca y redes (salen en el TV / cliente)</h2>
       <label class="small">Logo TYM (imagen)</label><input type="file" id="tymLogoFile" accept="image/*" class="field">
@@ -96,9 +104,32 @@
     </div>
   </div>
 
+  <!-- ===== INFORMES DEL LOCAL ===== -->
+  <div class="card">
+    <h2>Informes del local 📊</h2>
+    <div class="kpis" id="analKpis" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px"></div>
+    <div class="grid2">
+      <div>
+        <h3 style="font-size:14px;font-weight:700;margin-bottom:8px;color:var(--mut)">Horas pico (ingresos)</h3>
+        <div id="analHours"></div>
+      </div>
+      <div>
+        <h3 style="font-size:14px;font-weight:700;margin-bottom:8px;color:var(--mut)">Canciones más pedidas</h3>
+        <div class="list" id="analSongs"></div>
+      </div>
+    </div>
+    <h3 style="font-size:14px;font-weight:700;margin:14px 0 8px;color:var(--mut)">Cuentas recientes</h3>
+    <div class="list" id="analAccts"><div class="empty">Sin cuentas aún.</div></div>
+  </div>
+
   <div class="card">
     <h2>Correos capturados (<span id="subCount">0</span>)</h2>
     <div class="list" id="subList"><div class="empty">Aún no hay correos.</div></div>
+  </div>
+
+  <div class="card" id="assistCard" style="border-color:#dc2626;display:none">
+    <h2 style="color:#dc2626">🔔 Asistencia en mesa (<span id="acount">0</span>)</h2>
+    <div class="list" id="assistList"></div>
   </div>
 
   <div class="card">
@@ -133,6 +164,7 @@ async function approve(id){await post('/api/admin/approve',{id});tick();}
 async function reject(id){await post('/api/admin/reject',{id});tick();}
 async function remove(id){await post('/api/admin/remove',{id});tick();}
 async function skip(){await post('/api/advance',{});tick();}
+async function resolveAssist(id){await post('/api/admin/assist_resolve',{id});tick();}
 
 function readPackages(){
   const rows=document.querySelectorAll('#pkgs .pkgrow');const out=[];
@@ -147,6 +179,8 @@ async function save(){
     trim_end_secs:parseInt($('trimEnd').value||0),
     free_per_window:parseInt($('freeN').value||0),free_window_min:parseInt($('freeWin').value||0),
     jump_multiplier:parseInt($('jumpMult').value||0),
+    max_priority_queue_min:parseInt($('maxPrioMin').value||0),
+    fallback_shuffle:$('fbShuffle').checked,
     socials:{instagram:$('soIg').value,tiktok:$('soTt').value,web:$('soWeb').value},
     credit_packages:readPackages(),
     time_pass:{minutes:parseInt($('passMin').value||30),price:parseInt($('passPrice').value||0)}};
@@ -208,6 +242,8 @@ async function tick(){
       $('trimEnd').value=s.settings.trim_end_secs;
       $('freeN').value=s.settings.free_per_window;$('freeWin').value=s.settings.free_window_min;
       $('jumpMult').value=s.settings.jump_multiplier;
+      $('maxPrioMin').value=s.settings.max_priority_queue_min||0;
+      $('fbShuffle').checked=s.settings.fallback_shuffle!==false;
       const so=s.settings.socials||{};$('soIg').value=so.instagram||'';$('soTt').value=so.tiktok||'';$('soWeb').value=so.web||'';
       $('passMin').value=pass_obj.minutes;$('passPrice').value=pass_obj.price;
       renderPkgInputs();
@@ -221,6 +257,16 @@ async function tick(){
     else{sl.innerHTML='';subs.forEach(x=>{const r=document.createElement('div');r.className='row';
       r.innerHTML=`<div class="info"><div class="t">${x.email}</div><div class="a">${x.table||''}</div></div>`;sl.appendChild(r);});}
     renderCurated(s.curated||[]);
+    // Solicitudes de asistencia
+    const assists=s.assists||[];$('acount').textContent=assists.length;
+    const ac=$('assistCard'),al=$('assistList');
+    if(assists.length){ac.style.display='';al.innerHTML='';
+      assists.forEach(a=>{const r=document.createElement('div');r.className='row';r.style.borderLeft='4px solid #dc2626';r.style.paddingLeft='10px';
+        const ts=new Date(a.ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+        r.innerHTML=`<div class="info"><div class="t">${a.table}</div><div class="a">${ts}</div></div>`;
+        const b=document.createElement('button');b.className='btn green sm';b.textContent='✓ Resolver';b.onclick=()=>resolveAssist(a.id);
+        r.appendChild(b);al.appendChild(r);});
+    }else{ac.style.display='none';}
     // ledger
     $('total').textContent=cop(s.ledger_total);
     const byT={};(s.ledger||[]).forEach(l=>{byT[l.table]=(byT[l.table]||0)+l.amount;});
@@ -260,6 +306,43 @@ function renderPkgInputs(){
     r.innerHTML=`<input class="field q" type="number" value="${p.qty}" title="cantidad"><span class="small">x prioridad =</span><input class="field p" type="number" step="100" value="${p.price}">`;
     box.appendChild(r);});
 }
+async function loadAnalytics(){
+  try{
+    const d=await (await fetch('/api/admin/analytics')).json();
+    const cop2=n=>'$'+(n||0).toLocaleString('es-CO');
+    // KPIs
+    const kbox=$('analKpis');kbox.innerHTML='';
+    [{n:cop2(d.facturacion_total),l:'Facturación total',gold:true},
+     {n:cop2(d.facturacion_semana),l:'Esta semana'},
+     {n:d.orders_premium,l:'Pedidos premium'},
+     {n:d.orders_free,l:'Pedidos gratis'}].forEach(k=>{
+      const b=document.createElement('div');b.className='kpibox';
+      b.innerHTML=`<div class="n${k.gold?' gold':''}">${k.n}</div><div class="small">${k.l}</div>`;
+      kbox.appendChild(b);});
+    // Horas pico
+    const hv=d.hora_pico_ingresos||{};const hmax=Math.max(1,...Object.values(hv));
+    const hbox=$('analHours');hbox.innerHTML='';
+    for(let i=0;i<24;i++){const val=hv[i]||0;if(!val&&hmax===1)continue;
+      const row=document.createElement('div');row.className='abar';
+      row.innerHTML=`<span class="lbl">${String(i).padStart(2,'0')}h</span><div class="fill" style="width:${Math.round(140*val/hmax)}px"></div><span class="small">${val?cop2(val):''}</span>`;
+      hbox.appendChild(row);}
+    if(!hbox.children.length)hbox.innerHTML='<div class="empty">Sin datos aún.</div>';
+    // Canciones top
+    const sbox=$('analSongs');sbox.innerHTML='';
+    const songs=d.canciones_top||[];
+    if(!songs.length)sbox.innerHTML='<div class="empty">Sin pedidos aún.</div>';
+    songs.forEach((s,i)=>{const r=document.createElement('div');r.className='row';
+      r.innerHTML=`<div class="pos">${i+1}</div><div class="info"><div class="t">${s.title}</div></div><div class="chip">${s.count} pedido${s.count!==1?'s':''}</div>`;
+      sbox.appendChild(r);});
+    // Cuentas recientes
+    const abox=$('analAccts');const accts=d.cuentas_recientes||[];abox.innerHTML='';
+    const hm2=ts=>{if(!ts)return '—';const dt=new Date(ts*1000);return dt.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'});};
+    if(!accts.length)abox.innerHTML='<div class="empty">Sin cuentas aún.</div>';
+    accts.forEach(a=>{const r=document.createElement('div');r.className='row';
+      r.innerHTML=`<div class="info"><div class="t">${a.table}</div><div class="a">Abrió ${hm2(a.opened_at)} · Cerró ${hm2(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop2(a.total)}</div>`;
+      abox.appendChild(r);});
+  }catch(e){}
+}
 $('tymLogoFile').onchange=e=>readImg(e.target.files[0],d=>{tymLogoData=d;renderLogoPrev();});
 $('venueLogoFile').onchange=e=>readImg(e.target.files[0],d=>{venueLogoData=d;renderLogoPrev();});
 async function doLogin(){
@@ -272,6 +355,7 @@ async function logout(){await fetch('/api/logout',{method:'POST'});location.relo
   if(!me.ok){$('loginGate').style.display='flex';return;}
   const j=await me.json();$('venueTag').textContent=j.venue_name;
   loadTables();tick();setInterval(tick,2500);
+  loadAnalytics();setInterval(loadAnalytics,15000);
 })();
 </script>
 </body>

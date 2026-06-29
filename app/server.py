@@ -6,15 +6,20 @@ Vistas: /  (cliente)  ·  /player (pantalla del local)  ·  /admin (dueno)
 Novedades: sesion de mesa por PIN, paquetes (creditos + pase), progreso de
 reproduccion, recomendadas (mas pedido / del local / populares / genero).
 """
-import json, os, re, socket, threading, time, random
+import json, os, re, socket, threading, time, random, datetime
 import urllib.request, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
-PORT = int(os.environ.get("PORT", 8000))   # los hosts (Render/Railway/Fly) inyectan PORT
-PUBLIC_URL = os.environ.get("PUBLIC_URL", "")  # ej. https://tym.onrender.com (para el QR en deploy)
+PORT = int(os.environ.get("PORT", 8000))
+PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
+# Upstash Redis (backup remoto: evita perder datos en Render/hosts con disco efímero)
+# Crea una DB gratuita en upstash.com → copia REST URL y token → ponlos como variables de entorno
+REDIS_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
+REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
+REDIS_KEY   = "tym_state"
 DEFAULT_DUR = 210  # 3:30 si no se conoce la duracion
 EMOJIS = ["❤️", "🔥", "👍"]  # reacciones positivas
 
@@ -66,6 +71,8 @@ def make_venue(name):
             "free_window_min": 10,
             "jump_multiplier": 3,
             "venue_logo": "",          # logo del BAR
+            "max_priority_queue_min": 0,   # bloquear nuevas prioridades si cola premium > N min (0=off)
+            "fallback_shuffle": True,       # lista del local en orden aleatorio
         },
         "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4} for i in range(1, 6)],  # PINs 1111..5555
         "sessions": {},
@@ -74,10 +81,13 @@ def make_venue(name):
         "ledger": [],
         "history": [],
         "curated": [dict(s) for s in CATALOG if s["genre"] in ("reggaeton", "pop latino")][:8],
+        "curated_shuffle": [],     # orden aleatorio actual del fallback
         "req_counts": {},
         "reactions": {},
         "jump_used_for": None,
-        "learned_end": {},     # yt -> seg donde termina de verdad (aprendido de los saltos del local)
+        "learned_end": {},         # yt -> seg de corte aprendido por saltos manuales
+        "assists": [],             # {id, table, ts, resolved, resolve_ts, token}
+        "tv_lastseen": 0,          # timestamp del último ping de la TV activa
         "_id": 0, "_fb": 0,
     }
 
@@ -125,6 +135,8 @@ def log_charge(table, token, amount, kind, title):
     a = TYM["accounts"].get(token)
     if a:
         a["total"] += amount
+    # Cualquier cobro fuerza un backup a Redis en el próximo autosave (~3s): nunca se pierde dinero
+    _redis_last_save[0] = 0
 
 def close_accounts(vid, table):
     total = 0
@@ -138,7 +150,6 @@ def tym_analytics():
     fact_local, hour_rev, hour_ord = {}, {k: 0 for k in range(24)}, {k: 0 for k in range(24)}
     free = prem = total = 0
     for e in TYM["events"]:
-        import datetime
         h = datetime.datetime.fromtimestamp(e["ts"]).hour
         if e["ev"] == "charge":
             fact_local[e["venue"]] = fact_local.get(e["venue"], 0) + e["amount"]
@@ -148,10 +159,45 @@ def tym_analytics():
             if e.get("premium"): prem += 1
             else: free += 1
     accts = sorted(TYM["accounts"].values(), key=lambda a: -a["opened_at"])[:200]
+    venues_info = {vid: {"name": VENUES[vid]["settings"]["venue_name"],
+                         "tables": len(VENUES[vid]["tables"])} for vid in VENUES}
+    owners_info = [{"username": k, "venue": v["venue"], "venue_name": VENUES[v["venue"]]["settings"]["venue_name"]}
+                   for k, v in TYM["owners"].items() if v.get("venue") != "*" and v.get("venue") in VENUES]
     return {"facturacion_por_local": fact_local, "facturacion_total": total,
             "orders_free": free, "orders_premium": prem,
             "hora_pico_ingresos": hour_rev, "hora_pico_pedidos": hour_ord,
-            "cuentas": accts, "venues": {vid: VENUES[vid]["settings"]["venue_name"] for vid in VENUES}}
+            "cuentas": accts, "venues": venues_info, "owners": owners_info}
+
+def venue_analytics(vid):
+    """Informe del local para el dueño: facturación, pedidos, canciones top, horas pico."""
+    hour_rev = {k: 0 for k in range(24)}
+    hour_ord = {k: 0 for k in range(24)}
+    songs, total, week_total, free, prem = {}, 0, 0, 0, 0
+    week_ago = time.time() - 7 * 86400
+    for e in TYM["events"]:
+        if e.get("venue") != vid:
+            continue
+        h = datetime.datetime.fromtimestamp(e["ts"]).hour
+        if e["ev"] == "charge":
+            hour_rev[h] += e.get("amount", 0)
+            total += e.get("amount", 0)
+            if e["ts"] >= week_ago:
+                week_total += e.get("amount", 0)
+        elif e["ev"] == "order":
+            hour_ord[h] += 1
+            if e.get("premium"): prem += 1
+            else: free += 1
+            yt = e.get("yt", ""); title = e.get("title", "?")
+            if yt:
+                if yt not in songs: songs[yt] = {"title": title, "yt": yt, "count": 0}
+                songs[yt]["count"] += 1
+    top_songs = sorted(songs.values(), key=lambda x: -x["count"])[:10]
+    recent_accts = sorted([a for a in TYM["accounts"].values() if a.get("venue") == vid],
+                          key=lambda a: -(a.get("opened_at") or 0))[:20]
+    return {"facturacion_total": total, "facturacion_semana": week_total,
+            "orders_free": free, "orders_premium": prem,
+            "hora_pico_ingresos": hour_rev, "hora_pico_pedidos": hour_ord,
+            "canciones_top": top_songs, "cuentas_recientes": recent_accts}
 
 # =================== Utilidades ===================
 def _parse_len(t):
@@ -279,17 +325,36 @@ def promote_next():
         nxt["played_at"] = now
         STATE["now_playing"] = nxt
     else:
-        # Nunca silencio: siguiente sugerida en orden, saltando las que sonaron hace poco
-        pool = STATE["curated"] if STATE["curated"] else CATALOG
+        # Nunca silencio: fallback de la lista del local (shuffle o secuencial)
+        base_pool = STATE["curated"] if STATE["curated"] else CATALOG
+        shuffle = STATE["settings"].get("fallback_shuffle", True)
+        if shuffle:
+            # Usa una copia barajada; cuando se agota, baraja de nuevo
+            if not STATE.get("curated_shuffle"):
+                import random
+                STATE["curated_shuffle"] = list(base_pool)
+                random.shuffle(STATE["curated_shuffle"])
+            pool = STATE["curated_shuffle"]
+        else:
+            pool = base_pool
         s = None
         if pool:
             recent = {h["yt"] for h in STATE["history"][:STATE["settings"].get("repeat_block_songs", 3)]}
-            for _ in range(len(pool)):
-                cand = pool[FB_IDX[0] % len(pool)]; FB_IDX[0] += 1
+            tries = 0
+            while tries < len(pool):
+                if shuffle:
+                    cand = pool[0]; pool.pop(0)
+                    if not pool:   # se agotó la lista, mezcla de nuevo para la próxima vuelta
+                        import random
+                        STATE["curated_shuffle"] = list(base_pool)
+                        random.shuffle(STATE["curated_shuffle"])
+                else:
+                    cand = pool[FB_IDX[0] % len(pool)]; FB_IDX[0] += 1
                 if cand["yt"] not in recent:
                     s = cand; break
+                tries += 1
             if s is None:
-                s = pool[FB_IDX[0] % len(pool)]; FB_IDX[0] += 1
+                s = base_pool[0] if base_pool else None
         STATE["now_playing"] = ({
             "id": nid(), "title": s["title"], "artist": s.get("artist", ""), "yt": s["yt"],
             "table": "Lista del local", "priority": False, "status": "playing",
@@ -376,12 +441,16 @@ def public_state(token=None, admin=False):
                                        "genre", "credit_packages", "time_pass",
                                        "repeat_block_min", "repeat_block_songs", "trim_end_secs",
                                        "free_per_window", "free_window_min", "jump_multiplier",
-                                       "venue_logo")},
+                                       "venue_logo", "max_priority_queue_min", "fallback_shuffle")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "tables": [t["name"] for t in STATE["tables"]],
         "now_playing": np_pub,
         "jump_available": bool(np) and STATE.get("jump_used_for") != np["id"],
         "jump_price": s["price_priority"] * s.get("jump_multiplier", 3),
+        "priority_queue_min": int(sum(i.get("duration", DEFAULT_DUR)
+                                      for i in queue_view() if i.get("priority")) // 60),
+        "tv_active": (time.time() - STATE.get("tv_lastseen", 0)) < 15,
+        "assists": [a for a in STATE.get("assists", []) if not a.get("resolved")],
         "queue": qout,
         "queue_count": len(q),
         "queue_total_secs": int(acc),
@@ -539,6 +608,30 @@ class H(BaseHTTPRequestHandler):
             with LOCK:
                 self.set_venue(av)
                 return self._send(200, STATE["tables"])
+        if path == "/api/admin/analytics":
+            av = self.authed_venue()
+            if not av or av not in VENUES:
+                return self._send(401, {"error": "no auth"})
+            with LOCK:
+                return self._send(200, venue_analytics(av))
+        if path == "/manifest.json":
+            v = self._q("v") or DEFAULT_VID
+            name = VENUES.get(v, VENUES[DEFAULT_VID])["settings"]["venue_name"]
+            m = {"name": f"TYM Music — {name}", "short_name": "TYM Music",
+                 "description": "Pon tu música en el local",
+                 "start_url": f"/?v={v}", "display": "standalone",
+                 "background_color": "#0e1320", "theme_color": "#0e1320",
+                 "icons": [{"src": "/icon.svg", "type": "image/svg+xml",
+                            "sizes": "any", "purpose": "any maskable"}]}
+            return self._send(200, m, "application/manifest+json; charset=utf-8")
+        if path == "/icon.svg":
+            svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
+                   '<rect width="100" height="100" rx="20" fill="#0e1320"/>'
+                   '<text x="50" y="63" font-family="Arial Black,Arial" font-weight="900" '
+                   'font-size="34" fill="#f5b301" text-anchor="middle">TYM</text></svg>')
+            return self._send(200, svg.encode(), "image/svg+xml")
+        if path == "/sw.js":
+            return self._file("sw.js", "application/javascript; charset=utf-8")
         return self._send(404, {"error": "not found"})
 
     def _body(self):
@@ -591,8 +684,15 @@ class H(BaseHTTPRequestHandler):
                 STATE["sessions"][token] = {"table": table, "credits": 0, "pass_until": 0, "created": time.time()}
                 TOKENS[token] = CUR_VID
                 open_account(token, CUR_VID, table)   # nueva cuenta de mesa (analítica)
-                return self._send(200, {"ok": True, "token": token, "session": {
-                    "table": table, "credits": 0, "pass_until": 0}})
+                # Cuenta existente de la mesa (cobros pendientes de sesiones anteriores no cerradas)
+                existing_tab = sum(l["amount"] for l in STATE["ledger"] if l["table"] == table)
+                if existing_tab > 0:
+                    TYM["events"].append({"venue": CUR_VID, "table": table, "account": token,
+                                          "ts": time.time(), "ev": "session_with_existing_tab",
+                                          "existing_tab": existing_tab})
+                return self._send(200, {"ok": True, "token": token,
+                                        "existing_tab": existing_tab,
+                                        "session": {"table": table, "credits": 0, "pass_until": 0}})
 
             # ---- Comprar paquete / pase ----
             if path == "/api/buy":
@@ -660,6 +760,14 @@ class H(BaseHTTPRequestHandler):
                     mode = "salto"; ckind = "salto al #1"
                     charge = STATE["settings"]["price_priority"] * STATE["settings"].get("jump_multiplier", 3)
                 elif priority:
+                    # Bloqueo de cola larga: si hay demasiados min de canciones premium, bloquear
+                    mqm = int(STATE["settings"].get("max_priority_queue_min", 0))
+                    if mqm > 0:
+                        pq_secs = sum(i.get("duration", DEFAULT_DUR) for i in queue_view() if i.get("priority"))
+                        if pq_secs // 60 >= mqm:
+                            return self._send(400, {"error": f"La cola tiene más de {mqm} min de prioridades. Intenta en un rato 🎶",
+                                                    "priority_queue_full": True,
+                                                    "priority_queue_min": int(pq_secs // 60)})
                     if sess["pass_until"] > now:
                         mode = "pase"
                     elif sess["credits"] > 0:
@@ -769,6 +877,32 @@ class H(BaseHTTPRequestHandler):
                                            "venue": CUR_VID, "ts": time.time()})
                 return self._send(200, {"ok": True})
 
+            # ---- Solicitud de asistencia en mesa ----
+            if path == "/api/assist":
+                sess = get_session(d.get("token"))
+                if not sess:
+                    return self._send(400, {"error": "Sesión no válida"})
+                aid = nid()
+                STATE["assists"].append({"id": aid, "table": sess["table"],
+                                          "ts": time.time(), "resolved": False,
+                                          "resolve_ts": None, "token": d.get("token")})
+                TYM["events"].append({"venue": CUR_VID, "table": sess["table"],
+                                       "account": d.get("token"), "ts": time.time(),
+                                       "ev": "assist_requested"})
+                return self._send(200, {"ok": True, "id": aid})
+
+            if path == "/api/admin/assist_resolve":
+                aid = d.get("id")
+                for a in STATE.get("assists", []):
+                    if a["id"] == aid:
+                        a["resolved"] = True; a["resolve_ts"] = time.time(); break
+                return self._send(200, {"ok": True})
+
+            # ---- TV ping (marca TV como activa) ----
+            if path == "/api/tv_ping":
+                STATE["tv_lastseen"] = time.time()
+                return self._send(200, {"ok": True})
+
             # ---- Player reporta progreso ----
             if path == "/api/progress":
                 if STATE["now_playing"]:
@@ -820,10 +954,14 @@ class H(BaseHTTPRequestHandler):
                 if "auto_approve" in d:
                     s["auto_approve"] = bool(d["auto_approve"])
                 for k in ("repeat_block_min", "repeat_block_songs", "trim_end_secs",
-                          "free_per_window", "free_window_min", "jump_multiplier"):
+                          "free_per_window", "free_window_min", "jump_multiplier",
+                          "max_priority_queue_min"):
                     if k in d:
                         try: s[k] = max(0, int(d[k]))
                         except Exception: pass
+                for k in ("fallback_shuffle",):
+                    if k in d:
+                        s[k] = bool(d[k])
                 if "venue_logo" in d:                       # logo del BAR
                     s["venue_logo"] = str(d["venue_logo"])[:700000]
                 if "tym_logo" in d:                          # logo de TYM (global)
@@ -893,18 +1031,78 @@ class H(BaseHTTPRequestHandler):
                 FB_IDX[0] = 0
                 return self._send(200, {"ok": True})
 
+        # ---- TYM Master: gestión de locales ----
+        if path == "/api/tym/create_venue":
+            if self.authed_venue() != "*":
+                return self._send(403, {"error": "Solo TYM master"})
+            vid = re.sub(r"[^a-z0-9_-]", "", (d.get("vid") or "").strip().lower())[:24]
+            name = str(d.get("name") or "").strip()[:60]
+            username = re.sub(r"\s+", "", str(d.get("username") or "").strip())[:32]
+            password = str(d.get("password") or "").strip()[:64]
+            if not vid or not name or not username or not password:
+                return self._send(400, {"error": "Completa todos los campos"})
+            with LOCK:
+                if vid in VENUES:
+                    return self._send(400, {"error": f"El ID '{vid}' ya existe"})
+                if username in TYM["owners"]:
+                    return self._send(400, {"error": f"El usuario '{username}' ya existe"})
+                VENUES[vid] = make_venue(name)
+                TYM["owners"][username] = {"pass": password, "venue": vid}
+                save_state()
+            return self._send(200, {"ok": True, "vid": vid, "name": name})
+
         return self._send(404, {"error": "not found"})
 
 # =================== Persistencia (archivo JSON; fácil de migrar a DB/multi-bar) ===================
 DATA_FILE = os.path.join(HERE, "data.json")
 PERSIST_KEYS = ("settings", "tables", "sessions", "now_playing", "items", "ledger",
-                "history", "curated", "req_counts", "jump_used_for", "learned_end")
+                "history", "curated", "req_counts", "jump_used_for", "learned_end", "assists")
 
 def venue_snapshot(v):
     snap = {k: v[k] for k in PERSIST_KEYS}
     snap["reactions"] = {str(k): {e: list(s) for e, s in r.items()}
                          for k, r in v["reactions"].items()}
     return snap
+
+def _redis_strip_logos(data):
+    """Copia del estado sin logos base64 (pueden ser muy pesados para Redis free)."""
+    import copy
+    d = copy.deepcopy(data)
+    d.get("tym", {}).pop("tym_logo", None)
+    for v in d.get("venues", {}).values():
+        v.get("settings", {}).pop("venue_logo", None)
+    return d
+
+def redis_save(data):
+    """Guarda en Upstash Redis vía REST API (sin dependencias extra)."""
+    if not REDIS_URL or not REDIS_TOKEN:
+        return
+    try:
+        payload = json.dumps(["SET", REDIS_KEY, json.dumps(data, ensure_ascii=False)]).encode("utf-8")
+        req = urllib.request.Request(REDIS_URL,
+            data=payload,
+            headers={"Authorization": f"Bearer {REDIS_TOKEN}",
+                     "Content-Type": "application/json"})
+        urllib.request.urlopen(req, timeout=10)
+    except Exception as e:
+        print("redis_save error:", e)
+
+def redis_load():
+    """Recupera estado desde Upstash Redis."""
+    if not REDIS_URL or not REDIS_TOKEN:
+        return None
+    try:
+        req = urllib.request.Request(f"{REDIS_URL}/get/{REDIS_KEY}",
+            headers={"Authorization": f"Bearer {REDIS_TOKEN}"})
+        result = json.loads(urllib.request.urlopen(req, timeout=10).read())
+        val = result.get("result")
+        if val:
+            return json.loads(val)
+    except Exception as e:
+        print("redis_load error:", e)
+    return None
+
+_redis_last_save = [0]
 
 def save_state():
     """{version:3, tym:{...global...}, venues:{id:{...bar...}}} — multi-bar; listo para DB."""
@@ -915,6 +1113,11 @@ def save_state():
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         os.replace(tmp, DATA_FILE)
+        # Backup a Redis: máx una vez por minuto, en hilo separado para no bloquear
+        now = time.time()
+        if REDIS_URL and REDIS_TOKEN and now - _redis_last_save[0] > 60:
+            _redis_last_save[0] = now
+            threading.Thread(target=redis_save, args=(_redis_strip_logos(data),), daemon=True).start()
     except Exception as e:
         print("save_state error:", e)
 
@@ -930,11 +1133,24 @@ def _load_into(v, snap):
                       for k, r in snap.get("reactions", {}).items()}
 
 def load_state():
-    if not os.path.exists(DATA_FILE):
+    d = None
+    if os.path.exists(DATA_FILE):
+        try:
+            with open(DATA_FILE, encoding="utf-8") as f:
+                d = json.load(f)
+            print("Estado cargado de archivo local")
+        except Exception as e:
+            print("load_state (archivo) error:", e)
+    if d is None:
+        print("No hay data.json local — buscando backup en Redis…")
+        d = redis_load()
+        if d:
+            print("Estado recuperado de Redis ✓")
+        else:
+            print("Sin backup en Redis. Empezando desde cero.")
+    if not d:
         return
     try:
-        with open(DATA_FILE, encoding="utf-8") as f:
-            d = json.load(f)
         if "tym" in d:
             for k in ("socials", "tym_logo", "subscribers", "owners", "events", "accounts"):
                 if k in d["tym"]:
@@ -955,7 +1171,7 @@ def load_state():
         for vid, v in VENUES.items():
             for tok in v["sessions"]:
                 TOKENS[tok] = vid
-        print("Estado cargado de", DATA_FILE, "| bares:", list(VENUES.keys()))
+        print("Bares activos:", list(VENUES.keys()))
     except Exception as e:
         print("load_state error:", e)
 

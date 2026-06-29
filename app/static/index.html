@@ -4,6 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <meta name="theme-color" content="#0e1320">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TYM Music">
+<link rel="apple-touch-icon" href="/icon.svg">
+<script>
+const _v=new URLSearchParams(location.search).get('v')||'';
+const _mrel=document.createElement('link');_mrel.rel='manifest';
+_mrel.href='/manifest.json'+(_v?'?v='+encodeURIComponent(_v):'');document.head.appendChild(_mrel);
+if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
+</script>
 <title>TYM Music</title>
 <link rel="stylesheet" href="/style.css">
 <style>
@@ -107,6 +118,10 @@ body{padding-bottom:80px}
       <h2>Vienen en cola 🎶 (<span id="qcount">0</span>)</h2>
       <div class="list" id="queueList"><div class="empty">Nada en cola — suena la lista del local.</div></div>
     </div>
+    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
+      <div><b>¿Necesitas algo?</b><div class="small">El mesero vendrá a tu mesa</div></div>
+      <button class="btn sm" style="background:#dc2626;color:#fff;border-color:#dc2626;white-space:nowrap" onclick="callAssist()">🔔 Llamar</button>
+    </div>
   </section>
 
   <!-- ===== SOCIAL ===== -->
@@ -188,7 +203,7 @@ body{padding-bottom:80px}
     <h3 id="cfTitle">Confirmar</h3>
     <div class="muted" id="cfMsg" style="margin-top:6px;font-size:15px"></div>
     <div style="display:flex;gap:10px;margin-top:18px">
-      <button class="btn ghost" style="flex:1" onclick="cfNo()">Cancelar</button>
+      <button class="btn ghost" style="flex:1" id="cfNoBtn" onclick="cfNo()">Cancelar</button>
       <button class="btn gold" style="flex:2" id="cfYes">Confirmar</button>
     </div>
   </div>
@@ -197,7 +212,7 @@ body{padding-bottom:80px}
 <div id="fx"></div>
 
 <script>
-let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0;
+let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0;
 const VENUE=new URLSearchParams(location.search).get('v')||'';   // bar (multi-tenant) desde el QR
 let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], pass_obj={minutes:30,price:5000};
 let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='';
@@ -225,8 +240,15 @@ async function enterPin(){
   if(pin.length<4){$('pinErr').textContent='Ingresa los 4 dígitos';return;}
   const r=await fetch('/api/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin,v:VENUE})});
   const j=await r.json();
-  if(j.ok){token=j.token;localStorage.setItem('tym_token_'+VENUE,token);sess=j.session;$('gate').style.display='none';poll();}
-  else{$('pinErr').textContent=j.error||'Código incorrecto';}
+  if(j.ok){
+    token=j.token;localStorage.setItem('tym_token_'+VENUE,token);sess=j.session;
+    if((j.existing_tab||0)>0){
+      confirmModal('⚠ Cuenta pendiente en esta mesa',
+        'Esta mesa tiene una cuenta activa de <b>'+cop(j.existing_tab)+'</b> de un cliente anterior.<br><br>Si eres el mismo cliente, continúa. Si no, pide al personal que cierre la cuenta antes.',
+        ()=>{$('gate').style.display='none';poll();},
+        {noLabel:'Llamar al mesero',noCb:()=>{doAssist();$('gate').style.display='none';poll();},yesLabel:'Soy yo, continuar'});
+    }else{$('gate').style.display='none';poll();}
+  }else{$('pinErr').textContent=j.error||'Código incorrecto';}
 }
 
 // ---------- Recomendadas ----------
@@ -285,9 +307,10 @@ function fromLink(){const l=$('link').value.trim();if(!l){toast('Pega un link pr
   updatePriOption();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');$('sheet').classList.add('open');}
 function updatePriOption(){
   const now=Date.now()/1000;
-  if(sess&&sess.pass_until>now){$('priSub').textContent='Incluida en tu pase activo';$('priPrice').textContent='Pase';}
-  else if(sess&&sess.credits>0){$('priSub').textContent='Usa 1 crédito (te quedan '+(sess.credits-1)+')';$('priPrice').textContent='1 créd.';}
-  else{$('priSub').textContent='Suena antes — se suma a tu cuenta';$('priPrice').textContent=cop(price);}
+  const wait=price_queue_min>5?' · ~'+price_queue_min+' min de espera':'';
+  if(sess&&sess.pass_until>now){$('priSub').textContent='Incluida en tu pase activo'+wait;$('priPrice').textContent='Pase';}
+  else if(sess&&sess.credits>0){$('priSub').textContent='Usa 1 crédito (te quedan '+(sess.credits-1)+')'+wait;$('priPrice').textContent='1 créd.';}
+  else{$('priSub').textContent='Suena antes'+wait+' — se suma a tu cuenta';$('priPrice').textContent=cop(price);}
   $('optSuper').style.display = jumpAvail ? '' : 'none';
   $('superPrice').textContent=cop(jumpPrice);
 }
@@ -308,6 +331,7 @@ function confirmReq(){
     if(sess&&sess.pass_until>now) msg='Tu <b>pase activo</b> cubre esta prioridad (sin cargo extra).';
     else if(sess&&sess.credits>0) msg='Usarás <b>1 crédito</b> de prioridad (te quedan '+(sess.credits-1)+').';
     else msg='Se cobrará <b>'+cop(price)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+'.';
+    if(price_queue_min>5) msg+='<br><span style="color:#9aa7c2;font-size:13px">⏱ Cola de prioridades: ~'+price_queue_min+' min de espera antes de la tuya</span>';
     confirmModal('Pedir con prioridad ⚡',msg,doReq);
   } else doReq();
 }
@@ -321,10 +345,26 @@ async function doReq(){
     $('link').value='';$('q').value='';$('recoChips').style.display='flex';renderReco();refreshBal();}
   else toast(j.error||'Error');
 }
-let cfCb=null;
-function confirmModal(title,msg,cb){$('cfTitle').textContent=title;$('cfMsg').innerHTML=msg;$('confirmBg').classList.add('open');$('cfYes').onclick=()=>{cfNo();cb&&cb();};}
-function cfNo(){$('confirmBg').classList.remove('open');}
+let cfCb=null,cfNoCb=null;
+function confirmModal(title,msg,cb,opts){
+  cfCb=cb;cfNoCb=(opts&&opts.noCb)||null;
+  $('cfTitle').textContent=title;$('cfMsg').innerHTML=msg;
+  $('cfNoBtn').textContent=(opts&&opts.noLabel)||'Cancelar';
+  $('cfYes').textContent=(opts&&opts.yesLabel)||'Confirmar';
+  $('confirmBg').classList.add('open');
+  $('cfYes').onclick=()=>{cfNo();cfCb&&cfCb();};
+}
+function cfNo(){$('confirmBg').classList.remove('open');if(cfNoCb){cfNoCb();cfNoCb=null;}}
 function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
+async function doAssist(){
+  if(!token)return;
+  const j=await (await fetch('/api/assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})})).json();
+  if(j.ok)toast('🔔 Mesero llamado. Vendrá en un momento.');else toast(j.error||'Error');
+}
+function callAssist(){
+  if(!token){toast('Ingresa el código de tu mesa primero');return;}
+  confirmModal('Llamar al mesero 🔔','El personal de '+((sess&&sess.table)||'tu mesa')+' será avisado que necesitas atención.',doAssist);
+}
 
 // ---------- Paquetes ----------
 function renderPackages(){
@@ -447,7 +487,7 @@ async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
     price=s.settings.price_priority;packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
-    jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;renderSocials(s.settings.socials);
+    jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;price_queue_min=s.priority_queue_min||0;renderSocials(s.settings.socials);
     document.title='TYM · '+s.settings.venue_name;
     sess=s.session;
     if(!sess){$('gate').style.display='flex';$('tableTag').textContent=s.settings.style;}
@@ -492,6 +532,14 @@ async function poll(){
   }catch(e){}
 }
 boot();
+// Refresca la sesión cada 5 min: si el servidor la perdió (reinicio), vuelve a pedir PIN
+setInterval(async()=>{
+  if(!token)return;
+  try{const s=await (await fetch('/api/state?token='+token)).json();
+    if(!s.session&&sess){sess=null;token='';localStorage.removeItem('tym_token_'+VENUE);
+      toast('Tu sesión expiró. Ingresa tu código nuevamente.');$('gate').style.display='flex';}
+  }catch(e){}
+},5*60*1000);
 </script>
 </body>
 </html>
