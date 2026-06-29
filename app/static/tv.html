@@ -73,6 +73,14 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #start .sub{font-size:20px;color:#9aa7c2;margin-top:10px}
 .warn{position:fixed;top:0;left:0;right:0;background:#b45309;color:#fff;padding:12px;text-align:center;
   font-weight:700;font-size:16px;z-index:40}
+/* Asistencias: viñetas apiladas bottom-right */
+#assistZone{position:fixed;bottom:84px;right:22px;z-index:33;display:flex;flex-direction:column;gap:7px;align-items:flex-end}
+.apill{background:rgba(180,24,24,.88);backdrop-filter:blur(8px);border:1px solid rgba(255,100,100,.3);
+  color:#fff;padding:8px 18px;border-radius:999px;font-size:15px;font-weight:700;letter-spacing:.2px;
+  opacity:.28;transition:opacity 7s ease}
+.apill.fresh{opacity:1;transition:none;animation:pillIn .48s cubic-bezier(.34,1.56,.64,1)}
+@keyframes pillIn{from{transform:translateY(22px) scale(.8);opacity:0}to{transform:translateY(0) scale(1);opacity:1}}
+.apill.extra{font-size:13px;background:rgba(100,40,0,.85)}
 </style>
 </head>
 <body>
@@ -132,9 +140,8 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 <!-- Aviso silencioso cuando esta pestaña queda como secundaria -->
 <div id="duplWarn" style="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#b45309;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;z-index:34;display:none">📺 Pestaña secundaria — solo visualización, no controla audio</div>
 
-<!-- Notificación de asistencia (rojo, persistente) -->
-<div id="assistBar" style="position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:14px 24px;z-index:36;display:none;font-size:17px;font-weight:800;text-align:center;letter-spacing:.4px;animation:pulse 2s ease-in-out infinite"></div>
-<style>@keyframes pulse{0%,100%{opacity:1}50%{opacity:.85}}</style>
+<!-- Asistencias: viñetas apiladas bottom-right -->
+<div id="assistZone"></div>
 
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
@@ -155,6 +162,38 @@ $('qrImg').src='/api/qr'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
 let player,ready=false,curYt=null,curId=null,wantAudio=false,topLoved=[],lastReactTotal=0,lastReacts={},lastReactId=null,authok=false;
 let isPrimary=true;   // false → esta pestaña es secundaria: nunca llama advance
 let advancingId=undefined; // id de la canción para la que ya enviamos advance (evita doble llamada)
+// --- Asistencias ---
+const _assistShown=new Map(); // id → pill element
+function renderAssists(assists){
+  const zone=$('assistZone');
+  const ids=new Set((assists||[]).map(a=>a.id));
+  // Quitar viñetas resueltas
+  for(const [id,el] of _assistShown){
+    if(!ids.has(id)){el.remove();_assistShown.delete(id);}
+  }
+  if(!ids.size) return;
+  const MAX=3;
+  const visible=(assists||[]).slice(0,MAX);
+  const extra=(assists||[]).length-MAX;
+  // Agregar viñetas nuevas (newest at bottom → append)
+  visible.forEach(a=>{
+    if(_assistShown.has(a.id)) return;
+    const pill=document.createElement('div');
+    pill.className='apill fresh';
+    pill.dataset.id=a.id;
+    pill.textContent='🔔 '+a.table;
+    zone.appendChild(pill);
+    _assistShown.set(a.id,pill);
+    // Tras 2.5s: quitar 'fresh' → CSS transition fade a opacity .28
+    setTimeout(()=>{pill.classList.remove('fresh');},2500);
+  });
+  // Indicador de overflow
+  let ov=zone.querySelector('.apill.extra');
+  if(extra>0){
+    if(!ov){ov=document.createElement('div');ov.className='apill extra';zone.prepend(ov);}
+    ov.textContent='+'+extra+' más pendientes 🔔';
+  } else if(ov) ov.remove();
+}
 async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:document.getElementById('lgUser').value.trim(),pass:document.getElementById('lgPass').value})});if(r.ok)location.reload();else document.getElementById('lgErr').textContent='Usuario o contraseña incorrectos';}
 (async()=>{const me=await fetch('/api/me');if(!me.ok){document.getElementById('loginGate').style.display='flex';return;}authok=true;if(ready)tick();})();
 const EMO=['❤️','🔥','👍'];
@@ -320,10 +359,7 @@ setInterval(async()=>{
     topLoved=s.top_loved||[];
     $('lovedItems').innerHTML=topLoved.slice(0,3).map((it,i)=>`<div class="it">${i+1}. ${it.title}<span class="love">❤️ ${it.total}</span></div>`).join('');
     paintNext(s.queue,s.queue_count);
-    // Asistencias: notificación roja persistente
-    const assists=s.assists||[];const abar=$('assistBar');
-    if(assists.length){abar.style.display='';abar.textContent='🔔 '+assists.map(a=>a.table+' pide asistencia').join('  ·  ');}
-    else abar.style.display='none';
+    renderAssists(s.assists||[]);
     // TV ping (indica al server que esta pantalla está activa)
     fetch('/api/tv_ping',{method:'POST'}).catch(()=>{});
   }catch(e){}
