@@ -70,6 +70,13 @@
       <div class="pkgrow"><span class="small" style="flex:1">Bloquear nuevas prioridades si la cola supera (minutos, 0=sin límite)</span><input class="field" id="maxPrioMin" type="number"></div>
       <label class="opt" style="margin-top:10px"><div><b>Reproducir lista del local en orden aleatorio</b><div class="small">Si está apagado, sigue el orden en que añadiste las canciones</div></div><input type="checkbox" id="fbShuffle" style="width:22px;height:22px"></label>
 
+      <h2 style="margin-top:16px">Tema de color</h2>
+      <div style="display:flex;gap:8px;margin:8px 0" id="themeRow">
+        <div onclick="pickTheme('azul')" data-t="azul" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #3b82f6;background:#0e1320;color:#3b82f6">Azul</div>
+        <div onclick="pickTheme('purpura')" data-t="purpura" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #a855f7;background:#0e0b1e;color:#a855f7">Púrpura</div>
+        <div onclick="pickTheme('verde')" data-t="verde" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #10b981;background:#081411;color:#10b981">Verde</div>
+      </div>
+
       <h2 style="margin-top:16px">Marca y redes (salen en el TV / cliente)</h2>
       <label class="small">Logo TYM (imagen)</label><input type="file" id="tymLogoFile" accept="image/*" class="field">
       <label class="small">Logo del bar (imagen)</label><input type="file" id="venueLogoFile" accept="image/*" class="field">
@@ -147,7 +154,14 @@
 const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
-let editing=false, formLoaded=false, curTimer=null, packages=[], pass_obj={minutes:30,price:5000};
+let editing=false, formLoaded=false, curTimer=null, packages=[], pass_obj={minutes:30,price:5000}, curTheme='azul';
+function pickTheme(t){
+  curTheme=t;
+  document.querySelectorAll('#themeRow [data-t]').forEach(el=>{
+    el.style.outline=el.dataset.t===t?'3px solid rgba(255,255,255,.6)':'none';
+    el.style.outlineOffset='2px';
+  });
+}
 let tymLogoData=null, venueLogoData=null, curSettings={};
 function readImg(f,cb){if(!f)return;const r=new FileReader();r.onload=()=>cb(r.result);r.readAsDataURL(f);}
 function renderLogoPrev(){const p=$('logoPrev');if(!p)return;p.innerHTML='';
@@ -181,6 +195,7 @@ async function save(){
     jump_multiplier:parseInt($('jumpMult').value||0),
     max_priority_queue_min:parseInt($('maxPrioMin').value||0),
     fallback_shuffle:$('fbShuffle').checked,
+    theme:curTheme,
     socials:{instagram:$('soIg').value,tiktok:$('soTt').value,web:$('soWeb').value},
     credit_packages:readPackages(),
     time_pass:{minutes:parseInt($('passMin').value||30),price:parseInt($('passPrice').value||0)}};
@@ -244,6 +259,7 @@ async function tick(){
       $('jumpMult').value=s.settings.jump_multiplier;
       $('maxPrioMin').value=s.settings.max_priority_queue_min||0;
       $('fbShuffle').checked=s.settings.fallback_shuffle!==false;
+      pickTheme(s.settings.theme||'azul');
       const so=s.settings.socials||{};$('soIg').value=so.instagram||'';$('soTt').value=so.tiktok||'';$('soWeb').value=so.web||'';
       $('passMin').value=pass_obj.minutes;$('passPrice').value=pass_obj.price;
       renderPkgInputs();

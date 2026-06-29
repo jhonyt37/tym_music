@@ -99,7 +99,7 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   </div>
 </div>
 <div class="panel" id="qr">
-  <img src="/qr.png" alt="QR">
+  <img id="qrImg" src="" alt="QR">
   <div class="t">📲 Pon tu música</div>
   <div class="s" id="venue">…</div>
 </div>
@@ -136,6 +136,19 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
 const $=id=>document.getElementById(id);
+const TV_VENUE=new URLSearchParams(location.search).get('v')||'';
+const THEMES={
+  azul:   {pri:'#3b82f6',bg:'#000'},
+  purpura:{pri:'#a855f7',bg:'#050208'},
+  verde:  {pri:'#10b981',bg:'#020d07'},
+};
+function applyTheme(t){
+  const th=THEMES[t]||THEMES.azul,r=document.documentElement.style;
+  r.setProperty('--pri',th.pri);
+  document.body.style.background=th.bg;
+}
+// Apuntar QR al venue correcto
+$('qrImg').src='/api/qr'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
 let player,ready=false,curYt=null,curId=null,wantAudio=false,topLoved=[],lastReactTotal=0,lastReacts={},lastReactId=null,authok=false;
 async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:document.getElementById('lgUser').value.trim(),pass:document.getElementById('lgPass').value})});if(r.ok)location.reload();else document.getElementById('lgErr').textContent='Usuario o contraseña incorrectos';}
 (async()=>{const me=await fetch('/api/me');if(!me.ok){document.getElementById('loginGate').style.display='flex';return;}authok=true;if(ready)tick();})();
@@ -187,6 +200,7 @@ function load(np){
   curId=np.id;
 }
 function applyBrand(set){
+  applyTheme(set.theme);
   $('venue').textContent=set.venue_name;$('venueTop').textContent=set.venue_name;
   const tl=set.tym_logo,vl=set.venue_logo;
   if(tl){$('tymLogo').src=tl;$('tymLogo').style.display='';$('tymText').style.display='none';}

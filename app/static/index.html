@@ -70,6 +70,7 @@ body{padding-bottom:80px}
 <div class="gate" id="gate">
   <div class="box">
     <div class="logo" style="font-size:26px">TY<b>M</b> Music</div>
+    <div id="gateName" style="font-size:18px;font-weight:700;color:var(--pri);margin:4px 0 2px;min-height:24px"></div>
     <h2>¿En qué mesa estás?</h2>
     <div class="muted">Ingresa el código que está en tu mesa</div>
     <input class="pin" id="pinInput" inputmode="numeric" maxlength="4" placeholder="••••">
@@ -212,6 +213,18 @@ body{padding-bottom:80px}
 <div id="fx"></div>
 
 <script>
+const THEMES={
+  azul:   {pri:'#3b82f6',pri2:'#2563eb',bg:'#0e1320',bg2:'#161d2e',card:'#1b2435',line:'#2a3550'},
+  purpura:{pri:'#a855f7',pri2:'#9333ea',bg:'#0e0b1e',bg2:'#16112e',card:'#1d163c',line:'#2e2252'},
+  verde:  {pri:'#10b981',pri2:'#059669',bg:'#081411',bg2:'#0e1e19',card:'#132820',line:'#1a3d2c'},
+};
+function applyTheme(t){
+  const th=THEMES[t]||THEMES.azul,r=document.documentElement.style;
+  r.setProperty('--pri',th.pri);r.setProperty('--pri2',th.pri2);
+  r.setProperty('--bg',th.bg);r.setProperty('--bg2',th.bg2);
+  r.setProperty('--card',th.card);r.setProperty('--line',th.line);
+  document.querySelector('meta[name="theme-color"]').content=th.bg;
+}
 let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0;
 const VENUE=new URLSearchParams(location.search).get('v')||'';   // bar (multi-tenant) desde el QR
 let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], pass_obj={minutes:30,price:5000};
@@ -220,6 +233,16 @@ const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const mm=s=>{s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
+
+// Carga nombre del bar y tema antes de que el usuario haga login (para que la gate sea clara)
+(async()=>{
+  try{
+    const url='/api/state'+(VENUE?'?v='+encodeURIComponent(VENUE):'');
+    const d=await(await fetch(url)).json();
+    $('gateName').textContent=d.settings.venue_name||'';
+    applyTheme(d.settings.theme);
+  }catch(e){}
+})();
 
 async function boot(){
   CAT=await (await fetch('/api/catalog')).json();
@@ -489,6 +512,7 @@ async function poll(){
     price=s.settings.price_priority;packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
     jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;price_queue_min=s.priority_queue_min||0;renderSocials(s.settings.socials);
     document.title='TYM · '+s.settings.venue_name;
+    applyTheme(s.settings.theme);
     sess=s.session;
     if(!sess){$('gate').style.display='flex';$('tableTag').textContent=s.settings.style;}
     else{$('gate').style.display='none';$('tableTag').textContent='📍 '+sess.table;}

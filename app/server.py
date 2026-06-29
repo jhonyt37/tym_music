@@ -73,6 +73,7 @@ def make_venue(name):
             "venue_logo": "",          # logo del BAR
             "max_priority_queue_min": 0,   # bloquear nuevas prioridades si cola premium > N min (0=off)
             "fallback_shuffle": True,       # lista del local en orden aleatorio
+            "theme": "azul",               # tema de color: azul | purpura | verde
         },
         "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4} for i in range(1, 6)],  # PINs 1111..5555
         "sessions": {},
@@ -571,6 +572,23 @@ class H(BaseHTTPRequestHandler):
             return self._file("style.css", "text/css; charset=utf-8")
         if path == "/qr.png":
             return self._file("qr.png", "image/png")
+        if path == "/api/qr":
+            vid = self._q("v", DEFAULT_VID)
+            base = PUBLIC_URL.rstrip("/") if PUBLIC_URL else f"http://{lan_ip()}:{PORT}"
+            url = f"{base}/?v={vid}"
+            try:
+                import qrcode, io
+                buf = io.BytesIO()
+                qrcode.make(url).save(buf, "PNG")
+                data = buf.getvalue()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Cache-Control", "max-age=3600")
+                self.end_headers()
+                self.wfile.write(data)
+            except Exception as e:
+                self._send(500, {"error": str(e)})
+            return
         if path == "/api/catalog":
             return self._send(200, CATALOG)
         if path == "/api/search":
@@ -962,6 +980,8 @@ class H(BaseHTTPRequestHandler):
                 for k in ("fallback_shuffle",):
                     if k in d:
                         s[k] = bool(d[k])
+                if "theme" in d and d["theme"] in ("azul", "purpura", "verde"):
+                    s["theme"] = d["theme"]
                 if "venue_logo" in d:                       # logo del BAR
                     s["venue_logo"] = str(d["venue_logo"])[:700000]
                 if "tym_logo" in d:                          # logo de TYM (global)
