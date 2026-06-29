@@ -155,8 +155,20 @@ const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 let editing=false, formLoaded=false, curTimer=null, packages=[], pass_obj={minutes:30,price:5000}, curTheme='azul';
+const THEMES={
+  azul:   {pri:'#3b82f6',pri2:'#2563eb',bg:'#0e1320',bg2:'#161d2e',card:'#1b2435',line:'#2a3550'},
+  purpura:{pri:'#a855f7',pri2:'#9333ea',bg:'#0e0b1e',bg2:'#16112e',card:'#1d163c',line:'#2e2252'},
+  verde:  {pri:'#10b981',pri2:'#059669',bg:'#081411',bg2:'#0e1e19',card:'#132820',line:'#1a3d2c'},
+};
+function applyTheme(t){
+  const th=THEMES[t]||THEMES.azul,r=document.documentElement.style;
+  r.setProperty('--pri',th.pri);r.setProperty('--pri2',th.pri2);
+  r.setProperty('--bg',th.bg);r.setProperty('--bg2',th.bg2);
+  r.setProperty('--card',th.card);r.setProperty('--line',th.line);
+}
 function pickTheme(t){
   curTheme=t;
+  applyTheme(t);
   document.querySelectorAll('#themeRow [data-t]').forEach(el=>{
     el.style.outline=el.dataset.t===t?'3px solid rgba(255,255,255,.6)':'none';
     el.style.outlineOffset='2px';
