@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="theme-color" content="#0e1320">
+<title>TYM Music — Sin conexión</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;background:#0e1320;color:#eef2fb;
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+  display:flex;align-items:center;justify-content:center;text-align:center;padding:24px}
+.box{max-width:340px;width:100%}
+.icon{font-size:72px;margin-bottom:20px;opacity:.7}
+h1{font-size:26px;font-weight:800;margin-bottom:10px}
+h1 b{color:#3b82f6}
+p{color:#9aa7c2;font-size:15px;line-height:1.6;margin-bottom:28px}
+button{display:block;width:100%;padding:14px;border:none;border-radius:14px;
+  background:#3b82f6;color:#fff;font-size:16px;font-weight:700;cursor:pointer;
+  touch-action:manipulation}
+button:active{opacity:.85}
+.small{margin-top:16px;font-size:13px;color:#2a3550}
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="icon">📡</div>
+  <h1>TY<b>M</b> Music</h1>
+  <p>Sin conexión a internet.<br>Conéctate a la red del local y vuelve a intentarlo.</p>
+  <button onclick="location.reload()">Reintentar conexión</button>
+  <div class="small">TYM Music necesita internet para funcionar</div>
+</div>
+</body>
+</html>

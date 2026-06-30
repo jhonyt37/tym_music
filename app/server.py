@@ -6,7 +6,7 @@ Vistas: /  (cliente)  ·  /player (pantalla del local)  ·  /admin (dueno)
 Novedades: sesion de mesa por PIN, paquetes (creditos + pase), progreso de
 reproduccion, recomendadas (mas pedido / del local / populares / genero).
 """
-import json, os, re, socket, threading, time, random, datetime
+import json, os, re, socket, threading, time, random, datetime, struct, zlib
 import urllib.request, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
@@ -228,6 +228,34 @@ def yt_title(vid):
         return d.get("title", "Canción"), d.get("author_name", "")
     except Exception:
         return "Canción", "YouTube"
+
+# ---- PWA: generador de ícono PNG sin dependencias externas ----
+def _make_icon_png(size):
+    """Genera un PNG sólido color TYM (#0e1320) con franja dorada central."""
+    W = size
+    bg = (14, 19, 32)    # #0e1320
+    gold = (245, 179, 1) # #f5b301
+    # franja dorada: ocupa el 60% central del ícono
+    stripe_top = int(W * 0.20)
+    stripe_bot = int(W * 0.80)
+    stripe_l   = int(W * 0.15)
+    stripe_r   = int(W * 0.85)
+    rows = []
+    for y in range(W):
+        row = bytearray()
+        for x in range(W):
+            if stripe_top <= y < stripe_bot and stripe_l <= x < stripe_r:
+                row += bytes(gold)
+            else:
+                row += bytes(bg)
+        rows.append(bytes(row))
+    raw = b''.join(b'\x00' + r for r in rows)
+    def chunk(t, d):
+        return struct.pack('>I', len(d)) + t + d + struct.pack('>I', zlib.crc32(t + d) & 0xffffffff)
+    ihdr = chunk(b'IHDR', struct.pack('>IIBBBBB', W, W, 8, 2, 0, 0, 0))
+    idat = chunk(b'IDAT', zlib.compress(raw, 6))
+    iend = chunk(b'IEND', b'')
+    return b'\x89PNG\r\n\x1a\n' + ihdr + idat + iend
 
 # ---- Busqueda real en YouTube (sin API key) ----
 _search_cache = {}
@@ -676,8 +704,11 @@ class H(BaseHTTPRequestHandler):
                  "description": "Pon tu música en el local",
                  "start_url": f"/?v={v}", "display": "standalone",
                  "background_color": "#0e1320", "theme_color": "#0e1320",
-                 "icons": [{"src": "/icon.svg", "type": "image/svg+xml",
-                            "sizes": "any", "purpose": "any maskable"}]}
+                 "icons": [
+                     {"src": "/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any maskable"},
+                     {"src": "/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any maskable"},
+                     {"src": "/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable"},
+                 ]}
             return self._send(200, m, "application/manifest+json; charset=utf-8")
         if path == "/icon.svg":
             svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
@@ -685,6 +716,11 @@ class H(BaseHTTPRequestHandler):
                    '<text x="50" y="63" font-family="Arial Black,Arial" font-weight="900" '
                    'font-size="34" fill="#f5b301" text-anchor="middle">TYM</text></svg>')
             return self._send(200, svg.encode(), "image/svg+xml")
+        if path in ("/icon-192.png", "/icon-512.png"):
+            size = 192 if "192" in path else 512
+            return self._send(200, _make_icon_png(size), "image/png")
+        if path == "/offline.html":
+            return self._file("offline.html", "text/html; charset=utf-8")
         if path == "/sw.js":
             return self._file("sw.js", "application/javascript; charset=utf-8")
         return self._send(404, {"error": "not found"})
