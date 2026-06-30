@@ -171,8 +171,12 @@ keepAwake();
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') keepAwake(); });
 
 let player,ready=false,curYt=null,curId=null,wantAudio=false,topLoved=[],lastReactTotal=0,lastReacts={},lastReactId=null,authok=false;
-// Persistir wantAudio en sessionStorage para recuperar tras un redeploy/refresh
-try{if(sessionStorage.getItem('tym_tv_started')==='1'){wantAudio=true;$('start').style.display='none';}}catch(e){}
+// Si ya fue iniciado antes (refresh/redeploy), cambiar overlay a versión compacta
+try{if(sessionStorage.getItem('tym_tv_started')==='1'){
+  wantAudio=true;
+  $('start').querySelector('.big').textContent='🔊 Toca para activar audio';
+  $('start').querySelector('.sub').textContent='El video ya está cargando — toca para encender el sonido';
+}}catch(e){}
 let isPrimary=true;   // false → esta pestaña es secundaria: nunca llama advance
 let advancingId=undefined; // id de la canción para la que ya enviamos advance (evita doble llamada)
 // --- Asistencias ---
@@ -285,9 +289,10 @@ function load(np){
   $('title').textContent=np.title;$('artist').textContent=np.artist||'';
   $('who').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+(np.table||''));
   if(changed){
-    // Sólo fijar curYt cuando el player realmente carga el video.
-    // Si ready=false, dejamos curYt=null para que el próximo load() vea changed=true.
-    if(ready){curYt=np.yt;player.loadVideoById(np.yt);if(wantAudio){player.unMute();player.playVideo();}}
+    // Solo actualizar curYt cuando ready=true (el player existe y puede cargar).
+    // Si ready=false, curYt queda null para que el próximo load() vea changed=true.
+    // NUNCA llamar unMute()/setVolume() aquí — requiere gesto del usuario (#start.onclick).
+    if(ready){curYt=np.yt;player.loadVideoById(np.yt);}
     burstNow();
   }
   curId=np.id;
@@ -329,8 +334,14 @@ let mvT;document.addEventListener('mousemove',()=>{$('fsBtn').classList.add('sho
 $('start').onclick=()=>{
   wantAudio=true;
   try{sessionStorage.setItem('tym_tv_started','1');}catch(e){}
-  $('start').style.display='none';toggleFs();
-  if(player){player.unMute();player.setVolume(100);player.playVideo();}
+  $('start').style.display='none';
+  toggleFs();
+  if(player){
+    player.setVolume(100);
+    player.unMute();
+    player.playVideo();
+  }
+  if(!curYt&&authok)tick(); // si aún no hay video cargado, forzar carga inmediata
   burstNow();
 };
 
@@ -359,10 +370,10 @@ setInterval(async()=>{
     applyBrand(s.settings);
     // Watchdog: nunca silencio — si no hay nada o el video ya terminó, avanza solo
     if(!s.now_playing || (ready&&player&&player.getPlayerState&&player.getPlayerState()===YT.PlayerState.ENDED)){await advance();return;}
-    // Recuperar player pausado/detenido post-redeploy
-    if(wantAudio&&s.now_playing&&ready&&player&&player.getPlayerState){
+    // Recuperar player pausado/detenido/cued (ps -1=unstarted, 2=paused, 5=cued)
+    if(s.now_playing&&ready&&player&&player.getPlayerState){
       try{const ps=player.getPlayerState();
-        if(ps===2||ps===-1){player.unMute();player.playVideo();} // pausado o sin iniciar
+        if(ps===2||ps===-1||ps===5){player.playVideo();}
       }catch(e){}
     }
     // Trim APRENDIDO: salta en el punto donde el local suele saltar esta canción (silencios/outros)
