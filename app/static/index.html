@@ -57,10 +57,13 @@ body{padding-bottom:80px}
 @keyframes floatUp{0%{transform:translateY(0) scale(.5);opacity:0}15%{opacity:1;transform:translateY(-20px) scale(1.1)}100%{transform:translateY(-62vh) scale(1.25);opacity:0}}
 
 /* ---- Floating bell ---- */
-#floatBell{position:fixed;bottom:70px;right:14px;z-index:18;width:48px;height:48px;border-radius:50%;border:2px solid var(--line);background:var(--bg2);color:#fff;font-size:22px;cursor:pointer;display:none;box-shadow:0 3px 12px rgba(0,0,0,.45);align-items:center;justify-content:center;transition:background .2s,border-color .2s}
+#floatBell{position:fixed;bottom:70px;right:14px;z-index:18;width:60px;height:60px;border-radius:50%;
+  border:3px solid var(--pri);background:var(--pri);color:#fff;font-size:28px;cursor:grab;display:none;
+  box-shadow:0 4px 18px rgba(59,130,246,.55);align-items:center;justify-content:center;
+  transition:background .2s,border-color .2s;user-select:none;touch-action:none}
 #floatBell.show{display:flex}
 #floatBell.ringing{background:#dc2626;border-color:#dc2626;animation:assistRing 2s ease-in-out infinite}
-@keyframes assistRing{0%,100%{box-shadow:0 3px 12px rgba(220,38,38,.4)}50%{box-shadow:0 0 0 12px rgba(220,38,38,.08),0 3px 14px rgba(220,38,38,.7)}}
+@keyframes assistRing{0%,100%{box-shadow:0 4px 18px rgba(220,38,38,.5)}50%{box-shadow:0 0 0 14px rgba(220,38,38,.1),0 4px 18px rgba(220,38,38,.8)}}
 
 /* ---- Header info ---- */
 .bar-venue{font-size:11px;color:var(--mut);font-weight:700;line-height:1;margin-top:2px;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -200,7 +203,7 @@ body{padding-bottom:80px}
 </nav>
 
 <!-- Floating bell (asistencia) -->
-<button id="floatBell" onclick="toggleAssist()" title="Llamar mesero / cancelar">🔔</button>
+<button id="floatBell" title="Llamar asistencia / cancelar">🔔</button>
 
 <!-- Sheet pedir -->
 <div class="sheet-bg" id="sheet">
@@ -282,6 +285,7 @@ async function boot(){
   $('q').addEventListener('input',e=>onSearch(e.target.value));
   $('pinInput').addEventListener('keydown',e=>{if(e.key==='Enter')enterPin();});
   document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
+  initBellDrag();
   loadReco();
   poll(); setInterval(poll,2000);
 }
@@ -302,7 +306,7 @@ async function enterPin(){
       confirmModal('⚠ Cuenta pendiente en esta mesa',
         'Esta mesa tiene una cuenta activa de <b>'+cop(j.existing_tab)+'</b> de un cliente anterior.<br><br>Si eres el mismo cliente, continúa. Si no, pide al personal que cierre la cuenta antes.',
         ()=>{$('gate').style.display='none';poll();},
-        {noLabel:'Llamar al mesero',noCb:()=>{doAssist();$('gate').style.display='none';poll();},yesLabel:'Soy yo, continuar'});
+        {noLabel:'Llamar asistencia',noCb:()=>{doAssist();$('gate').style.display='none';poll();},yesLabel:'Soy yo, continuar'});
     }else{$('gate').style.display='none';poll();}
   }else{$('pinErr').textContent=j.error||'Código incorrecto';}
 }
@@ -444,11 +448,42 @@ function confirmModal(title,msg,cb,opts){
 function cfNo(){$('confirmBg').classList.remove('open');if(cfNoCb){cfNoCb();cfNoCb=null;}}
 function toast(t,type){const e=$('toast');e.textContent=t;e.className='toast'+(type?' '+type:'');e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
 
+// ---------- Campana flotante: drag + click ----------
+function initBellDrag(){
+  const el=$('floatBell');
+  let ox=0,oy=0,bx=0,by=0,moved=false;
+  try{const s=JSON.parse(localStorage.getItem('bell_pos')||'null');
+    if(s){el.style.right='auto';el.style.bottom='auto';el.style.left=s.x+'px';el.style.top=s.y+'px';}}
+  catch(e){}
+  function start(cx,cy){moved=false;ox=cx;oy=cy;const r=el.getBoundingClientRect();bx=r.left;by=r.top;}
+  function move(cx,cy){
+    const dx=cx-ox,dy=cy-oy;
+    if(!moved&&(Math.abs(dx)>6||Math.abs(dy)>6))moved=true;
+    if(!moved)return;
+    const nx=Math.max(0,Math.min(bx+cx-ox,window.innerWidth-el.offsetWidth));
+    const ny=Math.max(0,Math.min(by+cy-oy,window.innerHeight-el.offsetHeight));
+    el.style.right='auto';el.style.bottom='auto';el.style.left=nx+'px';el.style.top=ny+'px';
+  }
+  function end(){
+    if(moved){try{localStorage.setItem('bell_pos',JSON.stringify({x:parseInt(el.style.left),y:parseInt(el.style.top)}));}catch(e){}
+    }else{toggleAssist();}
+    moved=false;
+  }
+  el.addEventListener('touchstart',e=>{start(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});
+  el.addEventListener('touchmove',e=>{e.preventDefault();move(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
+  el.addEventListener('touchend',end);
+  el.addEventListener('mousedown',e=>{e.preventDefault();start(e.clientX,e.clientY);
+    const mm=m=>move(m.clientX,m.clientY);
+    document.addEventListener('mousemove',mm);
+    document.addEventListener('mouseup',()=>{document.removeEventListener('mousemove',mm);end();},{once:true});
+  });
+}
+
 // ---------- Asistencia (campana flotante) ----------
 async function doAssist(){
   if(!token)return;
   const j=await (await fetch('/api/assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})})).json();
-  if(j.ok){assistActive=true;assistId=j.id;updateAssistBtn();toast('🔔 Mesero llamado. Vendrá en un momento.','ok');}
+  if(j.ok){assistActive=true;assistId=j.id;updateAssistBtn();toast('🔔 Asistencia solicitada. Alguien vendrá en un momento.','ok');}
   else toast(j.error||'Error','err');
 }
 async function cancelAssist(){
@@ -459,7 +494,7 @@ async function cancelAssist(){
 function toggleAssist(){
   if(!token){toast('Ingresa el código de tu mesa primero','err');return;}
   if(assistActive){cancelAssist();}
-  else{confirmModal('Llamar al mesero 🔔','El personal de '+((sess&&sess.table)||'tu mesa')+' será avisado que necesitas atención.',doAssist);}
+  else{confirmModal('Llamar asistencia 🔔','El personal de '+((sess&&sess.table)||'tu mesa')+' será avisado que necesitas atención.',doAssist);}
 }
 function updateAssistBtn(){
   const btn=$('floatBell');if(!btn)return;
@@ -668,7 +703,7 @@ async function poll(){
     // Verificar si nuestra asistencia fue atendida por el admin
     if(assistActive&&assistId!==null){
       const still=(s.assists||[]).some(a=>a.id===assistId);
-      if(!still){assistActive=false;assistId=null;updateAssistBtn();toast('✓ Tu mesero está en camino 👋','ok');}
+      if(!still){assistActive=false;assistId=null;updateAssistBtn();toast('✓ Alguien está en camino 👋','ok');}
     }
 
     // Sugerencias basadas en lo que suena

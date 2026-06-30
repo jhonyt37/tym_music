@@ -171,6 +171,8 @@ keepAwake();
 document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') keepAwake(); });
 
 let player,ready=false,curYt=null,curId=null,wantAudio=false,topLoved=[],lastReactTotal=0,lastReacts={},lastReactId=null,authok=false;
+// Persistir wantAudio en sessionStorage para recuperar tras un redeploy/refresh
+try{if(sessionStorage.getItem('tym_tv_started')==='1'){wantAudio=true;$('start').style.display='none';}}catch(e){}
 let isPrimary=true;   // false → esta pestaña es secundaria: nunca llama advance
 let advancingId=undefined; // id de la canción para la que ya enviamos advance (evita doble llamada)
 // --- Asistencias ---
@@ -282,8 +284,12 @@ function load(np){
   const changed = np.yt!==curYt;
   $('title').textContent=np.title;$('artist').textContent=np.artist||'';
   $('who').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+(np.table||''));
-  if(changed){curYt=np.yt;if(ready){player.loadVideoById(np.yt);if(wantAudio){player.unMute();player.playVideo();}}
-    burstNow();}  // al cambiar de canción, muestra la info de inmediato
+  if(changed){
+    // Sólo fijar curYt cuando el player realmente carga el video.
+    // Si ready=false, dejamos curYt=null para que el próximo load() vea changed=true.
+    if(ready){curYt=np.yt;player.loadVideoById(np.yt);if(wantAudio){player.unMute();player.playVideo();}}
+    burstNow();
+  }
   curId=np.id;
 }
 function applyBrand(set){
@@ -320,8 +326,13 @@ function toggleFs(){
 $('fsBtn').onclick=toggleFs;
 document.addEventListener('keydown',e=>{if(e.key==='f'||e.key==='F')toggleFs();});
 let mvT;document.addEventListener('mousemove',()=>{$('fsBtn').classList.add('show');clearTimeout(mvT);mvT=setTimeout(()=>$('fsBtn').classList.remove('show'),3000);});
-$('start').onclick=()=>{wantAudio=true;$('start').style.display='none';toggleFs();
-  if(player){player.unMute();player.setVolume(100);player.playVideo();}burstNow();};
+$('start').onclick=()=>{
+  wantAudio=true;
+  try{sessionStorage.setItem('tym_tv_started','1');}catch(e){}
+  $('start').style.display='none';toggleFs();
+  if(player){player.unMute();player.setVolume(100);player.playVideo();}
+  burstNow();
+};
 
 // ---------- Estado ----------
 async function tick(){
@@ -348,6 +359,12 @@ setInterval(async()=>{
     applyBrand(s.settings);
     // Watchdog: nunca silencio — si no hay nada o el video ya terminó, avanza solo
     if(!s.now_playing || (ready&&player&&player.getPlayerState&&player.getPlayerState()===YT.PlayerState.ENDED)){await advance();return;}
+    // Recuperar player pausado/detenido post-redeploy
+    if(wantAudio&&s.now_playing&&ready&&player&&player.getPlayerState){
+      try{const ps=player.getPlayerState();
+        if(ps===2||ps===-1){player.unMute();player.playVideo();} // pausado o sin iniciar
+      }catch(e){}
+    }
     // Trim APRENDIDO: salta en el punto donde el local suele saltar esta canción (silencios/outros)
     {const le=s.now_playing.learned_end||0;
      if(le>0&&ready&&player&&player.getCurrentTime&&player.getCurrentTime()>=le&&player.getPlayerState()===YT.PlayerState.PLAYING){await advance();return;}}
