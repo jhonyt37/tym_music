@@ -471,6 +471,7 @@ def public_state(token=None, admin=False):
         "priority_queue_min": int(sum(i.get("duration", DEFAULT_DUR)
                                       for i in queue_view() if i.get("priority")) // 60),
         "tv_active": (time.time() - STATE.get("tv_lastseen", 0)) < 15,
+        "active_sessions": len(STATE.get("sessions", {})),
         "assists": [a for a in STATE.get("assists", []) if not a.get("resolved")],
         "queue": qout,
         "queue_count": len(q),
@@ -921,12 +922,16 @@ class H(BaseHTTPRequestHandler):
                 sess = get_session(d.get("token"))
                 if not sess:
                     return self._send(400, {"error": "Sesión no válida"})
+                tok = d.get("token")
+                if d.get("cancel"):
+                    STATE["assists"] = [a for a in STATE.get("assists", []) if a.get("token") != tok]
+                    return self._send(200, {"ok": True})
                 aid = nid()
                 STATE["assists"].append({"id": aid, "table": sess["table"],
                                           "ts": time.time(), "resolved": False,
-                                          "resolve_ts": None, "token": d.get("token")})
+                                          "resolve_ts": None, "token": tok})
                 TYM["events"].append({"venue": CUR_VID, "table": sess["table"],
-                                       "account": d.get("token"), "ts": time.time(),
+                                       "account": tok, "ts": time.time(),
                                        "ev": "assist_requested"})
                 return self._send(200, {"ok": True, "id": aid})
 

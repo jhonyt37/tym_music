@@ -20,8 +20,9 @@ if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 <style>
 .prog{height:6px;background:#2a3550;border-radius:4px;overflow:hidden;margin-top:12px}
 .prog-fill{height:100%;background:var(--pri);width:0%;transition:width .8s linear}
-.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:8px}
-.chipt{white-space:nowrap;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--mut);font-size:13px;font-weight:600;cursor:pointer}
+.chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:8px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chipt{white-space:nowrap;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--mut);font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0}
 .chipt.on{background:var(--pri);color:#fff;border-color:var(--pri)}
 .gate{position:fixed;inset:0;background:rgba(8,11,18,.98);z-index:50;display:flex;align-items:center;justify-content:center;padding:24px}
 .gate .box{max-width:360px;width:100%;text-align:center}
@@ -36,7 +37,6 @@ if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 .reacts{display:flex;gap:6px;margin-top:10px;flex-wrap:wrap}
 .rbtn{display:inline-flex;align-items:center;gap:5px;background:var(--bg2);border:1px solid var(--line);border-radius:999px;padding:6px 11px;font-size:15px;color:var(--txt);cursor:pointer}
 .rbtn.on{border-color:var(--pri);background:rgba(59,130,246,.2)}
-.rbtn span{font-weight:800;font-size:13px}
 .rank{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .rank .n{font-weight:800;color:var(--gold);width:22px;text-align:center}
 .rank .love{margin-left:auto;font-weight:800;color:#ff5a7a;white-space:nowrap}
@@ -55,15 +55,39 @@ body{padding-bottom:80px}
 #fx{position:fixed;inset:0;pointer-events:none;z-index:40;overflow:hidden}
 .fxe{position:absolute;bottom:90px;will-change:transform,opacity;animation:floatUp 2.6s ease-out forwards}
 @keyframes floatUp{0%{transform:translateY(0) scale(.5);opacity:0}15%{opacity:1;transform:translateY(-20px) scale(1.1)}100%{transform:translateY(-62vh) scale(1.25);opacity:0}}
+
+/* ---- Floating bell ---- */
+#floatBell{position:fixed;bottom:70px;right:14px;z-index:18;width:48px;height:48px;border-radius:50%;border:2px solid var(--line);background:var(--bg2);color:#fff;font-size:22px;cursor:pointer;display:none;box-shadow:0 3px 12px rgba(0,0,0,.45);align-items:center;justify-content:center;transition:background .2s,border-color .2s}
+#floatBell.show{display:flex}
+#floatBell.ringing{background:#dc2626;border-color:#dc2626;animation:assistRing 2s ease-in-out infinite}
+@keyframes assistRing{0%,100%{box-shadow:0 3px 12px rgba(220,38,38,.4)}50%{box-shadow:0 0 0 12px rgba(220,38,38,.08),0 3px 14px rgba(220,38,38,.7)}}
+
+/* ---- Header info ---- */
+.bar-venue{font-size:11px;color:var(--mut);font-weight:700;line-height:1;margin-top:2px;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tick-wrap{overflow:hidden;max-width:170px}
+.tick{display:inline-flex;font-size:12px;font-weight:600;white-space:nowrap;will-change:transform;color:var(--txt)}
+.tick.go{animation:tickGo 8s linear infinite}
+@keyframes tickGo{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+/* ---- Similar songs ---- */
+#simBox{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
+.sim-lbl{font-size:12px;color:var(--mut);margin-bottom:8px;font-weight:600}
+
+/* ---- Active tables ---- */
+.active-t{text-align:center;font-size:12px;color:var(--mut);padding:0 0 10px}
 </style>
 </head>
 <body>
+
 <header class="bar">
-  <div class="logo">TY<b>M</b> Music</div>
+  <div>
+    <div class="logo">TY<b>M</b> Music</div>
+    <div class="bar-venue" id="headerVenue"></div>
+  </div>
   <div class="spacer"></div>
-  <div class="tag" id="acctTag" style="display:none;cursor:pointer" onclick="showTab('prio')"></div>
-  <div class="tag" id="balTag" style="display:none"></div>
-  <div class="tag" id="tableTag">…</div>
+  <div class="tick-wrap" id="tickWrap" style="display:none">
+    <div class="tick" id="headerTick"></div>
+  </div>
 </header>
 
 <!-- Gate de mesa -->
@@ -92,15 +116,21 @@ body{padding-bottom:80px}
         <div class="chips" id="recoChips"></div>
         <div class="list" id="results"></div>
       </div>
+      <!-- Sugerencias basadas en lo que suena -->
+      <div id="simBox" style="display:none">
+        <div class="sim-lbl">🎵 Por si te gustó — <span id="simLabel"></span></div>
+        <div class="list" id="simList"></div>
+      </div>
     </div>
   </section>
 
-  <!-- ===== SUENA ===== -->
-  <section class="tab" id="tab-suena">
+  <!-- ===== AHORA (antes "Suena") ===== -->
+  <section class="tab" id="tab-ahora">
     <div class="card">
       <h2><span class="pulse"></span>Sonando ahora</h2>
+      <div class="active-t" id="activeTables"></div>
       <div class="now">
-        <img class="thumb" id="nowImg" alt="">
+        <img class="thumb" id="nowImg" alt="" onerror="this.removeAttribute('src')">
         <div style="flex:1;min-width:0">
           <div class="t" id="nowT">—</div>
           <div class="a" id="nowA"></div>
@@ -118,10 +148,6 @@ body{padding-bottom:80px}
     <div class="card">
       <h2>Vienen en cola 🎶 (<span id="qcount">0</span>)</h2>
       <div class="list" id="queueList"><div class="empty">Nada en cola — suena la lista del local.</div></div>
-    </div>
-    <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-      <div><b>¿Necesitas algo?</b><div class="small">El mesero vendrá a tu mesa</div></div>
-      <button class="btn sm" style="background:#dc2626;color:#fff;border-color:#dc2626;white-space:nowrap" onclick="callAssist()">🔔 Llamar</button>
     </div>
   </section>
 
@@ -168,12 +194,16 @@ body{padding-bottom:80px}
   </section>
 </div>
 
+<!-- Nav bottom -->
 <nav class="nav" id="nav">
   <button data-tab="pedir" class="on"><span>🔎</span>Pedir</button>
-  <button data-tab="suena"><span>▶️</span>Suena<i class="badge" id="badgeQ" style="display:none">0</i></button>
+  <button data-tab="ahora"><span>▶️</span>Ahora<i class="badge" id="badgeQ" style="display:none">0</i></button>
   <button data-tab="social"><span>❤️</span>Social</button>
   <button data-tab="prio"><span>⚡</span>Prioridad<i class="badge gold" id="badgeC" style="display:none">0</i></button>
 </nav>
+
+<!-- Floating bell (asistencia) -->
+<button id="floatBell" onclick="toggleAssist()" title="Llamar mesero / cancelar">🔔</button>
 
 <!-- Sheet pedir -->
 <div class="sheet-bg" id="sheet">
@@ -198,7 +228,8 @@ body{padding-bottom:80px}
     </div>
   </div>
 </div>
-<!-- Modal de confirmación (cobros claros) -->
+
+<!-- Modal de confirmación -->
 <div class="sheet-bg" id="confirmBg" style="z-index:30">
   <div class="sheet">
     <h3 id="cfTitle">Confirmar</h3>
@@ -209,6 +240,7 @@ body{padding-bottom:80px}
     </div>
   </div>
 </div>
+
 <div class="toast" id="toast"></div>
 <div id="fx"></div>
 
@@ -226,20 +258,23 @@ function applyTheme(t){
   document.querySelector('meta[name="theme-color"]').content=th.bg;
 }
 let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0;
-const VENUE=new URLSearchParams(location.search).get('v')||'';   // bar (multi-tenant) desde el QR
+const VENUE=new URLSearchParams(location.search).get('v')||'';
 let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], pass_obj={minutes:30,price:5000};
 let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='';
+let assistActive=false, assistId=null;
+let _simLoadedForId=null, _nowYt=null;
 const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const mm=s=>{s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
 
-// Carga nombre del bar y tema antes de que el usuario haga login (para que la gate sea clara)
+// Carga nombre del bar y tema antes de login
 (async()=>{
   try{
     const url='/api/state'+(VENUE?'?v='+encodeURIComponent(VENUE):'');
     const d=await(await fetch(url)).json();
     $('gateName').textContent=d.settings.venue_name||'';
+    $('headerVenue').textContent=d.settings.venue_name||'';
     applyTheme(d.settings.theme);
   }catch(e){}
 })();
@@ -311,10 +346,28 @@ function renderResults(list){
   list.slice(0,12).forEach(s=>{
     const r=document.createElement('div');r.className='row';
     const sub=[s.artist,s.length].filter(Boolean).join(' · ');
-    r.innerHTML=`<img class="mini" src="${img(s.yt)}"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div><button class="btn sm">Pedir</button>`;
+    r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div><button class="btn sm">Pedir</button>`;
     r.querySelector('button').onclick=()=>openSheet(s);
     res.appendChild(r);
   });
+}
+
+// ---------- Sugerencias basadas en lo que suena ----------
+async function loadSimilar(artist){
+  try{
+    $('simLabel').textContent=artist;
+    $('simBox').style.display='';
+    $('simList').innerHTML='<div class="empty" style="font-size:13px">Buscando…</div>';
+    const list=await (await fetch('/api/search?q='+encodeURIComponent(artist))).json();
+    const box=$('simList');box.innerHTML='';
+    list.filter(s=>s.yt!==_nowYt).slice(0,5).forEach(s=>{
+      const r=document.createElement('div');r.className='row';
+      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div><button class="btn sm">Pedir</button>`;
+      r.querySelector('button').onclick=()=>openSheet(s);
+      box.appendChild(r);
+    });
+    if(!box.children.length) $('simBox').style.display='none';
+  }catch(e){$('simBox').style.display='none';}
 }
 
 // ---------- Pedir ----------
@@ -379,14 +432,51 @@ function confirmModal(title,msg,cb,opts){
 }
 function cfNo(){$('confirmBg').classList.remove('open');if(cfNoCb){cfNoCb();cfNoCb=null;}}
 function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
+
+// ---------- Asistencia (campana flotante) ----------
 async function doAssist(){
   if(!token)return;
   const j=await (await fetch('/api/assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})})).json();
-  if(j.ok)toast('🔔 Mesero llamado. Vendrá en un momento.');else toast(j.error||'Error');
+  if(j.ok){assistActive=true;assistId=j.id;updateAssistBtn();toast('🔔 Mesero llamado. Vendrá en un momento.');}
+  else toast(j.error||'Error');
 }
-function callAssist(){
+async function cancelAssist(){
+  const j=await (await fetch('/api/assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,cancel:true})})).json();
+  if(j.ok){assistActive=false;assistId=null;updateAssistBtn();toast('Llamada cancelada.');}
+  else toast(j.error||'Error');
+}
+function toggleAssist(){
   if(!token){toast('Ingresa el código de tu mesa primero');return;}
-  confirmModal('Llamar al mesero 🔔','El personal de '+((sess&&sess.table)||'tu mesa')+' será avisado que necesitas atención.',doAssist);
+  if(assistActive){cancelAssist();}
+  else{confirmModal('Llamar al mesero 🔔','El personal de '+((sess&&sess.table)||'tu mesa')+' será avisado que necesitas atención.',doAssist);}
+}
+function updateAssistBtn(){
+  const btn=$('floatBell');if(!btn)return;
+  if(!sess){btn.classList.remove('show');return;}
+  btn.classList.add('show');
+  btn.textContent=assistActive?'🔕':'🔔';
+  btn.classList.toggle('ringing',assistActive);
+}
+
+// ---------- Header ticker ----------
+function updateHeaderTicker(tabTotal){
+  const wrap=$('tickWrap'),tick=$('headerTick');
+  if(!wrap||!tick)return;
+  if(!sess){wrap.style.display='none';return;}
+  wrap.style.display='';
+  const now=Date.now()/1000;
+  const parts=['📍 '+sess.table];
+  if((tabTotal||0)>0) parts.push('🧾 '+cop(tabTotal));
+  if((sess.credits||0)>0) parts.push('⚡ '+sess.credits+' créd.');
+  if(sess.pass_until>now) parts.push('⏱ pase activo');
+  const text=parts.join(' · ');
+  if(parts.length<=1){
+    tick.textContent=text;tick.classList.remove('go');
+  }else{
+    tick.innerHTML='<span style="padding-right:24px">'+text+'</span><span style="padding-right:24px">'+text+'</span>';
+    tick.style.animationDuration=Math.max(6,text.length*0.22)+'s';
+    tick.classList.add('go');
+  }
 }
 
 // ---------- Paquetes ----------
@@ -418,13 +508,21 @@ async function doBuy(kind,index){
   else toast(j.error||'Error');
 }
 function refreshBal(){
-  if(!sess){$('balTag').style.display='none';return;}
+  if(!sess)return;
   const now=Date.now()/1000;const passOn=sess.pass_until>now;
   $('credN').textContent=sess.credits||0;
-  $('passN').textContent=passOn?mm(sess.pass_until-now):'—';
-  $('balTag').style.display='';
-  $('balTag').textContent=(passOn?'⏱ pase':((sess.credits||0)+' créd.'));
+  const pn=$('passN');
+  if(passOn){
+    const rem=sess.pass_until-now;
+    pn.textContent='⏱ '+mm(rem);
+    pn.style.color=rem<180?'#ef4444':rem<300?'#f59e0b':'';
+    pn.style.fontWeight=rem<180?'900':'800';
+  }else{
+    pn.textContent='—';pn.style.color='';pn.style.fontWeight='800';
+  }
 }
+// Timer del pase: actualiza el countdown cada 5s sin esperar al poll
+setInterval(()=>{if(sess)refreshBal();},5000);
 
 // ---------- Reacciones / social ----------
 const EMOJIS=['❤️','🔥','👍'];
@@ -469,7 +567,7 @@ function playStatusBadge(it){
 function songRow(it,opts){
   const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
   const tag=it.super?'⏫ ':(it.priority?'⚡ ':'');
-  div.innerHTML=`<img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+(it.table||it.artist||'')}</div></div>`;
+  div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+(it.table||it.artist||'')}</div></div>`;
   if(opts&&opts.boost){
     if(!it.priority){const b=document.createElement('button');b.className='btn sm gold';b.textContent='⚡ Impulsar';b.onclick=()=>boost(it.id);div.appendChild(b);}
     if(jumpAvail&&!it.super){const jb=document.createElement('button');jb.className='btn sm';jb.style.background='#7c3aed';jb.textContent='⏫ #1';jb.title='Saltar al primer lugar';jb.onclick=()=>jump(it.id);div.appendChild(jb);}
@@ -507,9 +605,11 @@ function renderList(elId,items,opts){
 function renderLoved(items){
   const box=$('lovedList');box.innerHTML='';
   if(!items||!items.length){box.innerHTML='<div class="empty">Aún sin reacciones. ¡Sé el primero en reaccionar!</div>';return;}
-  items.forEach((it,i)=>{const d=document.createElement('div');d.className='rank';
-    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div><div class="love">❤️ ${it.total}</div>`;
-    box.appendChild(d);});
+  items.forEach((it,i)=>{
+    const d=document.createElement('div');d.className='rank';
+    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div><div class="love">❤️ ${it.total}</div>`;
+    box.appendChild(d);
+  });
 }
 
 // ---------- Poll ----------
@@ -518,20 +618,46 @@ async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
     price=s.settings.price_priority;packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
-    jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;price_queue_min=s.priority_queue_min||0;renderSocials(s.settings.socials);
+    jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;price_queue_min=s.priority_queue_min||0;
+    renderSocials(s.settings.socials);
     document.title='TYM · '+s.settings.venue_name;
     applyTheme(s.settings.theme);
     sess=s.session;
-    if(!sess){$('gate').style.display='flex';$('tableTag').textContent=s.settings.style;}
-    else{$('gate').style.display='none';$('tableTag').textContent='📍 '+sess.table;}
+
+    // Header: venue name + ticker
+    $('headerVenue').textContent=s.settings.venue_name||'';
+    updateHeaderTicker(s.my_tab_total||0);
+    updateAssistBtn();
+
+    // Gate
+    if(!sess){$('gate').style.display='flex';}
+    else{$('gate').style.display='none';}
+
     refreshBal();renderPackages();
-    // Detectar cambio de canción: si es una prioridad que acaba de sonar, refrescar cuenta al instante
+
+    // Mesas activas
+    const at=$('activeTables');
+    if(at){const n=s.active_sessions||0;at.textContent=n>1?'🎵 '+n+' mesas poniendo música ahora':'';}
+
+    // Detectar canción que acaba de cobrar
     const np=s.now_playing;
     if(np&&np.id!==_lastNpId){
       _lastNpId=np.id;
-      if(np.priority&&sess) setTimeout(poll,400); // cobro recién registrado → re-poll rápido
+      if(np.priority&&sess) setTimeout(poll,400);
     }
-    // now playing
+
+    // Verificar si nuestra asistencia fue atendida por el admin
+    if(assistActive&&assistId!==null){
+      const still=(s.assists||[]).some(a=>a.id===assistId);
+      if(!still){assistActive=false;assistId=null;updateAssistBtn();toast('✓ Tu mesero está en camino 👋');}
+    }
+
+    // Sugerencias basadas en lo que suena
+    if(np&&np.artist&&!np.fallback&&np.id!==_simLoadedForId){
+      _simLoadedForId=np.id;_nowYt=np.yt;loadSimilar(np.artist);
+    }else if(!np){$('simBox').style.display='none';_simLoadedForId=null;}
+
+    // Now playing
     if(np){$('nowImg').src=img(np.yt);$('nowT').textContent=np.title;$('nowA').textContent=np.artist||'';
       $('nowW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+np.table);
       const dur=np.duration||1,pos=Math.min(np.position||0,dur);
@@ -539,29 +665,31 @@ async function poll(){
       $('nowPos').textContent=mm(pos);$('nowRem').textContent='faltan '+mm(dur-pos);
     }else{$('nowT').textContent='—';$('nowA').textContent='Nadie ha puesto música aún';$('nowW').textContent='';
       $('nowImg').removeAttribute('src');$('progFill').style.width='0%';$('nowPos').textContent='0:00';$('nowRem').textContent='';}
-    // cola
+
+    // Cola
     $('queueInfo').textContent=`${s.queue_count} en cola · ~${mm(s.queue_total_secs)} de música`;
     if(s.my_pos){$('myInfo').style.display='';$('myInfo').innerHTML=`⭐ Tu canción: puesto #${s.my_pos} · suena en ~${mm(s.my_wait_secs)}`;}
     else $('myInfo').style.display='none';
-    // reacciones + social
+
+    // Reacciones + social
     $('nowReacts').innerHTML = np ? reactHtml(np) : '';
     $('qcount').textContent = s.queue_count;
     renderList('queueList', s.queue, {boost:true, empty:'Nada en cola — suena la lista del local.'});
     renderList('historyList', s.history, {empty:'Todavía no ha sonado nada.'});
     renderLoved(s.top_loved);
-    // badges de navegación
+
+    // Badges de navegación
     $('badgeQ').style.display=s.queue_count?'':'none';$('badgeQ').textContent=s.queue_count;
     const creds=(sess&&sess.credits)||0;$('badgeC').style.display=creds?'':'none';$('badgeC').textContent=creds;
-    // chip de cuenta en la barra superior (transparencia, clickeable)
-    $('acctTag').style.display = sess?'':'none';
-    $('acctTag').textContent='🧾 '+cop(s.my_tab_total||0);
-    // tu cuenta de la mesa (coincide con la del bar)
+
+    // Cuenta de la mesa
     $('tabTotal').textContent=cop(s.my_tab_total||0);
     const items=s.my_tab||[],tl=$('tabList');
     if(!items.length)tl.innerHTML='<div class="empty">Sin cargos todavía.</div>';
     else{tl.innerHTML='';items.forEach(x=>{const r=document.createElement('div');r.className='row';
       r.innerHTML=`<div class="info"><div class="t">${x.title}</div><div class="a">${x.kind}</div></div><div class="chip pri">${cop(x.amount)}</div>`;tl.appendChild(r);});}
-    // aviso al autor
+
+    // Aviso al autor de likes
     if(typeof s.my_likes_total==='number'){
       if(myLikes!==null && s.my_likes_total>myLikes) toast('❤️ ¡A '+s.my_likes_total+' les gusta tu música!');
       myLikes=s.my_likes_total;
