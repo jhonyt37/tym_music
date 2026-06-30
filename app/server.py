@@ -522,7 +522,23 @@ def recommendations():
     if not mas:
         mas = [{"yt": x["yt"], "title": x["title"], "artist": x.get("artist", "")} for x in STATE["curated"][:8]]
     local = [{"yt": x["yt"], "title": x["title"], "artist": x.get("artist", "")} for x in STATE["curated"]]
-    populares = [{"yt": r["yt"], "title": r["title"], "artist": r["artist"]} for r in yt_search("musica popular", 12)]
+    # Populares: canciones del historial del local (lo que ha sonado aquí)
+    seen = set()
+    populares = []
+    for h in STATE.get("history", []):
+        if not h.get("fallback") and h.get("yt") and h["yt"] not in seen:
+            seen.add(h["yt"])
+            populares.append({"yt": h["yt"], "title": h["title"], "artist": h.get("artist", "")})
+    # Complementar con artistas más pedidos si hay pocas canciones en historial
+    if len(populares) < 6:
+        top_artists = list({c["artist"] for c in counts if c.get("artist")})[:2]
+        for art in top_artists:
+            for r in yt_search(art, 5):
+                if r["yt"] not in seen:
+                    seen.add(r["yt"])
+                    populares.append({"yt": r["yt"], "title": r["title"], "artist": r["artist"]})
+    if not populares:
+        populares = [{"yt": r["yt"], "title": r["title"], "artist": r["artist"]} for r in yt_search("musica popular colombia", 12)]
     genero = [{"yt": r["yt"], "title": r["title"], "artist": r["artist"]} for r in yt_search(f"los mejores {s['genre']}", 12)]
     return {"mas_pedido": _pad(mas), "del_local": local,
             "populares": _pad(populares), "genero": _pad(genero, genre=s["genre"])}

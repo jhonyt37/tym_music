@@ -19,7 +19,7 @@ if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 <link rel="stylesheet" href="/style.css">
 <style>
 .prog{height:6px;background:#2a3550;border-radius:4px;overflow:hidden;margin-top:12px}
-.prog-fill{height:100%;background:var(--pri);width:0%;transition:width .8s linear}
+.prog-fill{height:100%;background:var(--pri);width:0%;transition:width .45s linear}
 .chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:8px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .chipt{white-space:nowrap;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--mut);font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0}
@@ -108,10 +108,7 @@ body{padding-bottom:80px}
   <section class="tab on" id="tab-pedir">
     <div class="card">
       <h2>Pon tu canción 🎵</h2>
-      <input class="search" id="q" placeholder="Buscar canción o artista…" autocomplete="off">
-      <div class="muted" style="margin:8px 2px">o pega un link de YouTube:</div>
-      <input class="search" id="link" placeholder="https://youtu.be/…" autocomplete="off">
-      <button class="btn ghost block sm" style="margin-top:8px" onclick="fromLink()">Pedir desde el link</button>
+      <input class="search" id="q" placeholder="Buscar canción, artista o pega un link de YouTube…" autocomplete="off">
       <div id="recoBox" style="margin-top:14px">
         <div class="chips" id="recoChips"></div>
         <div class="list" id="results"></div>
@@ -263,6 +260,7 @@ let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], 
 let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='';
 let assistActive=false, assistId=null;
 let _simLoadedForId=null, _nowYt=null;
+let _npState=null;
 const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
@@ -328,26 +326,33 @@ function renderReco(){
 }
 
 // ---------- Busqueda ----------
+const YT_RE=/youtu\.?be|youtube\.com\/(watch|shorts|embed)/i;
 function onSearch(term){
   clearTimeout(searchTimer);
   if(!term.trim()){$('recoChips').style.display='flex';renderReco();return;}
   $('recoChips').style.display='none';
+  if(YT_RE.test(term)){renderResults([{_link:term}]);return;}
   $('results').innerHTML='<div class="empty">Buscando…</div>';
   lastTerm=term;
   searchTimer=setTimeout(async()=>{
     try{const list=await (await fetch('/api/search?q='+encodeURIComponent(term))).json();
       if(term!==lastTerm)return; renderResults(list);
-    }catch(e){$('results').innerHTML='<div class="empty">No se pudo buscar. Pega un link abajo.</div>';}
+    }catch(e){$('results').innerHTML='<div class="empty">No se pudo buscar. Intenta de nuevo.</div>';}
   },350);
 }
 function renderResults(list){
   const res=$('results');res.innerHTML='';
-  if(!list||!list.length){res.innerHTML='<div class="empty">Sin resultados. Prueba otro nombre o pega un link.</div>';return;}
+  if(!list||!list.length){res.innerHTML='<div class="empty">Sin resultados. Prueba otro nombre o pega un link de YouTube.</div>';return;}
   list.slice(0,12).forEach(s=>{
     const r=document.createElement('div');r.className='row';
-    const sub=[s.artist,s.length].filter(Boolean).join(' · ');
-    r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div><button class="btn sm">Pedir</button>`;
-    r.querySelector('button').onclick=()=>openSheet(s);
+    if(s._link){
+      r.innerHTML=`<div style="font-size:26px;flex-shrink:0">🔗</div><div class="info" style="flex:1"><div class="t">Canción desde link</div><div class="a" style="word-break:break-all;font-size:11px">${s._link.slice(0,60)}</div></div><button class="btn sm">Pedir</button>`;
+      r.querySelector('button').onclick=()=>openSheetLink(s._link);
+    }else{
+      const sub=[s.artist,s.length].filter(Boolean).join(' · ');
+      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div><button class="btn sm">Pedir</button>`;
+      r.querySelector('button').onclick=()=>openSheet(s);
+    }
     res.appendChild(r);
   });
 }
@@ -371,16 +376,22 @@ async function loadSimilar(artist){
 }
 
 // ---------- Pedir ----------
-function openSheet(s){chosen={yt:s.yt,title:s.title,artist:s.artist||'',length:s.length||''};mode='normal';
+function openSheet(s){
+  const now=Date.now()/1000;
+  chosen={yt:s.yt,title:s.title,artist:s.artist||'',length:s.length||''};mode='normal';
+  if(token&&sess&&!sess.credits&&!(sess.pass_until>now)&&!jumpAvail){doReq();return;}
   $('sTitle').textContent=s.title;$('sArtist').textContent=s.artist||'';
   $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
   updatePriOption();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
-  $('sheet').classList.add('open');}
-function fromLink(){const l=$('link').value.trim();if(!l){toast('Pega un link primero');return;}
+  $('sheet').classList.add('open');
+}
+function openSheetLink(l){
   chosen={link:l,title:'Tu canción (link)'};mode='normal';
   $('sTitle').textContent='Canción desde link';$('sArtist').textContent=l.slice(0,42);
   $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
-  updatePriOption();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');$('sheet').classList.add('open');}
+  updatePriOption();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
+  $('sheet').classList.add('open');
+}
 function updatePriOption(){
   const now=Date.now()/1000;
   const wait=price_queue_min>5?' · ~'+price_queue_min+' min de espera':'';
@@ -399,7 +410,7 @@ function pick(m){mode=m;
   c.classList.toggle('gold',m!=='normal');}
 function closeSheet(){$('sheet').classList.remove('open');}
 function confirmReq(){
-  if(!token){toast('Ingresa el código de tu mesa');return;}
+  if(!token){toast('Ingresa el código de tu mesa','err');return;}
   if(mode==='super'){
     confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> y suena de primera. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+'. Solo <b>una vez por canción</b>.',doReq);
   } else if(mode==='pri'){
@@ -417,9 +428,9 @@ async function doReq(){
   const r=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
   if(j.ok){if(j.session)sess=j.session;
-    toast(mode==='super'?'⏫ ¡Tu canción al frente!':(mode==='pri'?'⚡ ¡Pedida con prioridad!':'¡Canción pedida!'));
-    $('link').value='';$('q').value='';$('recoChips').style.display='flex';renderReco();refreshBal();}
-  else toast(j.error||'Error');
+    toast(mode==='super'?'⏫ ¡Tu canción al frente!':(mode==='pri'?'⚡ ¡Pedida con prioridad!':'¡Canción pedida!'),'ok');
+    $('q').value='';$('recoChips').style.display='flex';renderReco();refreshBal();}
+  else toast(j.error||'Error','err');
 }
 let cfCb=null,cfNoCb=null;
 function confirmModal(title,msg,cb,opts){
@@ -431,22 +442,22 @@ function confirmModal(title,msg,cb,opts){
   $('cfYes').onclick=()=>{cfNo();cfCb&&cfCb();};
 }
 function cfNo(){$('confirmBg').classList.remove('open');if(cfNoCb){cfNoCb();cfNoCb=null;}}
-function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
+function toast(t,type){const e=$('toast');e.textContent=t;e.className='toast'+(type?' '+type:'');e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
 
 // ---------- Asistencia (campana flotante) ----------
 async function doAssist(){
   if(!token)return;
   const j=await (await fetch('/api/assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})})).json();
-  if(j.ok){assistActive=true;assistId=j.id;updateAssistBtn();toast('🔔 Mesero llamado. Vendrá en un momento.');}
-  else toast(j.error||'Error');
+  if(j.ok){assistActive=true;assistId=j.id;updateAssistBtn();toast('🔔 Mesero llamado. Vendrá en un momento.','ok');}
+  else toast(j.error||'Error','err');
 }
 async function cancelAssist(){
   const j=await (await fetch('/api/assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,cancel:true})})).json();
   if(j.ok){assistActive=false;assistId=null;updateAssistBtn();toast('Llamada cancelada.');}
-  else toast(j.error||'Error');
+  else toast(j.error||'Error','err');
 }
 function toggleAssist(){
-  if(!token){toast('Ingresa el código de tu mesa primero');return;}
+  if(!token){toast('Ingresa el código de tu mesa primero','err');return;}
   if(assistActive){cancelAssist();}
   else{confirmModal('Llamar al mesero 🔔','El personal de '+((sess&&sess.table)||'tu mesa')+' será avisado que necesitas atención.',doAssist);}
 }
@@ -485,7 +496,7 @@ function renderPackages(){
   packages.forEach((p,i)=>{
     const d=document.createElement('div');d.className='pkg';
     const unit=Math.round(p.price/p.qty);
-    d.innerHTML=`<div><b>${p.qty} prioridad${p.qty>1?'es':''}</b><div class="small">${cop(unit)} c/u</div></div>`;
+    d.innerHTML=`<div><b>${p.qty} canción${p.qty>1?'es':''}</b><div class="small">${cop(unit)} c/u</div></div>`;
     const b=document.createElement('button');b.className='btn sm gold';b.textContent=cop(p.price);b.onclick=()=>buy('credits',i);
     d.appendChild(b);box.appendChild(d);
   });
@@ -495,17 +506,17 @@ function renderPackages(){
   d.appendChild(b);box.appendChild(d);
 }
 function buy(kind,index){
-  if(!token){toast('Ingresa el código de tu mesa');return;}
+  if(!token){toast('Ingresa el código de tu mesa','err');return;}
   let msg;
   if(kind==='pass') msg='Se cobrará <b>'+cop(pass_obj.price)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+' por el pase de '+pass_obj.minutes+' min (prioridad ilimitada).';
-  else{const p=packages[index];msg='Se cobrará <b>'+cop(p.price)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+' por '+p.qty+' prioridad'+(p.qty>1?'es':'')+'.';}
+  else{const p=packages[index];msg='Se cobrará <b>'+cop(p.price)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+' por '+p.qty+' canción'+(p.qty>1?'es':'')+' con prioridad.';}
   confirmModal('Confirmar compra',msg,()=>doBuy(kind,index));
 }
 async function doBuy(kind,index){
   const r=await fetch('/api/buy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,kind,index})});
   const j=await r.json();
-  if(j.ok){sess=j.session;toast(kind==='pass'?'¡Pase activado!':'¡Paquete agregado a tu cuenta!');refreshBal();}
-  else toast(j.error||'Error');
+  if(j.ok){sess=j.session;toast(kind==='pass'?'¡Pase activado!':'¡Paquete agregado a tu cuenta!','ok');refreshBal();}
+  else toast(j.error||'Error','err');
 }
 function refreshBal(){
   if(!sess)return;
@@ -523,6 +534,14 @@ function refreshBal(){
 }
 // Timer del pase: actualiza el countdown cada 5s sin esperar al poll
 setInterval(()=>{if(sess)refreshBal();},5000);
+// Interpolación de progreso client-side (cada 500ms)
+setInterval(()=>{
+  if(!_npState)return;
+  const pos=Math.min(_npState.pos0+(Date.now()/1000-_npState.t0),_npState.dur);
+  $('progFill').style.width=(100*pos/_npState.dur)+'%';
+  $('nowPos').textContent=mm(pos);
+  $('nowRem').textContent='faltan '+mm(_npState.dur-pos);
+},500);
 
 // ---------- Reacciones / social ----------
 const EMOJIS=['❤️','🔥','👍'];
@@ -540,12 +559,12 @@ function spawnEmoji(e){
   $('fx').appendChild(s);setTimeout(()=>s.remove(),3400);
 }
 async function react(id,emoji){
-  if(!token){toast('Ingresa el código de tu mesa');return;}
+  if(!token){toast('Ingresa el código de tu mesa','err');return;}
   spawnEmoji(emoji);
   await fetch('/api/react',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id,emoji})});poll();
 }
 function boost(id){
-  if(!token){toast('Ingresa el código de tu mesa');return;}
+  if(!token){toast('Ingresa el código de tu mesa','err');return;}
   const now=Date.now()/1000;let msg;
   if(sess&&sess.pass_until>now) msg='Se impulsará con tu <b>pase activo</b> (sin cargo extra).';
   else if(sess&&sess.credits>0) msg='Usarás <b>1 crédito</b> (te quedan '+(sess.credits-1)+'). La prioridad se cobra a <b>tu</b> mesa.';
@@ -554,8 +573,8 @@ function boost(id){
 }
 async function doBoost(id){
   const j=await (await fetch('/api/boost',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id})})).json();
-  if(j.ok){if(j.session)sess=j.session;toast(j.already?'Ya tiene prioridad':'⚡ ¡Impulsada!');refreshBal();poll();}
-  else toast(j.error||'Error');
+  if(j.ok){if(j.session)sess=j.session;toast(j.already?'Ya tiene prioridad':'⚡ ¡Impulsada!','ok');refreshBal();poll();}
+  else toast(j.error||'Error','err');
 }
 const PS_ICON={pending:'⏳',playing:'🎵',played:'✅',requeued:'↩️',skipped:'⏭️'};
 function playStatusBadge(it){
@@ -576,13 +595,13 @@ function songRow(it,opts){
   return div;
 }
 function jump(id){
-  if(!token){toast('Ingresa el código de tu mesa');return;}
-  if(!jumpAvail){toast('El salto ya se usó esta canción. Disponible en la próxima 🎵');return;}
+  if(!token){toast('Ingresa el código de tu mesa','err');return;}
+  if(!jumpAvail){toast('El salto ya se usó esta canción. Disponible en la próxima 🎵','err');return;}
   confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> de la cola. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu mesa'+(sess?' ('+sess.table+')':'')+'. Solo se permite <b>una vez por canción</b>.',()=>doJump(id));
 }
 async function doJump(id){
   const j=await (await fetch('/api/jump',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id})})).json();
-  if(j.ok){toast('⏫ ¡Tu canción al frente!');refreshBal();poll();} else toast(j.error||'Error');
+  if(j.ok){toast('⏫ ¡Tu canción al frente!','ok');refreshBal();poll();} else toast(j.error||'Error','err');
 }
 function renderSocials(soc){
   const box=$('socialLinks');if(!box)return;box.innerHTML='';
@@ -593,9 +612,9 @@ function renderSocials(soc){
 }
 async function subscribe(){
   const email=($('subEmail').value||'').trim();
-  if(email.indexOf('@')<1||email.indexOf('.')<0){toast('Escribe un correo válido');return;}
+  if(email.indexOf('@')<1||email.indexOf('.')<0){toast('Escribe un correo válido','err');return;}
   const j=await (await fetch('/api/subscribe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,email})})).json();
-  if(j.ok){toast('¡Gracias! Te avisaremos 🚀');$('subEmail').value='';}else toast(j.error||'Error');
+  if(j.ok){toast('¡Gracias! Te avisaremos 🚀','ok');$('subEmail').value='';}else toast(j.error||'Error','err');
 }
 function renderList(elId,items,opts){
   const box=$(elId);box.innerHTML='';
@@ -649,7 +668,7 @@ async function poll(){
     // Verificar si nuestra asistencia fue atendida por el admin
     if(assistActive&&assistId!==null){
       const still=(s.assists||[]).some(a=>a.id===assistId);
-      if(!still){assistActive=false;assistId=null;updateAssistBtn();toast('✓ Tu mesero está en camino 👋');}
+      if(!still){assistActive=false;assistId=null;updateAssistBtn();toast('✓ Tu mesero está en camino 👋','ok');}
     }
 
     // Sugerencias basadas en lo que suena
@@ -660,10 +679,8 @@ async function poll(){
     // Now playing
     if(np){$('nowImg').src=img(np.yt);$('nowT').textContent=np.title;$('nowA').textContent=np.artist||'';
       $('nowW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+np.table);
-      const dur=np.duration||1,pos=Math.min(np.position||0,dur);
-      $('progFill').style.width=(100*pos/dur)+'%';
-      $('nowPos').textContent=mm(pos);$('nowRem').textContent='faltan '+mm(dur-pos);
-    }else{$('nowT').textContent='—';$('nowA').textContent='Nadie ha puesto música aún';$('nowW').textContent='';
+      _npState={pos0:np.position||0,t0:Date.now()/1000,dur:np.duration||1};
+    }else{_npState=null;$('nowT').textContent='—';$('nowA').textContent='Nadie ha puesto música aún';$('nowW').textContent='';
       $('nowImg').removeAttribute('src');$('progFill').style.width='0%';$('nowPos').textContent='0:00';$('nowRem').textContent='';}
 
     // Cola
@@ -691,7 +708,7 @@ async function poll(){
 
     // Aviso al autor de likes
     if(typeof s.my_likes_total==='number'){
-      if(myLikes!==null && s.my_likes_total>myLikes) toast('❤️ ¡A '+s.my_likes_total+' les gusta tu música!');
+      if(myLikes!==null && s.my_likes_total>myLikes) toast('❤️ ¡A '+s.my_likes_total+' les gusta tu música!','ok');
       myLikes=s.my_likes_total;
     }
   }catch(e){}
@@ -702,7 +719,7 @@ setInterval(async()=>{
   if(!token)return;
   try{const s=await (await fetch('/api/state?token='+token)).json();
     if(!s.session&&sess){sess=null;token='';localStorage.removeItem('tym_token_'+VENUE);
-      toast('Tu sesión expiró. Ingresa tu código nuevamente.');$('gate').style.display='flex';}
+      toast('Tu sesión expiró. Ingresa tu código nuevamente.','err');$('gate').style.display='flex';}
   }catch(e){}
 },5*60*1000);
 </script>
