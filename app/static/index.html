@@ -398,9 +398,7 @@ async function loadSimilar(artist){
 
 // ---------- Pedir ----------
 function openSheet(s){
-  const now=Date.now()/1000;
   chosen={yt:s.yt,title:s.title,artist:s.artist||'',length:s.length||''};mode='normal';
-  if(token&&sess&&!sess.credits&&!(sess.pass_until>now)&&!jumpAvail){doReq();return;}
   $('sTitle').textContent=s.title;$('sArtist').textContent=s.artist||'';
   $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
   updatePriOption();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
