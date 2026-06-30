@@ -170,12 +170,22 @@ body{padding-bottom:80px}
       <h2>Síguenos 🎶</h2>
       <div class="small">Llévate TYM Music a donde vayas — síguenos y entérate de novedades.</div>
       <div id="socialLinks" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px"></div>
+      <!-- Instalar PWA -->
+      <div id="pwaInstallBox" style="display:none;margin-top:14px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:14px;padding:14px">
+        <div style="font-weight:700;margin-bottom:4px">📲 Instala TYM Music</div>
+        <div class="small" style="margin-bottom:10px">Añade la app a tu pantalla de inicio para abrirla sin el navegador.</div>
+        <button class="btn block" id="pwaInstallBtn">⬇ Instalar app</button>
+      </div>
+      <!-- iOS: no tiene beforeinstallprompt, mostrar instrucciones -->
+      <div id="pwaIosBox" style="display:none;margin-top:14px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:14px;padding:14px">
+        <div style="font-weight:700;margin-bottom:6px">📲 Instala TYM Music en iPhone</div>
+        <div class="small">Toca el botón <b>Compartir</b> (⬆) en Safari y luego <b>"Añadir a pantalla de inicio"</b>.</div>
+      </div>
       <div style="margin-top:14px">
-        <div class="small" style="margin-bottom:6px">Déjanos tu correo para novedades y la app 🚀</div>
+        <div class="small" style="margin-bottom:6px">Déjanos tu correo para novedades 🚀</div>
         <input class="field" id="subEmail" type="email" placeholder="tucorreo@email.com" autocomplete="email">
         <button class="btn block" style="margin-top:8px" onclick="subscribe()">Quiero novedades</button>
       </div>
-      <div class="small" style="margin-top:12px;text-align:center">📲 Próximamente: app TYM Music</div>
     </div>
   </section>
 
@@ -510,6 +520,34 @@ function updateAssistBtn(){
   btn.textContent=assistActive?'🔕':'🔔';
   btn.classList.toggle('ringing',assistActive);
 }
+
+// ---------- PWA Install ----------
+let _pwaPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  _pwaPrompt = e;
+  const box = $('pwaInstallBox');
+  if (box) box.style.display = '';
+});
+window.addEventListener('appinstalled', () => {
+  _pwaPrompt = null;
+  const box = $('pwaInstallBox');
+  if (box) box.style.display = 'none';
+  toast('¡App instalada! 🎉', 'ok');
+});
+const _isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+const _isStandalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+if (_isIos && !_isStandalone) {
+  const box = $('pwaIosBox');
+  if (box) box.style.display = '';
+}
+const _pwaBtn = $('pwaInstallBtn');
+if (_pwaBtn) _pwaBtn.onclick = async () => {
+  if (!_pwaPrompt) return;
+  _pwaPrompt.prompt();
+  const { outcome } = await _pwaPrompt.userChoice;
+  if (outcome === 'accepted') { _pwaPrompt = null; $('pwaInstallBox').style.display = 'none'; }
+};
 
 // ---------- Row title ticker ----------
 function applyTicker(el){
