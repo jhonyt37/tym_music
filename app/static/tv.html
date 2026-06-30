@@ -30,7 +30,7 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #now .title{font-size:54px;font-weight:800;line-height:1.05;margin-top:6px;text-shadow:0 2px 12px rgba(0,0,0,.85)}
 #now .artist{font-size:27px;color:#cfd8ec;margin-top:4px}
 #now .who{display:inline-block;margin-top:12px;font-size:21px;font-weight:700;color:var(--gold)}
-/* A continuacion (abajo-izq, mismo lugar, escalonado en el tiempo) */
+/* A continuacion */
 #up{left:0;right:0;bottom:0;padding:70px 40px 40px;
   background:linear-gradient(transparent,rgba(0,0,0,.5) 40%,rgba(0,0,0,.9))}
 #up .lbl{font-size:18px;color:#9aa7c2;font-weight:700;display:block;margin-bottom:12px}
@@ -38,42 +38,39 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #up .chip{display:inline-block;background:rgba(255,255,255,.10);border:1px solid #2a3550;border-radius:999px;
   padding:10px 18px;margin:0 10px 10px 0;font-size:22px;font-weight:600}
 #up .chip.p{border-color:rgba(245,179,1,.5)}
-/* Reacciones en sonando ahora */
+/* Reacciones */
 #nowReacts{margin-top:16px;font-size:28px;font-weight:800;display:flex;gap:26px;text-shadow:0 2px 10px rgba(0,0,0,.8)}
 #nowReacts.rpulse{animation:rp .6s}
 @keyframes rp{0%{transform:scale(1)}40%{transform:scale(1.22)}100%{transform:scale(1)}}
-/* Ranking lo más querido (centro) */
+/* Ranking lo más querido */
 #loved{left:0;right:0;top:50%;transform:translateY(-50%);text-align:center;padding:0 60px}
 #loved .h{font-size:34px;font-weight:800;color:#ff5a7a;margin-bottom:22px;letter-spacing:1px;text-shadow:0 2px 12px rgba(0,0,0,.9)}
 #loved .it{font-size:36px;font-weight:700;margin:12px 0;text-shadow:0 2px 12px rgba(0,0,0,.9)}
 #loved .it .love{color:#ff5a7a;margin-left:16px}
-/* Emojis flotantes (dopamina) */
+/* Emojis flotantes */
 #fx{position:fixed;inset:0;pointer-events:none;z-index:18;overflow:hidden}
 .fxe{position:absolute;bottom:120px;will-change:transform,opacity;animation:floatUp 3.2s ease-out forwards;
   filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}
-@keyframes floatUp{
-  0%{transform:translateY(0) scale(.4);opacity:0}
-  12%{opacity:1;transform:translateY(-30px) scale(1.1)}
-  70%{opacity:1}
-  100%{transform:translateY(-74vh) scale(1.3);opacity:0}}
+@keyframes floatUp{0%{transform:translateY(0) scale(.4);opacity:0}12%{opacity:1;transform:translateY(-30px) scale(1.1)}70%{opacity:1}100%{transform:translateY(-74vh) scale(1.3);opacity:0}}
 /* Barra progreso */
-#bar{position:fixed;left:0;bottom:0;height:7px;width:100%;background:rgba(255,255,255,.12);z-index:5;
-  opacity:0;transition:opacity 1.1s ease}
+#bar{position:fixed;left:0;bottom:0;height:7px;width:100%;background:rgba(255,255,255,.12);z-index:5;opacity:0;transition:opacity 1.1s ease}
 #bar.show{opacity:1}
 #bar .fill{height:100%;width:0%;background:var(--pri);transition:width .8s linear}
-/* Boton pantalla completa */
-#fsBtn{position:fixed;bottom:24px;right:26px;z-index:25;background:rgba(10,14,22,.85);color:#fff;
-  border:1px solid #2a3550;border-radius:12px;padding:12px 16px;font-size:18px;font-weight:700;cursor:pointer;
-  opacity:0;transition:opacity .3s;pointer-events:none}
-#fsBtn.show{opacity:1;pointer-events:auto}
-/* Tap to start */
-#start{position:fixed;inset:0;background:rgba(5,8,14,.94);display:flex;flex-direction:column;
-  align-items:center;justify-content:center;z-index:30;cursor:pointer;text-align:center}
-#start .big{font-size:42px;font-weight:800}
-#start .sub{font-size:20px;color:#9aa7c2;margin-top:10px}
-.warn{position:fixed;top:0;left:0;right:0;background:#b45309;color:#fff;padding:12px;text-align:center;
-  font-weight:700;font-size:16px;z-index:40}
-/* Asistencias: viñetas apiladas bottom-right */
+/* Botones de control (aparecen con movimiento del mouse) */
+.ctrl{position:fixed;bottom:24px;z-index:25;background:rgba(10,14,22,.85);color:#fff;
+  border:1px solid #2a3550;border-radius:12px;padding:12px 16px;font-size:16px;font-weight:700;
+  cursor:pointer;opacity:0;transition:opacity .3s;pointer-events:none}
+.ctrl.show{opacity:1;pointer-events:auto}
+#fsBtn{right:26px}
+#resetBtn{right:210px;border-color:rgba(239,68,68,.5);color:#fca5a5}
+/* Overlay de activación de audio (pantalla completa, siempre reemplaza el "toca para iniciar") */
+#audioOverlay{position:fixed;inset:0;background:rgba(5,8,14,.93);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;z-index:30;cursor:pointer;text-align:center;padding:30px}
+#audioOverlay .ao-icon{font-size:80px;margin-bottom:20px}
+#audioOverlay .ao-title{font-size:38px;font-weight:800}
+#audioOverlay .ao-sub{font-size:18px;color:#9aa7c2;margin-top:12px;max-width:420px}
+.warn{position:fixed;top:0;left:0;right:0;background:#b45309;color:#fff;padding:12px;text-align:center;font-weight:700;font-size:16px;z-index:40}
+/* Asistencias */
 #assistZone{position:fixed;bottom:84px;right:22px;z-index:33;display:flex;flex-direction:column;gap:7px;align-items:flex-end}
 .apill{background:rgba(180,24,24,.88);backdrop-filter:blur(8px);border:1px solid rgba(255,100,100,.3);
   color:#fff;padding:8px 18px;border-radius:999px;font-size:15px;font-weight:700;letter-spacing:.2px;
@@ -122,10 +119,17 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 <div class="panel" id="loved"><div class="h">❤️ Lo más querido de hoy</div><div id="lovedItems"></div></div>
 <div id="bar"><div class="fill" id="fill"></div></div>
 
-<button id="fsBtn" title="Pantalla completa (F)">⛶ Pantalla completa</button>
-<div id="start"><div class="big">▶ Toca para iniciar</div><div class="sub">Activa el sonido y entra en pantalla completa</div></div>
+<button class="ctrl" id="fsBtn" title="Pantalla completa (F)">⛶ Pantalla completa</button>
+<button class="ctrl" id="resetBtn" title="Forzar reinicio del reproductor">🔄 Reiniciar video</button>
 
-<!-- TV singleton: ya hay otra pestaña corriendo -->
+<!-- Overlay de activación — siempre un toque, siempre captura el gesto del usuario -->
+<div id="audioOverlay">
+  <div class="ao-icon" id="aoIcon">▶</div>
+  <div class="ao-title" id="aoTitle">Toca para iniciar</div>
+  <div class="ao-sub" id="aoSub">Activa el sonido y entra en pantalla completa</div>
+</div>
+
+<!-- TV singleton -->
 <div id="duplModal" style="position:fixed;inset:0;background:rgba(0,0,0,.96);z-index:35;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:30px">
   <div style="font-size:52px;margin-bottom:16px">📺</div>
   <h2 style="font-size:28px;font-weight:800;margin-bottom:10px">TV ya está corriendo</h2>
@@ -137,166 +141,168 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   </div>
   <p style="color:#ef4444;margin-top:20px;font-size:13px">⚠ Tener dos TVs activas al mismo tiempo puede saltarse canciones y perder pagos</p>
 </div>
-<!-- Aviso silencioso cuando esta pestaña queda como secundaria -->
 <div id="duplWarn" style="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#b45309;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;z-index:34;display:none">📺 Pestaña secundaria — solo visualización, no controla audio</div>
-
-<!-- Asistencias: viñetas apiladas bottom-right -->
 <div id="assistZone"></div>
 
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
 const $=id=>document.getElementById(id);
 const TV_VENUE=new URLSearchParams(location.search).get('v')||'';
-const THEMES={
-  azul:   {pri:'#3b82f6',bg:'#000'},
-  purpura:{pri:'#a855f7',bg:'#050208'},
-  verde:  {pri:'#10b981',bg:'#020d07'},
-};
-function applyTheme(t){
-  const th=THEMES[t]||THEMES.azul,r=document.documentElement.style;
-  r.setProperty('--pri',th.pri);
-  document.body.style.background=th.bg;
-}
-// Apuntar QR al venue correcto
+const THEMES={azul:{pri:'#3b82f6',bg:'#000'},purpura:{pri:'#a855f7',bg:'#050208'},verde:{pri:'#10b981',bg:'#020d07'}};
+function applyTheme(t){const th=THEMES[t]||THEMES.azul,r=document.documentElement.style;r.setProperty('--pri',th.pri);document.body.style.background=th.bg;}
 $('qrImg').src='/api/qr'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
 
-// Wake Lock: evita que el computador entre en reposo/hibernación mientras la TV está activa
+// Wake Lock
 let _wl=null;
-async function keepAwake(){
-  if(!('wakeLock' in navigator)) return;
-  try{ _wl=await navigator.wakeLock.request('screen'); }catch(e){}
-}
+async function keepAwake(){if(!('wakeLock' in navigator))return;try{_wl=await navigator.wakeLock.request('screen');}catch(e){}}
 keepAwake();
-// Re-adquirir cuando la pestaña vuelve a estar visible (el SO libera el lock al minimizar)
-document.addEventListener('visibilitychange',()=>{ if(document.visibilityState==='visible') keepAwake(); });
+document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')keepAwake();});
 
-let player,ready=false,curYt=null,curId=null,wantAudio=false,topLoved=[],lastReactTotal=0,lastReacts={},lastReactId=null,authok=false;
-// Si ya fue iniciado antes (refresh/redeploy), cambiar overlay a versión compacta
+// ---- Estado principal ----
+let player,ready=false,curYt=null,curId=null,wantAudio=false;
+let topLoved=[],lastReactTotal=0,lastReacts={},lastReactId=null,authok=false;
+let isPrimary=true,advancingId=undefined;
+
+// Si ya inició antes en esta sesión (redeploy sin refresh), restaurar
 try{if(sessionStorage.getItem('tym_tv_started')==='1'){
   wantAudio=true;
-  $('start').querySelector('.big').textContent='🔊 Toca para activar audio';
-  $('start').querySelector('.sub').textContent='El video ya está cargando — toca para encender el sonido';
+  $('aoIcon').textContent='🔊';
+  $('aoTitle').textContent='Toca para reactivar audio';
+  $('aoSub').textContent='El video está cargando — un toque activa el sonido';
 }}catch(e){}
-let isPrimary=true;   // false → esta pestaña es secundaria: nunca llama advance
-let advancingId=undefined; // id de la canción para la que ya enviamos advance (evita doble llamada)
-// --- Asistencias ---
-const _assistShown=new Map(); // id → pill element
+
+// ---- Asistencias ----
+const _assistShown=new Map();
 function renderAssists(assists){
   const zone=$('assistZone');
   const ids=new Set((assists||[]).map(a=>a.id));
-  // Quitar viñetas resueltas
-  for(const [id,el] of _assistShown){
-    if(!ids.has(id)){el.remove();_assistShown.delete(id);}
-  }
-  if(!ids.size) return;
-  const MAX=3;
-  const visible=(assists||[]).slice(0,MAX);
-  const extra=(assists||[]).length-MAX;
-  // Agregar viñetas nuevas (newest at bottom → append)
+  for(const [id,el] of _assistShown){if(!ids.has(id)){el.remove();_assistShown.delete(id);}}
+  if(!ids.size)return;
+  const MAX=3;const visible=(assists||[]).slice(0,MAX);const extra=(assists||[]).length-MAX;
   visible.forEach(a=>{
-    if(_assistShown.has(a.id)) return;
-    const pill=document.createElement('div');
-    pill.className='apill fresh';
-    pill.dataset.id=a.id;
-    pill.textContent='🔔 '+a.table;
-    zone.appendChild(pill);
-    _assistShown.set(a.id,pill);
-    // Tras 2.5s: quitar 'fresh' → CSS transition fade a opacity .28
+    if(_assistShown.has(a.id))return;
+    const pill=document.createElement('div');pill.className='apill fresh';pill.dataset.id=a.id;
+    pill.textContent='🔔 '+a.table;zone.appendChild(pill);_assistShown.set(a.id,pill);
     setTimeout(()=>{pill.classList.remove('fresh');},2500);
   });
-  // Indicador de overflow
   let ov=zone.querySelector('.apill.extra');
-  if(extra>0){
-    if(!ov){ov=document.createElement('div');ov.className='apill extra';zone.prepend(ov);}
-    ov.textContent='+'+extra+' más pendientes 🔔';
-  } else if(ov) ov.remove();
-}
-async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:document.getElementById('lgUser').value.trim(),pass:document.getElementById('lgPass').value})});if(r.ok)location.reload();else document.getElementById('lgErr').textContent='Usuario o contraseña incorrectos';}
-(async()=>{const me=await fetch('/api/me');if(!me.ok){document.getElementById('loginGate').style.display='flex';return;}authok=true;if(ready)tick();})();
-const EMO=['❤️','🔥','👍'];
-function spawnEmoji(e){
-  const s=document.createElement('div');s.className='fxe';s.textContent=e;
-  s.style.left=(6+Math.random()*64)+'%';
-  s.style.fontSize=(42+Math.random()*34)+'px';
-  s.style.animationDuration=(2.7+Math.random()*1.3)+'s';
-  document.getElementById('fx').appendChild(s);
-  setTimeout(()=>s.remove(),4300);
-}
-const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
-const isRawIP=/^\d{1,3}(\.\d{1,3}){3}$/.test(location.hostname);
-if(isRawIP&&!isLocal){
-  const b=document.createElement('div');b.className='warn';
-  b.innerHTML='⚠ Conecta el COMPUTADOR del local al TV y abre <b>http://localhost:8000/tv</b> (YouTube no reproduce desde una IP).';
-  document.body.appendChild(b);
+  if(extra>0){if(!ov){ov=document.createElement('div');ov.className='apill extra';zone.prepend(ov);}ov.textContent='+'+extra+' más pendientes 🔔';}
+  else if(ov)ov.remove();
 }
 
-// TV Singleton: una sola pestaña controla la reproducción
+async function doLogin(){
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({user:document.getElementById('lgUser').value.trim(),pass:document.getElementById('lgPass').value})});
+  if(r.ok)location.reload();
+  else document.getElementById('lgErr').textContent='Usuario o contraseña incorrectos';
+}
+(async()=>{const me=await fetch('/api/me');if(!me.ok){document.getElementById('loginGate').style.display='flex';return;}authok=true;if(ready)tick();})();
+
+const EMO=['❤️','🔥','👍'];
+function spawnEmoji(e){const s=document.createElement('div');s.className='fxe';s.textContent=e;s.style.left=(6+Math.random()*64)+'%';s.style.fontSize=(42+Math.random()*34)+'px';s.style.animationDuration=(2.7+Math.random()*1.3)+'s';document.getElementById('fx').appendChild(s);setTimeout(()=>s.remove(),4300);}
+
+const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
+const isRawIP=/^\d{1,3}(\.\d{1,3}){3}$/.test(location.hostname);
+if(isRawIP&&!isLocal){const b=document.createElement('div');b.className='warn';b.innerHTML='⚠ Conecta el COMPUTADOR del local al TV y abre <b>http://localhost:8000/tv</b> (YouTube no reproduce desde una IP).';document.body.appendChild(b);}
+
+// TV Singleton
 let _tvc=null;
 try{
   _tvc=new BroadcastChannel('tym_tv');
   _tvc.onmessage=e=>{
     if(e.data==='tv_ping'){_tvc.postMessage('tv_here');}
     if(e.data==='tv_here'){isPrimary=false;$('duplModal').style.display='flex';}
-    if(e.data==='tv_takeover'){
-      // Otra pestaña toma control: esta pasa a secundaria silenciosa
-      isPrimary=false;
-      if(player&&player.pauseVideo){try{player.pauseVideo();}catch(e){}}
-      const w=$('duplWarn');if(w)w.style.display='';
-    }
+    if(e.data==='tv_takeover'){isPrimary=false;if(player&&player.pauseVideo){try{player.pauseVideo();}catch(e){}}const w=$('duplWarn');if(w)w.style.display='';}
   };
   _tvc.postMessage('tv_ping');
 }catch(e){}
-function acceptDupl(){
-  // Esta pestaña toma el control; la otra se silencia
-  isPrimary=true;
-  advancingId=undefined;
-  $('duplModal').style.display='none';
-  if(_tvc)_tvc.postMessage('tv_takeover');
-}
-function rejectDupl(){
-  isPrimary=false;
-  $('duplModal').style.display='none';
-  $('start').innerHTML='<div class="big">📺 TV activa en otra pestaña</div><div class="sub">Vuelve a la pestaña donde ya está corriendo la TV.</div>';
-}
+function acceptDupl(){isPrimary=true;advancingId=undefined;$('duplModal').style.display='none';if(_tvc)_tvc.postMessage('tv_takeover');}
+function rejectDupl(){isPrimary=false;$('duplModal').style.display='none';$('audioOverlay').innerHTML='<div class="ao-icon">📺</div><div class="ao-title">TV activa en otra pestaña</div><div class="ao-sub">Vuelve a la pestaña donde ya está corriendo la TV.</div>';}
 
-// ---------- YouTube ----------
+// ---- YouTube ----
 function onYouTubeIframeAPIReady(){
   player=new YT.Player('yt',{height:'100%',width:'100%',
     host:'https://www.youtube-nocookie.com',
     playerVars:{autoplay:1,playsinline:1,rel:0,controls:0,modestbranding:1,enablejsapi:1,origin:location.origin},
-    events:{onReady:()=>{ready=true;if(authok)tick();},onStateChange:e=>{if(e.data===YT.PlayerState.ENDED)advance();},
-            onError:()=>{ if(!isRawIP||isLocal) setTimeout(()=>advance(),1200); }}});
+    events:{
+      onReady:()=>{ready=true;if(authok)tick();},
+      onStateChange:e=>{if(e.data===YT.PlayerState.ENDED)advance();},
+      onError:()=>{if(!isRawIP||isLocal)setTimeout(()=>advance(),1200);}
+    }
+  });
 }
+
+// Fallback: si el player no se inicializó en 8s, mostrar aviso
+setTimeout(()=>{if(!ready){const b=document.createElement('div');b.className='warn';b.textContent='⚠ El reproductor de YouTube no cargó. Verifica la conexión a internet y recarga la página.';document.body.appendChild(b);}},8000);
+
 async function advance(manual=false){
-  if(!isPrimary) return;                            // pestaña secundaria: nunca avanza
-  const snapId = curId !== null ? curId : "";       // "" = nada sonaba cuando se llamó
-  if(advancingId===snapId) return;                  // ya enviamos advance para esta canción
+  if(!isPrimary)return;
+  const snapId=curId!==null?curId:'';
+  if(advancingId===snapId)return;
   advancingId=snapId;
   const body={from_id:snapId};
-  if(manual&&curYt){
-    try{body.yt=curYt;body.position=player.getCurrentTime();body.duration=player.getDuration();body.manual=true;}catch(e){}
-  }
-  try{
-    await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  }finally{
-    advancingId=undefined;
-  }
+  if(manual&&curYt){try{body.yt=curYt;body.position=player.getCurrentTime();body.duration=player.getDuration();body.manual=true;}catch(e){}}
+  try{await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
+  finally{advancingId=undefined;}
   tick();
 }
+
 function load(np){
-  if(!np){$('title').textContent='Esperando canciones…';$('artist').textContent='';$('who').textContent='';curYt=null;return;}
-  const changed = np.yt!==curYt;
-  $('title').textContent=np.title;$('artist').textContent=np.artist||'';
+  if(!np){$('title').textContent='Esperando canciones…';$('artist').textContent='';$('who').textContent='';curYt=null;curId=null;return;}
+  $('title').textContent=np.title;
+  $('artist').textContent=np.artist||'';
   $('who').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+(np.table||''));
-  if(changed){
-    // Solo actualizar curYt cuando ready=true (el player existe y puede cargar).
-    // Si ready=false, curYt queda null para que el próximo load() vea changed=true.
-    // NUNCA llamar unMute()/setVolume() aquí — requiere gesto del usuario (#start.onclick).
-    if(ready){curYt=np.yt;player.loadVideoById(np.yt);}
+  curId=np.id; // siempre actualizar el ID del servidor
+  if(np.yt!==curYt){
+    if(ready){
+      // Solo fijar curYt cuando el player carga el video
+      curYt=np.yt;
+      player.loadVideoById(np.yt);
+      // NO llamar unMute() aquí — solo el gesto del usuario en #audioOverlay puede hacerlo
+    }
+    // Si !ready: curYt queda null, el próximo tick() o watchdog lo reintentará
     burstNow();
   }
-  curId=np.id;
 }
+
+// ---- Activación de audio (único punto con gesto garantizado) ----
+async function activateAudio(){
+  wantAudio=true;
+  try{sessionStorage.setItem('tym_tv_started','1');}catch(e){}
+  $('audioOverlay').style.display='none';
+  toggleFs();
+  // Activar audio con el gesto del usuario
+  if(player){
+    try{player.setVolume(100);player.unMute();}catch(e){}
+    // Si el video ya está cargado, reproducirlo con audio
+    if(curYt){try{player.playVideo();}catch(e){}}
+  }
+  // Si no hay video cargado, forzar tick
+  if(!curYt&&authok)await tick();
+  // Intentar de nuevo después de tick
+  if(player&&curYt){try{player.playVideo();player.unMute();}catch(e){}}
+  burstNow();
+}
+
+// ---- Forzar reinicio del reproductor ----
+async function forceRestart(){
+  wantAudio=true;
+  try{sessionStorage.setItem('tym_tv_started','1');}catch(e){}
+  $('audioOverlay').style.display='none';
+  // Descargar el video actual para forzar recarga
+  curYt=null;
+  if(player){try{player.stopVideo();}catch(e){}}
+  await tick();
+  // Con gesto del usuario: activar audio
+  if(player){
+    try{player.setVolume(100);player.unMute();if(curYt)player.playVideo();}catch(e){}
+  }
+  burstNow();
+}
+
+$('audioOverlay').onclick=activateAudio;
+$('resetBtn').onclick=forceRestart;
+
 function applyBrand(set){
   applyTheme(set.theme);
   $('venue').textContent=set.venue_name;$('venueTop').textContent=set.venue_name;
@@ -309,80 +315,86 @@ function paintNext(q,count){
   count=count||0;
   if(!q||!q.length){$('upLbl').innerHTML='Cola vacía · suena la lista del local';$('upChips').innerHTML='';return;}
   $('upLbl').innerHTML=`A continuación · <b>${count} en cola</b>`;
-  $('upChips').innerHTML=q.slice(0,4).map(it=>`<span class="chip${it.priority?' p':''}">${it.priority?'⚡ ':''}${it.title}</span>`).join('')
-    +(count>4?`<span class="chip">+${count-4} más</span>`:'');
+  $('upChips').innerHTML=q.slice(0,4).map(it=>`<span class="chip${it.priority?' p':''}">${it.priority?'⚡ ':''}${it.title}</span>`).join('')+(count>4?`<span class="chip">+${count-4} más</span>`:'');
 }
 
-// ---------- Apariciones escalonadas con desvanecido ----------
+// ---- Apariciones escalonadas ----
 function burst(el,dur){el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),dur);}
 function burstNow(){burst($('brand'),13000);burst($('now'),13000);burst($('bar'),13000);}
 function schedule(fn,period,offset){setTimeout(()=>{fn();setInterval(fn,period);},offset);}
-const CYCLE=90000; // cada bloque reaparece cada 90s, escalonado -> hay ratos de solo video
-schedule(burstNow,CYCLE,1500);                       // sonando ahora + local
-schedule(()=>burst($('up'),11000),CYCLE,30000);      // a continuación (a los 30s)
-schedule(()=>burst($('qr'),13000),CYCLE,60000);      // QR + local (a los 60s)
-schedule(()=>{if(topLoved.length)burst($('loved'),9000);},CYCLE,75000); // ranking (a los 75s, si hay)
+const CYCLE=90000;
+schedule(burstNow,CYCLE,1500);
+schedule(()=>burst($('up'),11000),CYCLE,30000);
+schedule(()=>burst($('qr'),13000),CYCLE,60000);
+schedule(()=>{if(topLoved.length)burst($('loved'),9000);},CYCLE,75000);
 
-// ---------- Pantalla completa ----------
+// ---- Pantalla completa ----
 function toggleFs(){
   if(!document.fullscreenElement){(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen||function(){}).call(document.documentElement);}
   else{(document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);}
 }
 $('fsBtn').onclick=toggleFs;
-document.addEventListener('keydown',e=>{if(e.key==='f'||e.key==='F')toggleFs();});
-let mvT;document.addEventListener('mousemove',()=>{$('fsBtn').classList.add('show');clearTimeout(mvT);mvT=setTimeout(()=>$('fsBtn').classList.remove('show'),3000);});
-$('start').onclick=()=>{
-  wantAudio=true;
-  try{sessionStorage.setItem('tym_tv_started','1');}catch(e){}
-  $('start').style.display='none';
-  toggleFs();
-  if(player){
-    player.setVolume(100);
-    player.unMute();
-    player.playVideo();
-  }
-  if(!curYt&&authok)tick(); // si aún no hay video cargado, forzar carga inmediata
-  burstNow();
-};
+document.addEventListener('keydown',e=>{
+  if(e.key==='f'||e.key==='F')toggleFs();
+  if(e.key==='r'||e.key==='R')forceRestart();
+});
+let mvT;
+document.addEventListener('mousemove',()=>{
+  $('fsBtn').classList.add('show');$('resetBtn').classList.add('show');
+  clearTimeout(mvT);mvT=setTimeout(()=>{$('fsBtn').classList.remove('show');$('resetBtn').classList.remove('show');},3000);
+});
 
-// ---------- Estado ----------
+// ---- Estado / poll ----
 async function tick(){
   try{
-    const s=await (await fetch('/api/state')).json();
+    const s=await (await fetch('/api/state'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'')+'')).json();
     applyBrand(s.settings);
     if(!s.now_playing){
       if(isPrimary){
-        const snapId="";
+        const snapId=curId!==null?curId:'';
         if(advancingId!==snapId){
           advancingId=snapId;
           try{await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_id:snapId})});}finally{advancingId=undefined;}
         }
       }
-      const s2=await (await fetch('/api/state')).json();load(s2.now_playing);paintNext(s2.queue,s2.queue_count);return;
+      const s2=await (await fetch('/api/state'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'')+'')).json();
+      load(s2.now_playing);paintNext(s2.queue,s2.queue_count);return;
     }
     load(s.now_playing);paintNext(s.queue,s.queue_count);
   }catch(e){}
 }
+
 setInterval(async()=>{
   if(!authok)return;
   try{
-    const s=await (await fetch('/api/state')).json();
+    const s=await (await fetch('/api/state'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'')+'')).json();
     applyBrand(s.settings);
-    // Watchdog: nunca silencio — si no hay nada o el video ya terminó, avanza solo
-    if(!s.now_playing || (ready&&player&&player.getPlayerState&&player.getPlayerState()===YT.PlayerState.ENDED)){await advance();return;}
-    // Recuperar player pausado/detenido/cued (ps -1=unstarted, 2=paused, 5=cued)
-    if(s.now_playing&&ready&&player&&player.getPlayerState){
+
+    // Watchdog: nunca silencio
+    if(!s.now_playing||(ready&&player&&player.getPlayerState&&player.getPlayerState()===YT.PlayerState.ENDED)){await advance();return;}
+
+    // Recuperar: si hay canción en servidor pero no está cargada en el player
+    if(s.now_playing&&ready&&s.now_playing.yt!==curYt){load(s.now_playing);}
+
+    // Recuperar player detenido/pausado/cued después de carga exitosa
+    if(s.now_playing&&ready&&player&&player.getPlayerState&&curYt===s.now_playing.yt){
       try{const ps=player.getPlayerState();
-        if(ps===2||ps===-1||ps===5){player.playVideo();}
+        if(ps===2||ps===-1||ps===5){
+          player.playVideo();
+          if(wantAudio){try{player.unMute();player.setVolume(100);}catch(e){}}
+        }
       }catch(e){}
     }
-    // Trim APRENDIDO: salta en el punto donde el local suele saltar esta canción (silencios/outros)
-    {const le=s.now_playing.learned_end||0;
+
+    // Trim APRENDIDO
+    {const le=s.now_playing&&s.now_playing.learned_end||0;
      if(le>0&&ready&&player&&player.getCurrentTime&&player.getCurrentTime()>=le&&player.getPlayerState()===YT.PlayerState.PLAYING){await advance();return;}}
-    // Corte ciego opcional (si el dueño lo activa)
+
+    // Corte ciego opcional
     {const te=s.settings.trim_end_secs||0;
      if(te>0&&ready&&player&&player.getDuration){const cur=player.getCurrentTime()||0,d=player.getDuration()||0;
        if(d>30&&cur>=d-te&&player.getPlayerState()===YT.PlayerState.PLAYING){await advance();return;}}}
+
     if(s.now_playing){
       if(s.now_playing.id!==curId)load(s.now_playing);
       const dur=s.now_playing.duration||1,pos=Math.min(s.now_playing.position||0,dur);
@@ -391,7 +403,6 @@ setInterval(async()=>{
       $('nowReacts').innerHTML=EMO.map(e=>`${e} ${r[e]||0}`).join('   ');
       if(tot>lastReactTotal){$('nowReacts').classList.remove('rpulse');void $('nowReacts').offsetWidth;$('nowReacts').classList.add('rpulse');}
       lastReactTotal=tot;
-      // Emojis flotantes cuando llegan likes nuevos a la canción que suena
       if(s.now_playing.id!==lastReactId){lastReactId=s.now_playing.id;lastReacts=Object.assign({},r);}
       else{EMO.forEach(e=>{const d=(r[e]||0)-(lastReacts[e]||0);for(let i=0;i<Math.min(d,10);i++)setTimeout(()=>spawnEmoji(e),i*160);lastReacts[e]=r[e]||0;});}
     }
@@ -399,15 +410,14 @@ setInterval(async()=>{
     $('lovedItems').innerHTML=topLoved.slice(0,3).map((it,i)=>`<div class="it">${i+1}. ${it.title}<span class="love">❤️ ${it.total}</span></div>`).join('');
     paintNext(s.queue,s.queue_count);
     renderAssists(s.assists||[]);
-    // TV ping (indica al server que esta pantalla está activa)
     fetch('/api/tv_ping',{method:'POST'}).catch(()=>{});
   }catch(e){}
 },2000);
+
 setInterval(()=>{
   if(authok&&ready&&player&&player.getCurrentTime&&curYt){
     try{const pos=player.getCurrentTime(),dur=player.getDuration();
-      if(dur>0)fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({position:pos,duration:dur})});}catch(e){}
+      if(dur>0)fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:pos,duration:dur})});}catch(e){}
   }
 },2000);
 </script>
