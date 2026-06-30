@@ -47,7 +47,7 @@ header.bar{
 .row .mini{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none;background:#0b0f1a}
 .row .info{flex:1;min-width:0}
 .row .btn{flex:none}
-.row .info .t{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .info .t{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden}
 .row .info .a{color:var(--mut);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pos{font-weight:800;color:var(--mut);width:26px;text-align:center}
 .chip{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:700}
@@ -55,7 +55,8 @@ header.bar{
 .chip.fb{background:rgba(154,167,194,.14);color:var(--mut);border:1px solid var(--line)}
 
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:none;cursor:pointer;
-  padding:12px 16px;border-radius:12px;font-size:15px;font-weight:700;color:#fff;background:var(--pri)}
+  padding:12px 16px;border-radius:12px;font-size:15px;font-weight:700;color:#fff;background:var(--pri);
+  touch-action:manipulation;-webkit-user-select:none;user-select:none}
 .btn:active{transform:scale(.98)}
 .btn.block{width:100%}
 .btn.gold{background:var(--gold);color:#1a1300}

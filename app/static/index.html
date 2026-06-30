@@ -71,6 +71,11 @@ body{padding-bottom:80px}
 .tick{display:inline-flex;font-size:12px;font-weight:600;white-space:nowrap;will-change:transform;color:var(--txt)}
 .tick.go{animation:tickGo 8s linear infinite}
 @keyframes tickGo{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+/* ---- Row title ticker ---- */
+@keyframes rowTick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+/* Filas de la lista: hacer toda la fila clickeable */
+.row.tappable{cursor:pointer}
+.row.tappable:active{opacity:.75}
 
 /* ---- Similar songs ---- */
 #simBox{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
@@ -348,17 +353,18 @@ function renderResults(list){
   const res=$('results');res.innerHTML='';
   if(!list||!list.length){res.innerHTML='<div class="empty">Sin resultados. Prueba otro nombre o pega un link de YouTube.</div>';return;}
   list.slice(0,12).forEach(s=>{
-    const r=document.createElement('div');r.className='row';
+    const r=document.createElement('div');r.className='row tappable';
     if(s._link){
-      r.innerHTML=`<div style="font-size:26px;flex-shrink:0">🔗</div><div class="info" style="flex:1"><div class="t">Canción desde link</div><div class="a" style="word-break:break-all;font-size:11px">${s._link.slice(0,60)}</div></div><button class="btn sm">Pedir</button>`;
-      r.querySelector('button').onclick=()=>openSheetLink(s._link);
+      r.innerHTML=`<div style="font-size:26px;flex-shrink:0">🔗</div><div class="info" style="flex:1"><div class="t">Canción desde link</div><div class="a" style="word-break:break-all;font-size:11px">${s._link.slice(0,60)}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
+      r.onclick=()=>openSheetLink(s._link);
     }else{
       const sub=[s.artist,s.length].filter(Boolean).join(' · ');
-      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div><button class="btn sm">Pedir</button>`;
-      r.querySelector('button').onclick=()=>openSheet(s);
+      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
+      r.onclick=()=>openSheet(s);
     }
     res.appendChild(r);
   });
+  tickify(res);
 }
 
 // ---------- Sugerencias basadas en lo que suena ----------
@@ -370,12 +376,13 @@ async function loadSimilar(artist){
     const list=await (await fetch('/api/search?q='+encodeURIComponent(artist))).json();
     const box=$('simList');box.innerHTML='';
     list.filter(s=>s.yt!==_nowYt).slice(0,5).forEach(s=>{
-      const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div><button class="btn sm">Pedir</button>`;
-      r.querySelector('button').onclick=()=>openSheet(s);
+      const r=document.createElement('div');r.className='row tappable';
+      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
+      r.onclick=()=>openSheet(s);
       box.appendChild(r);
     });
     if(!box.children.length) $('simBox').style.display='none';
+    else tickify(box);
   }catch(e){$('simBox').style.display='none';}
 }
 
@@ -502,6 +509,24 @@ function updateAssistBtn(){
   btn.classList.add('show');
   btn.textContent=assistActive?'🔕':'🔔';
   btn.classList.toggle('ringing',assistActive);
+}
+
+// ---------- Row title ticker ----------
+function applyTicker(el){
+  if(el.dataset.tkd)return;
+  el.dataset.tkd='1';
+  if(el.scrollWidth<=el.clientWidth+2)return; // título cabe, sin ticker
+  const html=el.innerHTML;
+  const dur=Math.max(6,el.textContent.length*0.16)+'s';
+  const span=document.createElement('span');
+  span.style.cssText=`display:inline-block;white-space:nowrap;animation:rowTick ${dur} linear infinite`;
+  span.innerHTML=`<span style="padding-right:40px">${html}</span><span style="padding-right:40px">${html}</span>`;
+  el.innerHTML='';el.appendChild(span);
+}
+function tickify(parent){
+  requestAnimationFrame(()=>{
+    (parent||document).querySelectorAll('.info .t:not([data-tkd])').forEach(applyTicker);
+  });
 }
 
 // ---------- Header ticker ----------
@@ -655,6 +680,7 @@ function renderList(elId,items,opts){
   const box=$(elId);box.innerHTML='';
   if(!items||!items.length){box.innerHTML='<div class="empty">'+((opts&&opts.empty)||'Nada aún.')+'</div>';return;}
   items.forEach(it=>box.appendChild(songRow(it,opts)));
+  tickify(box);
 }
 function renderLoved(items){
   const box=$('lovedList');box.innerHTML='';
@@ -664,6 +690,7 @@ function renderLoved(items){
     d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div><div class="love">❤️ ${it.total}</div>`;
     box.appendChild(d);
   });
+  tickify(box);
 }
 
 // ---------- Poll ----------
@@ -739,7 +766,7 @@ async function poll(){
     const items=s.my_tab||[],tl=$('tabList');
     if(!items.length)tl.innerHTML='<div class="empty">Sin cargos todavía.</div>';
     else{tl.innerHTML='';items.forEach(x=>{const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<div class="info"><div class="t">${x.title}</div><div class="a">${x.kind}</div></div><div class="chip pri">${cop(x.amount)}</div>`;tl.appendChild(r);});}
+      r.innerHTML=`<div class="info"><div class="t">${x.title}</div><div class="a">${x.kind}</div></div><div class="chip pri">${cop(x.amount)}</div>`;tl.appendChild(r);});tickify(tl);}
 
     // Aviso al autor de likes
     if(typeof s.my_likes_total==='number'){
