@@ -249,6 +249,19 @@ class TestAdminHTML(unittest.TestCase):
     def test_move_buttons_rendered(self):
         self.assertIn("dir", self.h.src)   # used in moveItem call
 
+    def test_admin_search_is_autosearch(self):
+        # Input must trigger adminSearch on every keystroke (oninput), not just Enter
+        self.assertIn("oninput", self.h.src)
+        self.assertIn("adminSearch", self.h.src)
+
+    def test_admin_search_response_is_array_not_results_key(self):
+        # Bug: was using d.results||[] but API returns array directly
+        # Must NOT access .results on the response
+        idx = self.h.src.index("function adminSearch")
+        block = self.h.src[idx:idx+800]
+        self.assertNotIn(".results", block,
+            "adminSearch must treat API response as array directly, not d.results")
+
 
 # ===========================================================================
 # Tests: style.css

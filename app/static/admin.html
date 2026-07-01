@@ -105,8 +105,7 @@
         <div class="card">
           <p class="sec">Agregar canción a la cola</p>
           <div style="display:flex;gap:8px">
-            <input class="field" id="adminQ" placeholder="Buscar canción…" style="margin:0;flex:1" onkeydown="if(event.key==='Enter')adminSearch()">
-            <button class="btn sm" onclick="adminSearch()">Buscar</button>
+            <input class="field" id="adminQ" placeholder="Buscar canción…" style="margin:0;flex:1" oninput="adminSearch()" onkeydown="if(event.key==='Enter')adminSearch()">
           </div>
           <div class="list" id="adminResults" style="margin-top:8px"></div>
         </div>
@@ -387,18 +386,20 @@ async function moveItem(id,dir){await post('/api/admin/move',{id,dir});tick();}
 
 let _adminSearchTimer=null;
 function adminSearch(){
-  const q=$('adminQ').value.trim();if(!q)return;
-  const box=$('adminResults');box.innerHTML='<div class="empty">Buscando…</div>';
+  const q=$('adminQ').value.trim();
+  const box=$('adminResults');
   clearTimeout(_adminSearchTimer);
+  if(!q){box.innerHTML='';return;}
+  box.innerHTML='<div class="empty">Buscando…</div>';
   _adminSearchTimer=setTimeout(async()=>{
     try{
-      const r=await fetch('/api/search?q='+encodeURIComponent(q));
-      const d=await r.json();const res=d.results||[];
+      const res=await (await fetch('/api/search?q='+encodeURIComponent(q))).json();
       box.innerHTML='';
-      if(!res.length){box.innerHTML='<div class="empty">Sin resultados.</div>';return;}
-      res.slice(0,6).forEach(s=>{
+      if(!res||!res.length){box.innerHTML='<div class="empty">Sin resultados.</div>';return;}
+      res.slice(0,8).forEach(s=>{
+        const sub=[s.artist,s.length].filter(Boolean).join(' · ');
         const row=document.createElement('div');row.className='row';
-        row.innerHTML=`<img class="mini" src="${img(s.yt)}"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div>`;
+        row.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div>`;
         const addBtn=document.createElement('button');addBtn.className='btn green sm';addBtn.textContent='+ Cola';
         addBtn.onclick=()=>{
           const pos=prompt('¿En qué posición? (1 = primero, dejar vacío = al final)');
