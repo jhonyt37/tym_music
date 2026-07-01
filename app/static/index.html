@@ -356,14 +356,18 @@ function renderReco(){
 
 // ---------- Busqueda ----------
 const YT_RE=/youtu\.?be|youtube\.com\/(watch|shorts|embed)/i;
+function placeSimBox(searchActive){
+  const card=$('recoBox').parentNode;
+  if(searchActive) card.appendChild($('simBox'));
+  else card.insertBefore($('simBox'),$('recoBox'));
+}
 function onSearch(term){
   clearTimeout(searchTimer);
-  const card=$('recoBox').parentNode;
   if(!term.trim()){
-    card.insertBefore($('simBox'),$('recoBox')); // simBox arriba del catálogo
+    placeSimBox(false);
     $('recoChips').style.display='flex';renderReco();return;
   }
-  card.appendChild($('simBox')); // resultados primero, simBox abajo con separador
+  placeSimBox(true); // resultados primero, simBox abajo con separador
   $('recoChips').style.display='none';
   if(YT_RE.test(term)){renderResults([{_link:term}]);return;}
   $('results').innerHTML='<div class="empty">Buscando…</div>';
@@ -396,6 +400,7 @@ function renderResults(list){
 async function loadSimilar(artists){
   const unique=[...new Set((Array.isArray(artists)?artists:[artists]).filter(Boolean))].slice(0,3);
   if(!unique.length){$('simBox').style.display='none';return;}
+  if(!$('q').value.trim()) placeSimBox(false);
   $('simBox').style.display='';
   $('simLabel').textContent=unique.join(' · ');
   $('simList').innerHTML='<div class="empty" style="font-size:13px">Buscando…</div>';
