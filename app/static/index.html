@@ -51,6 +51,7 @@ body{padding-bottom:80px}
   min-height:60px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 .nav button span{font-size:21px;line-height:1}
 .nav button.on{color:var(--pri)}
+.nav.modal-open{display:none}
 .badge{position:absolute;top:4px;right:50%;margin-right:-22px;background:var(--pri);color:#fff;font-size:10px;
   font-weight:800;border-radius:999px;padding:1px 6px;font-style:normal}
 .badge.gold{background:var(--gold);color:#1a1300}
@@ -432,14 +433,14 @@ function openSheet(s){
   $('sTitle').textContent=s.title;$('sArtist').textContent=s.artist||'';
   $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
   updatePriOption();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
-  $('sheet').classList.add('open');document.body.style.overflow='hidden';
+  $('sheet').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
 }
 function openSheetLink(l){
   chosen={link:l,title:'Tu canción (link)'};mode='normal';
   $('sTitle').textContent='Canción desde link';$('sArtist').textContent=l.slice(0,42);
   $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
   updatePriOption();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
-  $('sheet').classList.add('open');document.body.style.overflow='hidden';
+  $('sheet').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
 }
 function updatePriOption(){
   const now=Date.now()/1000;
@@ -457,7 +458,7 @@ function pick(m){mode=m;
   const c=$('confirmBtn');
   c.textContent = m==='super'?'Saltar al #1 ⏫':(m==='pri'?'Pedir con prioridad ⚡':'Pedir canción');
   c.classList.toggle('gold',m!=='normal');}
-function closeSheet(){$('sheet').classList.remove('open');document.body.style.overflow='';}
+function closeSheet(){$('sheet').classList.remove('open');document.body.style.overflow='';$('nav').classList.remove('modal-open');}
 function confirmReq(){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   if(mode==='super'){
@@ -492,10 +493,15 @@ function confirmModal(title,msg,cb,opts){
   $('cfTitle').textContent=title;$('cfMsg').innerHTML=msg;
   $('cfNoBtn').textContent=(opts&&opts.noLabel)||'Cancelar';
   $('cfYes').textContent=(opts&&opts.yesLabel)||'Confirmar';
-  $('confirmBg').classList.add('open');document.body.style.overflow='hidden';
+  $('confirmBg').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
   $('cfYes').onclick=()=>{cfNo();cfCb&&cfCb();};
 }
-function cfNo(){$('confirmBg').classList.remove('open');document.body.style.overflow='';if(cfNoCb){cfNoCb();cfNoCb=null;}}
+function cfNo(){
+  $('confirmBg').classList.remove('open');document.body.style.overflow='';
+  // Restaura el nav solo si el sheet de canción también está cerrado
+  if(!$('sheet').classList.contains('open'))$('nav').classList.remove('modal-open');
+  if(cfNoCb){cfNoCb();cfNoCb=null;}
+}
 function toast(t,type){const e=$('toast');e.textContent=t;e.className='toast'+(type?' '+type:'');e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
 
 // ---------- Campana flotante: drag + tap corto + tap largo ----------

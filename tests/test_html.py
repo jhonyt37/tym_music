@@ -135,6 +135,38 @@ class TestIndexHTML(unittest.TestCase):
     def test_bell_holding_class_defined(self):
         self.assertIn("holding", self.h.src)
 
+    # --- Nav hidden when modal/sheet is open ---
+    def test_nav_hidden_css_class_defined(self):
+        self.assertIn(".nav.modal-open", self.h.src)
+    def test_nav_hidden_on_open_sheet(self):
+        # openSheet must add modal-open to nav
+        idx = self.h.src.index("function openSheet(")
+        block = self.h.src[idx:idx+600]
+        self.assertIn("modal-open", block)
+    def test_nav_hidden_on_open_sheet_link(self):
+        idx = self.h.src.index("function openSheetLink(")
+        block = self.h.src[idx:idx+700]
+        self.assertIn("modal-open", block)
+    def test_nav_restored_on_close_sheet(self):
+        idx = self.h.src.index("function closeSheet(")
+        block = self.h.src[idx:idx+200]
+        self.assertIn("modal-open", block)
+    def test_nav_hidden_on_confirm_modal(self):
+        idx = self.h.src.index("function confirmModal(")
+        block = self.h.src[idx:idx+400]
+        self.assertIn("modal-open", block)
+    def test_nav_restored_on_cf_no(self):
+        idx = self.h.src.index("function cfNo(")
+        block = self.h.src[idx:idx+300]
+        self.assertIn("modal-open", block)
+    def test_cf_no_checks_sheet_before_restoring_nav(self):
+        # cfNo must check if sheet is still open before removing modal-open
+        # (to avoid flashing nav when confirmModal is stacked on top of sheet)
+        idx = self.h.src.index("function cfNo(")
+        block = self.h.src[idx:idx+300]
+        self.assertIn("sheet", block)
+        self.assertIn("modal-open", block)
+
 
 # ===========================================================================
 # Tests: tv.html structure
