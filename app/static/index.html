@@ -159,6 +159,10 @@ body{padding-bottom:80px}
   <!-- ===== SOCIAL ===== -->
   <section class="tab" id="tab-social">
     <div class="card">
+      <h2>🏆 Lo más pedido aquí</h2>
+      <div class="list" id="topReqList"><div class="empty">Aún sin pedidos registrados.</div></div>
+    </div>
+    <div class="card">
       <h2>❤️ Lo más querido de la noche</h2>
       <div class="list" id="lovedList"><div class="empty">Aún sin reacciones. ¡Sé el primero en reaccionar!</div></div>
     </div>
@@ -718,6 +722,17 @@ function renderList(elId,items,opts){
   items.forEach(it=>box.appendChild(songRow(it,opts)));
   tickify(box);
 }
+function renderTopRequested(items){
+  const box=$('topReqList');box.innerHTML='';
+  if(!items||!items.length){box.innerHTML='<div class="empty">Aún sin pedidos registrados.</div>';return;}
+  items.forEach((it,i)=>{
+    const d=document.createElement('div');d.className='rank tappable';
+    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div><div class="love" style="color:var(--pri)">🎵 ${it.count}</div>`;
+    d.onclick=()=>openSheet(it);
+    box.appendChild(d);
+  });
+  tickify(box);
+}
 function renderLoved(items){
   const box=$('lovedList');box.innerHTML='';
   if(!items||!items.length){box.innerHTML='<div class="empty">Aún sin reacciones. ¡Sé el primero en reaccionar!</div>';return;}
@@ -792,6 +807,7 @@ async function poll(){
     renderList('queueList', s.queue, {boost:true, empty:'Nada en cola — suena la lista del local.'});
     renderList('historyList', s.history, {empty:'Todavía no ha sonado nada.'});
     renderLoved(s.top_loved);
+    renderTopRequested(s.top_requested);
 
     // Badges de navegación
     $('badgeQ').style.display=s.queue_count?'':'none';$('badgeQ').textContent=s.queue_count;

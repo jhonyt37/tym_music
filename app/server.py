@@ -487,6 +487,15 @@ def public_state(token=None, admin=False):
                                           "artist": it.get("artist", ""), "total": 0})
             a["total"] += tot
     top_loved = sorted(agg.values(), key=lambda x: -x["total"])[:5]
+    req_songs = {}
+    for e in STATE.get("request_log", []):
+        yt = e.get("yt", "")
+        if not yt:
+            continue
+        if yt not in req_songs:
+            req_songs[yt] = {"yt": yt, "title": e.get("title", "?"), "artist": e.get("artist", ""), "count": 0}
+        req_songs[yt]["count"] += 1
+    top_requested = sorted(req_songs.values(), key=lambda x: -x["count"])[:10]
     out = {
         "settings": dict({k: s.get(k) for k in ("venue_name", "price_priority", "style", "auto_approve",
                                        "genre", "credit_packages", "time_pass",
@@ -512,6 +521,7 @@ def public_state(token=None, admin=False):
         "my_wait_secs": my_wait,
         "history": history,
         "top_loved": top_loved,
+        "top_requested": top_requested,
         "session": (None if not sess else {"table": sess["table"], "credits": sess["credits"],
                                            "pass_until": sess["pass_until"]}),
     }
