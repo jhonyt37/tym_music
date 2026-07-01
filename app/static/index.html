@@ -18,8 +18,7 @@ if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 <title>TYM Music</title>
 <link rel="stylesheet" href="/style.css">
 <style>
-.prog{height:6px;background:#2a3550;border-radius:4px;overflow:hidden;margin-top:12px}
-.prog-fill{height:100%;background:var(--pri);width:0%;transition:width .45s linear}
+
 .chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:8px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .chipt{white-space:nowrap;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--mut);font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0}
@@ -177,7 +176,8 @@ body{padding-bottom:80px}
 
   <!-- ===== AHORA (antes "Suena") ===== -->
   <section class="tab" id="tab-ahora">
-    <div class="card">
+    <div class="card now-live" id="nowCard">
+      <div class="now-live-lbl">🟢 EN VIVO</div>
       <h2><span class="pulse"></span>Sonando ahora</h2>
       <div class="active-t" id="activeTables"></div>
       <div class="now">
@@ -194,14 +194,16 @@ body{padding-bottom:80px}
       </div>
       <div class="wait" id="queueInfo">Cargando cola…</div>
       <div class="wait" id="myInfo" style="display:none"></div>
+      <div id="myNextBanner" class="my-next-banner" style="display:none">🎵 ¡Tu canción es la siguiente!</div>
       <div id="reactLbl" style="display:none;margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         <span style="font-size:12px;color:var(--mut)">¿Te gusta lo que suena? Reacciona:</span>
         <button id="likePubBtn" onclick="toggleLikePub()" style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--txt);cursor:pointer;touch-action:manipulation"></button>
       </div>
       <div class="reacts" id="nowReacts"></div>
+      <button id="skipBtn" class="skip-btn" onclick="voteSkip()" style="display:none"></button>
     </div>
-    <div class="card">
-      <h2>Vienen en cola 🎶 (<span id="qcount">0</span>)</h2>
+    <div class="card queue-card" id="queueCard">
+      <h2>En cola 🎶 (<span id="qcount">0</span>)</h2>
       <div class="list" id="queueList"><div class="empty">Nada en cola — suena la lista del local.</div></div>
     </div>
   </section>
@@ -411,6 +413,7 @@ let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='';
 let assistActive=false, assistId=null, _lastBuzzTs=0;
 let _simLoadedForId=null, _nowYt=null;
 let _npState=null;
+let _queueYts=new Set();
 const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
@@ -510,7 +513,8 @@ function renderResults(list){
       r.onclick=()=>openSheetLink(s._link);
     }else{
       const sub=[s.artist,s.length].filter(Boolean).join(' · ');
-      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
+      const inQ=_queueYts.has(s.yt);
+      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div>${inQ?'<span class="chip-queue">En cola</span>':'<div class="btn sm" style="pointer-events:none">Pedir</div>'}`;
       r.onclick=()=>openSheet(s);
     }
     res.appendChild(r);
@@ -1124,7 +1128,12 @@ async function subscribe(){
 function renderList(elId,items,opts){
   const box=$(elId);box.innerHTML='';
   if(!items||!items.length){box.innerHTML='<div class="empty">'+((opts&&opts.empty)||'Nada aún.')+'</div>';return;}
-  items.forEach(it=>box.appendChild(songRow(it,opts)));
+  const showPos=(elId==='queueList');
+  items.forEach((it,i)=>{
+    const row=songRow(it,opts);
+    if(showPos){const pos=document.createElement('div');pos.className='qpos';pos.textContent='#'+(i+1);row.prepend(pos);}
+    box.appendChild(row);
+  });
   tickify(box);
 }
 function renderTopRequested(items){
@@ -1216,9 +1225,22 @@ async function poll(){
       $('nowImg').removeAttribute('src');$('progFill').style.width='0%';$('nowPos').textContent='0:00';$('nowRem').textContent='';}
 
     // Cola
+    _queueYts=new Set((s.queue||[]).map(it=>it.yt).filter(Boolean));
     $('queueInfo').textContent=`${s.queue_count} en cola · ~${mm(s.queue_total_secs)} de música`;
     if(s.my_pos){$('myInfo').style.display='';$('myInfo').innerHTML=`⭐ Tu canción: puesto #${s.my_pos} · suena en ~${mm(s.my_wait_secs)}`;}
     else $('myInfo').style.display='none';
+
+    // Banner "tu canción es la siguiente"
+    $('myNextBanner').style.display=(s.my_pos===1)?'flex':'none';
+
+    // Skip democrático
+    const skipEl=$('skipBtn');
+    if(s.settings&&s.settings.allow_skip_vote&&np&&!np.fallback){
+      skipEl.style.display='';
+      const cnt=s.skip_votes_count||0, thr=s.skip_threshold||2;
+      skipEl.textContent=s.my_skip_vote?`⏭ Voté saltar (${cnt}/${thr}) — quitar voto`:`⏭ Votar saltar esta canción (${cnt}/${thr})`;
+      skipEl.className='skip-btn'+(s.my_skip_vote?' voted':'');
+    }else{skipEl.style.display='none';}
 
     // Reacciones + social
     $('nowReacts').innerHTML = np ? reactHtml(np) : '';
@@ -1252,6 +1274,18 @@ async function poll(){
       myLikes=s.my_likes_total;
     }
   }catch(e){}
+}
+async function voteSkip(){
+  if(!token){toast('Ingresa el código de tu mesa primero.','err');return;}
+  try{
+    const r=await fetch('/api/skip_vote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})});
+    const d=await r.json();
+    if(!r.ok){toast(d.error||'Error al votar','err');return;}
+    if(d.skipped){toast('⏭ ¡Votos suficientes! Cambiando canción…','ok');}
+    else if(d.my_vote){toast(`⏭ Voto registrado (${d.count}/${d.threshold})`,'ok');}
+    else{toast('Voto retirado','ok');}
+    poll();
+  }catch(e){toast('Error de conexión','err');}
 }
 boot();
 // Refresca la sesión cada 5 min: si el servidor la perdió (reinicio), vuelve a pedir PIN

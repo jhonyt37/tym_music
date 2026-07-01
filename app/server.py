@@ -13,7 +13,7 @@ from urllib.parse import urlparse, parse_qs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
-VERSION = "0.0.3-demo"
+VERSION = "0.0.4-demo"
 PORT = int(os.environ.get("PORT", 8000))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 # Upstash Redis (backup remoto: evita perder datos en Render/hosts con disco efímero)
@@ -79,6 +79,7 @@ def make_venue(name):
             "theme": "azul",               # tema de color: azul | purpura | verde
             "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
             "allowed_keywords": [],        # si hay entradas, la canción DEBE tener al menos una
+            "allow_skip_vote": False,      # permite que las mesas voten para saltar la canción
         },
         "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4} for i in range(1, 6)],  # PINs 1111..5555
         "sessions": {},
@@ -102,6 +103,7 @@ def make_venue(name):
         "bis_votes": {},           # {yt: set(tokens)} — votos de bis por canción
         "poll": None,              # {options:[{yt,title,artist}], votes:{yt:set(tokens)}, active, created_at}
         "vibe_votes": {},          # {emoji: set(tokens)} — votos de vibe
+        "skip_votes": set(),       # set de tokens que votaron para saltar la canción actual
         "_id": 0, "_fb": 0,
     }
 
@@ -380,6 +382,7 @@ def promote_next(manual=False):
             nxt["charged"] = True  # marcar siempre para no reintentar
         nxt["position"] = 0
         nxt["played_at"] = now
+        STATE["skip_votes"] = set()  # reiniciar votos de skip al cambiar de canción
         nxt["played_enough"] = False
         nxt["play_status"] = "playing"
         STATE["now_playing"] = nxt
@@ -603,7 +606,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "repeat_block_min", "repeat_block_songs", "trim_end_secs",
                                        "free_per_window", "free_window_min", "jump_multiplier",
                                        "venue_logo", "max_priority_queue_min", "fallback_shuffle",
-                                       "theme", "blocked_keywords", "allowed_keywords")},
+                                       "theme", "blocked_keywords", "allowed_keywords",
+                                       "allow_skip_vote")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "tables": [t["name"] for t in STATE["tables"]],
         "now_playing": np_pub,
@@ -631,6 +635,10 @@ def public_state(token=None, admin=False, mark_dedica=None):
         "bis_threshold": BIS_THRESHOLD,
         "poll": poll_state,
         "vibe": vibe_state,
+        "skip_votes_count": len(STATE.get("skip_votes", set())),
+        "skip_threshold": max(2, -(-len({se["table"] for se in STATE.get("sessions", {}).values()
+                                         if time.time() - se.get("created", 0) < 7200}) // 2)),
+        "my_skip_vote": bool(token and token in STATE.get("skip_votes", set())),
         "session": (None if not sess else {"table": sess["table"], "credits": sess["credits"],
                                            "pass_until": sess["pass_until"]}),
     }
@@ -1443,6 +1451,7 @@ class H(BaseHTTPRequestHandler):
                 STATE["bis_votes"] = {}
                 STATE["poll"] = None
                 STATE["vibe_votes"] = {}
+                STATE["skip_votes"] = set()
                 _id[0] = 0
                 FB_IDX[0] = 0
                 return self._send(200, {"ok": True})
@@ -1531,6 +1540,34 @@ class H(BaseHTTPRequestHandler):
                                         "my_vote": my_vote})
 
             # ---- Vibe ----
+            if path == "/api/skip_vote":
+                if not STATE["settings"].get("allow_skip_vote"):
+                    return self._send(400, {"error": "El skip por votación no está activado en este local."})
+                np_sv = STATE.get("now_playing")
+                if not np_sv or np_sv.get("fallback"):
+                    return self._send(400, {"error": "No hay canción de cliente sonando ahora."})
+                sess_sv = get_session(d.get("token"))
+                if not sess_sv:
+                    return self._send(400, {"error": "Ingresa el código de tu mesa primero."})
+                tok = d.get("token")
+                sv = STATE.setdefault("skip_votes", set())
+                if tok in sv:
+                    sv.discard(tok)
+                    my_vote = False
+                else:
+                    sv.add(tok)
+                    my_vote = True
+                active_tables = len({se["table"] for se in STATE.get("sessions", {}).values()
+                                     if time.time() - se.get("created", 0) < 7200})
+                threshold = max(2, -(-active_tables // 2))
+                skipped = False
+                if len(sv) >= threshold:
+                    promote_next(manual=True)
+                    skipped = True
+                return self._send(200, {"ok": True, "my_vote": my_vote,
+                                        "count": len(STATE.get("skip_votes", set())),
+                                        "threshold": threshold, "skipped": skipped})
+
             if path == "/api/vibe":
                 sess = get_session(d.get("token"))
                 if not sess:
@@ -1633,6 +1670,7 @@ def venue_snapshot(v):
     snap["repeat_exceptions"] = list(v.get("repeat_exceptions", set()))
     snap["bis_votes"] = {yt: list(tokens) for yt, tokens in v.get("bis_votes", {}).items()}
     snap["vibe_votes"] = {emoji: list(tokens) for emoji, tokens in v.get("vibe_votes", {}).items()}
+    snap["skip_votes"] = list(v.get("skip_votes", set()))
     _poll = v.get("poll")
     if _poll:
         _pc = dict(_poll)
@@ -1714,6 +1752,7 @@ def _load_into(v, snap):
     v["repeat_exceptions"] = set(snap.get("repeat_exceptions", []))
     v["bis_votes"] = {yt: set(tokens) for yt, tokens in snap.get("bis_votes", {}).items()}
     v["vibe_votes"] = {emoji: set(tokens) for emoji, tokens in snap.get("vibe_votes", {}).items()}
+    v["skip_votes"] = set(snap.get("skip_votes", []))
     _ps = snap.get("poll")
     if _ps:
         _pc = dict(_ps)

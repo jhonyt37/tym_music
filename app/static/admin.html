@@ -181,6 +181,11 @@
       <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (× precio)</span><input class="field" id="jumpMult" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Bloquear nuevas prioridades si la cola supera (minutos, 0=sin límite)</span><input class="field" id="maxPrioMin" type="number"></div>
 
+      <label class="opt" style="margin-top:12px">
+        <div><b>Permitir skip democrático ⏭</b><div class="small">Las mesas pueden votar para saltar la canción actual (mayoría simple)</div></div>
+        <input type="checkbox" id="allowSkipVote" style="width:22px;height:22px">
+      </label>
+
       <p class="sec" style="margin-top:22px">Filtro de contenido 🚫</p>
       <div class="small" style="margin-bottom:10px">Controla qué canciones pueden pedir los clientes según el título o artista.</div>
 
@@ -491,7 +496,8 @@ async function save(){
     allowed_keywords:[..._kwAllowed],
     socials:{instagram:$('soIg').value,tiktok:$('soTt').value,web:$('soWeb').value},
     credit_packages:readPackages(),
-    time_pass:{minutes:parseInt($('passMin').value||30),price:parseInt($('passPrice').value||0)}};
+    time_pass:{minutes:parseInt($('passMin').value||30),price:parseInt($('passPrice').value||0)},
+    allow_skip_vote:$('allowSkipVote').checked};
   if(tymLogoData)payload.tym_logo=tymLogoData;
   if(venueLogoData)payload.venue_logo=venueLogoData;
   await post('/api/admin/settings',payload);
@@ -565,6 +571,7 @@ async function tick(){
       $('jumpMult').value=s.settings.jump_multiplier;
       $('maxPrioMin').value=s.settings.max_priority_queue_min||0;
       $('fbShuffle').checked=s.settings.fallback_shuffle!==false;
+      if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;
       _kwBlocked=Array.isArray(s.settings.blocked_keywords)?[...s.settings.blocked_keywords]:[];
       _kwAllowed=Array.isArray(s.settings.allowed_keywords)?[...s.settings.allowed_keywords]:[];
       renderTags('blocked');renderTags('allowed');
