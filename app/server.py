@@ -74,6 +74,8 @@ def make_venue(name):
             "max_priority_queue_min": 0,   # bloquear nuevas prioridades si cola premium > N min (0=off)
             "fallback_shuffle": True,       # lista del local en orden aleatorio
             "theme": "azul",               # tema de color: azul | purpura | verde
+            "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
+            "allowed_keywords": [],        # si hay entradas, la canción DEBE tener al menos una
         },
         "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4} for i in range(1, 6)],  # PINs 1111..5555
         "sessions": {},
@@ -491,7 +493,7 @@ def public_state(token=None, admin=False):
                                        "repeat_block_min", "repeat_block_songs", "trim_end_secs",
                                        "free_per_window", "free_window_min", "jump_multiplier",
                                        "venue_logo", "max_priority_queue_min", "fallback_shuffle",
-                                       "theme")},
+                                       "theme", "blocked_keywords", "allowed_keywords")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "tables": [t["name"] for t in STATE["tables"]],
         "now_playing": np_pub,
@@ -853,6 +855,14 @@ class H(BaseHTTPRequestHandler):
                 if not yt:
                     return self._send(400, {"error": "No pude leer el link de YouTube"})
                 now = time.time()
+                # Filtro de contenido: palabras bloqueadas / permitidas
+                _haystack = (title + " " + (artist or "")).lower()
+                _blocked = [kw.strip().lower() for kw in STATE["settings"].get("blocked_keywords", []) if kw.strip()]
+                if _blocked and any(kw in _haystack for kw in _blocked):
+                    return self._send(400, {"error": "Esta canción no está disponible en este local 🎵", "content_blocked": True})
+                _allowed = [kw.strip().lower() for kw in STATE["settings"].get("allowed_keywords", []) if kw.strip()]
+                if _allowed and not any(kw in _haystack for kw in _allowed):
+                    return self._send(400, {"error": "Esta canción no encaja con la música del local. ¡Prueba con otra! 🎶", "content_blocked": True})
                 if in_play_or_queue(yt):
                     return self._send(400, {"error": "Esa canción ya está sonando o en la cola 🎶"})
                 rb = repeat_block_reason(yt, now)
@@ -1107,6 +1117,9 @@ class H(BaseHTTPRequestHandler):
                         s[k] = bool(d[k])
                 if "theme" in d and d["theme"] in ("azul", "purpura", "verde"):
                     s["theme"] = d["theme"]
+                for k in ("blocked_keywords", "allowed_keywords"):
+                    if k in d and isinstance(d[k], list):
+                        s[k] = [str(w).strip().lower()[:50] for w in d[k] if str(w).strip()][:30]
                 if "venue_logo" in d:                       # logo del BAR
                     s["venue_logo"] = str(d["venue_logo"])[:700000]
                 if "tym_logo" in d:                          # logo de TYM (global)

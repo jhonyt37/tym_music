@@ -31,6 +31,12 @@
 .tabpanel.active{display:block}
 /* ---- Section titles ---- */
 .sec{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 12px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+/* ---- Keyword tags ---- */
+.kwtag{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;background:var(--bg);border:1px solid var(--line)}
+.kwtag.blocked{background:rgba(239,68,68,.15);border-color:rgba(239,68,68,.4);color:#fca5a5}
+.kwtag.allowed{background:rgba(34,197,94,.15);border-color:rgba(34,197,94,.4);color:#86efac}
+.kwtag button{background:none;border:none;color:inherit;cursor:pointer;padding:0;font-size:15px;line-height:1;opacity:.7}
+.kwtag button:hover{opacity:1}
 /* ---- Urgency ---- */
 .urgentCard{border-color:#dc2626!important}
 .urgentCard .sec{color:#dc2626}
@@ -158,6 +164,24 @@
       <div class="pkgrow"><span class="small" style="flex:1">...cada (minutos)</span><input class="field" id="freeWin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (× precio)</span><input class="field" id="jumpMult" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Bloquear nuevas prioridades si la cola supera (minutos, 0=sin límite)</span><input class="field" id="maxPrioMin" type="number"></div>
+
+      <p class="sec" style="margin-top:22px">Filtro de contenido 🚫</p>
+      <div class="small" style="margin-bottom:10px">Controla qué canciones pueden pedir los clientes según el título o artista.</div>
+
+      <label class="small" style="display:block;margin-bottom:4px">🚫 Palabras BLOQUEADAS (ej: metal, trap, reggaetón)</label>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <input class="field" id="blockedInput" placeholder="Agregar palabra..." style="margin:0;flex:1" onkeydown="if(event.key==='Enter'){addKeyword('blocked');event.preventDefault()}">
+        <button class="btn sm" onclick="addKeyword('blocked')">+ Agregar</button>
+      </div>
+      <div id="blockedTags" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px;margin-bottom:14px"></div>
+
+      <label class="small" style="display:block;margin-bottom:4px">✅ Palabras PERMITIDAS (opcional — si hay, solo se aceptan canciones con estas palabras)</label>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">Ej: "bolero, salsa, cumbia" → solo canciones que contengan alguna de esas palabras</div>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <input class="field" id="allowedInput" placeholder="Agregar palabra..." style="margin:0;flex:1" onkeydown="if(event.key==='Enter'){addKeyword('allowed');event.preventDefault()}">
+        <button class="btn sm" onclick="addKeyword('allowed')">+ Agregar</button>
+      </div>
+      <div id="allowedTags" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px;margin-bottom:14px"></div>
 
       <p class="sec" style="margin-top:22px">Tema de color</p>
       <div style="display:flex;gap:8px;margin:8px 0" id="themeRow">
@@ -350,6 +374,26 @@ function readPackages(){
   rows.forEach(r=>{const q=+r.querySelector('.q').value,p=+r.querySelector('.p').value;if(q>0)out.push({qty:q,price:p});});
   return out;
 }
+// Keyword tags
+let _kwBlocked=[], _kwAllowed=[];
+function renderTags(type){
+  const list=type==='blocked'?_kwBlocked:_kwAllowed;
+  const box=$(type+'Tags');box.innerHTML='';
+  list.forEach((w,i)=>{
+    const t=document.createElement('span');t.className='kwtag '+type;
+    t.innerHTML=`${w}<button onclick="_kwRemove('${type}',${i})" title="Eliminar">×</button>`;
+    box.appendChild(t);
+  });
+}
+function _kwRemove(type,i){if(type==='blocked')_kwBlocked.splice(i,1);else _kwAllowed.splice(i,1);renderTags(type);}
+function addKeyword(type){
+  const inp=$(type+'Input');
+  const val=(inp.value||'').trim().toLowerCase();
+  if(!val)return;
+  const list=type==='blocked'?_kwBlocked:_kwAllowed;
+  if(!list.includes(val))list.push(val);
+  inp.value='';renderTags(type);
+}
 async function save(){
   const payload={
     venue_name:$('venue').value,price_priority:parseInt($('price').value||0),
@@ -361,6 +405,8 @@ async function save(){
     max_priority_queue_min:parseInt($('maxPrioMin').value||0),
     fallback_shuffle:$('fbShuffle').checked,
     theme:curTheme,
+    blocked_keywords:[..._kwBlocked],
+    allowed_keywords:[..._kwAllowed],
     socials:{instagram:$('soIg').value,tiktok:$('soTt').value,web:$('soWeb').value},
     credit_packages:readPackages(),
     time_pass:{minutes:parseInt($('passMin').value||30),price:parseInt($('passPrice').value||0)}};
@@ -437,6 +483,9 @@ async function tick(){
       $('jumpMult').value=s.settings.jump_multiplier;
       $('maxPrioMin').value=s.settings.max_priority_queue_min||0;
       $('fbShuffle').checked=s.settings.fallback_shuffle!==false;
+      _kwBlocked=Array.isArray(s.settings.blocked_keywords)?[...s.settings.blocked_keywords]:[];
+      _kwAllowed=Array.isArray(s.settings.allowed_keywords)?[...s.settings.allowed_keywords]:[];
+      renderTags('blocked');renderTags('allowed');
       pickTheme(s.settings.theme||'azul');
       const so=s.settings.socials||{};$('soIg').value=so.instagram||'';$('soTt').value=so.tiktok||'';$('soWeb').value=so.web||'';
       $('passMin').value=pass_obj.minutes;$('passPrice').value=pass_obj.price;
