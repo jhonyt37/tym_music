@@ -1073,19 +1073,29 @@ class H(BaseHTTPRequestHandler):
                 if d.get("cancel"):
                     STATE["assists"] = [a for a in STATE.get("assists", []) if a.get("token") != tok]
                     return self._send(200, {"ok": True})
+                # Buzz en asistencia existente (con cooldown)
+                def _do_buzz(a):
+                    since = time.time() - a.get("buzzed_at", 0)
+                    if since < 30:
+                        return self._send(400, {"error": "Espera antes de volver a llamar", "wait": int(30 - since)})
+                    a["buzzed_at"] = time.time()
+                    a["buzz_count"] = a.get("buzz_count", 1) + 1
+                    return self._send(200, {"ok": True, "buzzed": True, "id": a["id"]})
                 if d.get("buzz"):
                     for a in STATE.get("assists", []):
-                        if a.get("token") == tok:
-                            since = time.time() - a.get("buzzed_at", 0)
-                            if since < 30:
-                                return self._send(400, {"error": "Espera antes de volver a llamar", "wait": int(30 - since)})
-                            a["buzzed_at"] = time.time()
-                            return self._send(200, {"ok": True, "buzzed": True})
+                        if a.get("token") == tok and not a.get("resolved"):
+                            return _do_buzz(a)
                     return self._send(400, {"error": "No tienes una asistencia activa"})
+                # Nueva solicitud — si ya hay una activa del mismo token, tratar como buzz
+                existing = next((a for a in STATE.get("assists", [])
+                                 if a.get("token") == tok and not a.get("resolved")), None)
+                if existing:
+                    return _do_buzz(existing)
                 aid = nid()
                 STATE["assists"].append({"id": aid, "table": sess["table"],
                                           "ts": time.time(), "resolved": False,
-                                          "resolve_ts": None, "token": tok})
+                                          "resolve_ts": None, "token": tok,
+                                          "buzz_count": 1})
                 TYM["events"].append({"venue": CUR_VID, "table": sess["table"],
                                        "account": tok, "ts": time.time(),
                                        "ev": "assist_requested"})

@@ -475,10 +475,7 @@ class TestAssist(TYMTestCase):
 
     def test_buzz_requires_existing_assist(self):
         d, status = self._post("/api/assist", {"token": self.token, "buzz": True})
-        # Should fail or do nothing — no existing assist
-        # Server returns 200 but with no buzzed=True, or 400 — either is fine
-        # Key: no crash
-        self.assertIn(status, [200, 400])
+        self.assertEqual(status, 400, "Buzz without active assist must return 400")
 
     def test_buzz_cooldown_enforced(self):
         self._post("/api/assist", {"token": self.token})
@@ -486,6 +483,32 @@ class TestAssist(TYMTestCase):
         d, status = self._post("/api/assist", {"token": self.token, "buzz": True})
         self.assertEqual(status, 400, "Second buzz within 30s should be rejected")
         self.assertIn("wait", d)
+
+    def test_duplicate_assist_treated_as_buzz(self):
+        # Second request from same token while assist is active = buzz (not new entry)
+        self._post("/api/assist", {"token": self.token})
+        s1 = self._state()
+        self.assertEqual(len(s1.get("assists", [])), 1, "Only 1 assist after first request")
+        # Second request (no buzz flag) — should NOT create a duplicate
+        d, status = self._post("/api/assist", {"token": self.token})
+        # Either cooldown (400 with wait) or buzz success (200) — but never a new entry
+        s2 = self._state()
+        self.assertEqual(len(s2.get("assists", [])), 1, "Still only 1 assist after second request")
+
+    def test_buzz_count_increments(self):
+        self._post("/api/assist", {"token": self.token})
+        s0 = self._state()
+        self.assertEqual(s0["assists"][0].get("buzz_count", 1), 1, "Initial buzz_count is 1")
+        # First buzz succeeds
+        d, status = self._post("/api/assist", {"token": self.token, "buzz": True})
+        self.assertEqual(status, 200)
+        s1 = self._state()
+        self.assertEqual(s1["assists"][0]["buzz_count"], 2, "buzz_count increments to 2 after first buzz")
+
+    def test_assist_has_buzz_count_field(self):
+        self._post("/api/assist", {"token": self.token})
+        s = self._state()
+        self.assertIn("buzz_count", s["assists"][0], "assist must have buzz_count field")
 
 
 # ===========================================================================

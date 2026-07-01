@@ -74,10 +74,20 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #assistZone{position:fixed;bottom:84px;right:22px;z-index:33;display:flex;flex-direction:column;gap:7px;align-items:flex-end}
 .apill{background:rgba(180,24,24,.88);backdrop-filter:blur(8px);border:1px solid rgba(255,100,100,.3);
   color:#fff;padding:8px 18px;border-radius:999px;font-size:15px;font-weight:700;letter-spacing:.2px;opacity:1}
-.apill.fresh{animation:pillIn .5s cubic-bezier(.34,1.56,.64,1),pillBuzz .9s .4s ease-in-out}
-.apill.buzz{animation:pillBuzz .8s ease-in-out}
+.apill.fresh{animation:pillIn .5s cubic-bezier(.34,1.56,.64,1),pillBuzz 1.8s .4s ease-in-out}
+.apill.buzz{animation:pillBuzz 1.8s ease-in-out}
 @keyframes pillIn{from{transform:translateY(22px) scale(.8);opacity:0}to{transform:translateY(0) scale(1);opacity:1}}
-@keyframes pillBuzz{0%,100%{transform:translateX(0)}15%,45%,75%{transform:translateX(-7px)}30%,60%,90%{transform:translateX(7px)}}
+@keyframes pillBuzz{
+  0%,100%{transform:scale(1) translateX(0);filter:brightness(1)}
+  8%{transform:scale(1.35) translateX(0);filter:brightness(2.2)}
+  20%{transform:scale(1.25) translateX(-12px);filter:brightness(1.8)}
+  32%{transform:scale(1.25) translateX(12px);filter:brightness(2.2)}
+  44%{transform:scale(1.25) translateX(-12px);filter:brightness(1.8)}
+  56%{transform:scale(1.25) translateX(12px);filter:brightness(2.2)}
+  68%{transform:scale(1.2) translateX(-8px);filter:brightness(1.5)}
+  80%{transform:scale(1.1) translateX(6px);filter:brightness(1.2)}
+  92%{transform:scale(1.05) translateX(0);filter:brightness(1.05)}
+}
 .apill.extra{font-size:13px;background:rgba(100,40,0,.85)}
 </style>
 </head>
@@ -181,22 +191,24 @@ function renderAssists(assists){
   if(!ids.size)return;
   const MAX=3;const visible=(assists||[]).slice(0,MAX);const extra=(assists||[]).length-MAX;
   visible.forEach(a=>{
+    const label='🔔 '+a.table+(a.buzz_count>1?' ×'+a.buzz_count:'');
     if(_assistShown.has(a.id)){
       const pill=_assistShown.get(a.id);
+      pill.textContent=label;
       const prev=pill.dataset.buzzedAt||'';
       const cur=String(a.buzzed_at||'');
       if(cur&&cur!==prev){
         pill.dataset.buzzedAt=cur;
         pill.classList.remove('buzz');
-        void pill.offsetWidth; // reflow para reiniciar animación
+        void pill.offsetWidth;
         pill.classList.add('buzz');
-        setTimeout(()=>pill.classList.remove('buzz'),900);
+        setTimeout(()=>pill.classList.remove('buzz'),2000);
       }
       return;
     }
     const pill=document.createElement('div');pill.className='apill fresh';pill.dataset.id=a.id;
     pill.dataset.buzzedAt=String(a.buzzed_at||'');
-    pill.textContent='🔔 '+a.table;zone.appendChild(pill);_assistShown.set(a.id,pill);
+    pill.textContent=label;zone.appendChild(pill);_assistShown.set(a.id,pill);
     setTimeout(()=>pill.classList.remove('fresh'),1400);
   });
   let ov=zone.querySelector('.apill.extra');
