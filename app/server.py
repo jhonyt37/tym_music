@@ -89,6 +89,8 @@ def make_venue(name):
         "req_counts": {},
         "reactions": {},
         "reaction_pub": {},    # {item_id: {emoji: set(tokens)}} — reacciones marcadas como públicas
+        "react_log": [],       # [{emoji, table, ts, item_id}] — log de últimas reacciones para TV
+        "repeat_exceptions": set(),  # yt IDs a los que el admin permite repetir aunque estén en historial
         "jump_used_for": None,
         "learned_end": {},         # yt -> seg de corte aprendido por saltos manuales
         "assists": [],             # {id, table, ts, resolved, resolve_ts, token}
@@ -418,6 +420,8 @@ def in_play_or_queue(yt):
     return any(i["yt"] == yt for i in STATE["items"])
 
 def repeat_block_reason(yt, now):
+    if yt in STATE.get("repeat_exceptions", set()):
+        return None
     s = STATE["settings"]
     n = max(0, int(s.get("repeat_block_songs", 3)))
     if n and any(h.get("yt") == yt for h in STATE["history"][:n]):
@@ -478,6 +482,12 @@ def public_state(token=None, admin=False):
                   "duration": np.get("duration", DEFAULT_DUR), "position": np.get("position", 0),
                   "learned_end": STATE["learned_end"].get(np["yt"]),
                   "reactions": ncounts, "my_reacts": nmine, "react_total": ntotal}
+        now_ts = time.time()
+        np_pub["recent_reacts"] = [
+            {"emoji": e["emoji"], "table": e.get("table"), "ts": e["ts"]}
+            for e in STATE.get("react_log", [])
+            if now_ts - e["ts"] < 30 and e.get("item_id") == np["id"]
+        ]
     history = [public_item(h, token) for h in STATE["history"][:8]]
     # Ranking "lo más querido de la noche" (agrega reacciones por canción)
     agg = {}
@@ -553,6 +563,9 @@ def public_state(token=None, admin=False):
         out["ledger_total"] = sum(l["amount"] for l in STATE["ledger"])
         out["curated"] = STATE["curated"]
         out["subscribers"] = list(reversed(TYM["subscribers"]))[:100]
+        out["history"] = [{"id": h["id"], "yt": h["yt"], "title": h["title"],
+                           "artist": h.get("artist", "")} for h in STATE["history"][:10]]
+        out["repeat_exceptions"] = list(STATE.get("repeat_exceptions", set()))
     return out
 
 def _pad(lst, n=6, genre=None):
@@ -805,7 +818,8 @@ class H(BaseHTTPRequestHandler):
         # ---- Endpoints que requieren dueño logueado ----
         ADMIN_PATHS = ("/api/advance", "/api/progress", "/api/admin/approve", "/api/admin/reject",
                        "/api/admin/remove", "/api/admin/settings", "/api/admin/tables",
-                       "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset")
+                       "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset",
+                       "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move")
         vid = self.resolve_vid(d)
         if path in ADMIN_PATHS:
             av = self.authed_venue()
@@ -976,6 +990,11 @@ class H(BaseHTTPRequestHandler):
                         rp[emoji].add(tok)
                     else:
                         rp[emoji].discard(tok)
+                    now_ts = time.time()
+                    log = STATE.setdefault("react_log", [])
+                    log.append({"emoji": emoji, "table": sess["table"] if pub else None,
+                                "ts": now_ts, "item_id": item_id})
+                    STATE["react_log"] = [e for e in log if now_ts - e["ts"] < 60]
                 counts, mine, total = react_counts(item_id, tok)
                 return self._send(200, {"ok": True, "reactions": counts, "my_reacts": mine, "react_total": total})
 
@@ -1206,6 +1225,55 @@ class H(BaseHTTPRequestHandler):
                     STATE["curated"] = [c for c in STATE["curated"] if c["yt"] != d.get("yt")]
                 return self._send(200, {"ok": True, "curated": STATE["curated"]})
 
+            if path == "/api/admin/add":
+                yt = (d.get("yt") or "").strip()
+                title = str(d.get("title") or "Canción")[:120]
+                artist = str(d.get("artist") or "")[:80]
+                dur = _parse_len(d.get("length")) or DEFAULT_DUR
+                if not yt:
+                    return self._send(400, {"error": "Falta yt"})
+                pos = d.get("position")
+                item = {"id": nid(), "title": title, "artist": artist, "yt": yt,
+                        "token": None, "table": "Admin", "priority": False, "super": False,
+                        "mode": "normal", "duration": dur, "status": "approved",
+                        "play_status": "pending", "played_enough": False, "requeue_count": 0,
+                        "ts": time.time(), "charge_on_play": 0, "charged": False, "charge_kind": ""}
+                q = [i for i in STATE["items"] if i["status"] == "approved"]
+                pending = [i for i in STATE["items"] if i["status"] != "approved"]
+                if pos is None:
+                    q.append(item)
+                else:
+                    idx = max(0, min(int(pos) - 1, len(q)))
+                    q.insert(idx, item)
+                STATE["items"] = q + pending
+                return self._send(200, {"ok": True})
+
+            if path == "/api/admin/allow_repeat":
+                yt = (d.get("yt") or "").strip()
+                if not yt:
+                    return self._send(400, {"error": "Falta yt"})
+                exc = STATE.setdefault("repeat_exceptions", set())
+                if yt in exc:
+                    exc.discard(yt)
+                    return self._send(200, {"ok": True, "allowed": False})
+                exc.add(yt)
+                return self._send(200, {"ok": True, "allowed": True})
+
+            if path == "/api/admin/move":
+                item_id = d.get("id")
+                direction = d.get("dir")  # "up" o "down"
+                q = [i for i in STATE["items"] if i["status"] == "approved"]
+                idx = next((i for i, it in enumerate(q) if it["id"] == item_id), None)
+                if idx is None:
+                    return self._send(400, {"error": "No encontrado"})
+                if direction == "up" and idx > 0:
+                    q[idx], q[idx - 1] = q[idx - 1], q[idx]
+                elif direction == "down" and idx < len(q) - 1:
+                    q[idx], q[idx + 1] = q[idx + 1], q[idx]
+                pending = [i for i in STATE["items"] if i["status"] != "approved"]
+                STATE["items"] = q + pending
+                return self._send(200, {"ok": True})
+
             if path == "/api/admin/close_table":
                 tbl = d.get("table")
                 total = close_accounts(CUR_VID, tbl)   # marca cuentas cerradas (hora fin) + total
@@ -1269,6 +1337,7 @@ def venue_snapshot(v):
                          for k, r in v["reactions"].items()}
     snap["reaction_pub"] = {str(k): {e: list(s) for e, s in r.items()}
                             for k, r in v.get("reaction_pub", {}).items()}
+    snap["repeat_exceptions"] = list(v.get("repeat_exceptions", set()))
     return snap
 
 def _redis_strip_logos(data):
@@ -1340,6 +1409,7 @@ def _load_into(v, snap):
                       for k, r in snap.get("reactions", {}).items()}
     v["reaction_pub"] = {int(k): {e: set(lst) for e, lst in r.items()}
                          for k, r in snap.get("reaction_pub", {}).items()}
+    v["repeat_exceptions"] = set(snap.get("repeat_exceptions", []))
 
 def load_state():
     d = None

@@ -101,6 +101,22 @@
           <div class="list" id="queue"><div class="empty">Nada en cola.</div></div>
         </div>
 
+        <!-- Agregar canción -->
+        <div class="card">
+          <p class="sec">Agregar canción a la cola</p>
+          <div style="display:flex;gap:8px">
+            <input class="field" id="adminQ" placeholder="Buscar canción…" style="margin:0;flex:1" onkeydown="if(event.key==='Enter')adminSearch()">
+            <button class="btn sm" onclick="adminSearch()">Buscar</button>
+          </div>
+          <div class="list" id="adminResults" style="margin-top:8px"></div>
+        </div>
+
+        <!-- Historial reciente -->
+        <div class="card" id="histCard" style="display:none">
+          <p class="sec">Historial reciente</p>
+          <div class="list" id="histList"></div>
+        </div>
+
         <!-- Por aprobar -->
         <div class="card">
           <p class="sec">Por aprobar (<span id="pcount">0</span>)</p>
@@ -367,6 +383,40 @@ async function approve(id){await post('/api/admin/approve',{id});tick();}
 async function reject(id){await post('/api/admin/reject',{id});tick();}
 async function remove(id){await post('/api/admin/remove',{id});tick();}
 async function skip(){await post('/api/advance',{});tick();}
+async function moveItem(id,dir){await post('/api/admin/move',{id,dir});tick();}
+
+let _adminSearchTimer=null;
+function adminSearch(){
+  const q=$('adminQ').value.trim();if(!q)return;
+  const box=$('adminResults');box.innerHTML='<div class="empty">Buscando…</div>';
+  clearTimeout(_adminSearchTimer);
+  _adminSearchTimer=setTimeout(async()=>{
+    try{
+      const r=await fetch('/api/search?q='+encodeURIComponent(q));
+      const d=await r.json();const res=d.results||[];
+      box.innerHTML='';
+      if(!res.length){box.innerHTML='<div class="empty">Sin resultados.</div>';return;}
+      res.slice(0,6).forEach(s=>{
+        const row=document.createElement('div');row.className='row';
+        row.innerHTML=`<img class="mini" src="${img(s.yt)}"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div>`;
+        const addBtn=document.createElement('button');addBtn.className='btn green sm';addBtn.textContent='+ Cola';
+        addBtn.onclick=()=>{
+          const pos=prompt('¿En qué posición? (1 = primero, dejar vacío = al final)');
+          const posN=pos&&pos.trim()!==''?parseInt(pos.trim()):null;
+          adminAddSong(s.yt,s.title,s.artist,s.length,posN);
+        };
+        row.appendChild(addBtn);box.appendChild(row);
+      });
+    }catch(e){box.innerHTML='<div class="empty">Error al buscar.</div>';}
+  },350);
+}
+async function adminAddSong(yt,title,artist,length,position){
+  const d={yt,title,artist,length};if(position!=null)d.position=position;
+  const r=await post('/api/admin/add',d);
+  toast(r.ok?'Canción añadida a la cola':'Error al añadir');
+  $('adminResults').innerHTML='';$('adminQ').value='';
+  tick();
+}
 async function resolveAssist(id){await post('/api/admin/assist_resolve',{id});tick();}
 
 function readPackages(){
@@ -556,8 +606,24 @@ async function tick(){
     q.forEach((it,i)=>{
       const r=document.createElement('div');r.className='row';
       r.innerHTML=`<div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}</div><div class="a">${it.table}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
+      if(i>0){const u=document.createElement('button');u.className='btn ghost sm';u.textContent='↑';u.title='Subir';u.onclick=()=>moveItem(it.id,'up');r.appendChild(u);}
+      if(i<q.length-1){const dn=document.createElement('button');dn.className='btn ghost sm';dn.textContent='↓';dn.title='Bajar';dn.onclick=()=>moveItem(it.id,'down');r.appendChild(dn);}
       const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';rm.onclick=()=>remove(it.id);r.appendChild(rm);Q.appendChild(r);
     });
+    // Historial reciente con toggle de repetición
+    const hist=s.history||[];
+    const reptExc=new Set(s.repeat_exceptions||[]);
+    const HC=$('histCard');const HL=$('histList');
+    if(hist.length){HC.style.display='';HL.innerHTML='';
+      hist.forEach(h=>{
+        const r=document.createElement('div');r.className='row';
+        const exc=reptExc.has(h.yt);
+        r.innerHTML=`<img class="mini" src="${img(h.yt)}"><div class="info"><div class="t">${h.title}</div><div class="a small">${h.artist||''}</div></div>`;
+        const rb=document.createElement('button');rb.className='btn sm';rb.style.background=exc?'var(--green)':'var(--bg2)';rb.style.border='1px solid var(--line)';rb.style.color=exc?'#fff':'var(--mut)';rb.textContent=exc?'🔁 Repetir OK':'🔁 Bloquear';rb.title='Permitir/bloquear repetición';
+        rb.onclick=async()=>{const j=await post('/api/admin/allow_repeat',{yt:h.yt});toast(j.allowed?'Repetición permitida':'Repetición bloqueada');tick();};
+        r.appendChild(rb);HL.appendChild(r);
+      });
+    }else HC.style.display='none';
 
     // Badge de alertas en el tab "En vivo"
     const badgeN=pend.length+assists.length;

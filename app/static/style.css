@@ -69,7 +69,8 @@ header.bar{
 .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-end;z-index:20}
 .sheet-bg.open{display:flex}
 .sheet{background:var(--bg2);border-top-left-radius:22px;border-top-right-radius:22px;
-  width:100%;max-width:520px;margin:0 auto;padding:20px 18px 28px;border:1px solid var(--line)}
+  width:100%;max-width:520px;margin:0 auto;padding:20px 18px 28px;border:1px solid var(--line);
+  max-height:88vh;overflow-y:auto;padding-bottom:max(28px,env(safe-area-inset-bottom,28px))}
 .sheet h3{margin:2px 0 2px;font-size:18px}
 .opt{display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--line);
   border-radius:14px;padding:14px;margin-top:12px;background:var(--card);cursor:pointer}
