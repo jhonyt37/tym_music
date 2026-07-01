@@ -46,7 +46,7 @@ body{padding-bottom:80px}
 .nav{position:fixed;left:0;right:0;bottom:0;z-index:15;display:flex;max-width:520px;margin:0 auto;
   background:rgba(14,19,32,.97);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
 .nav button{position:relative;flex:1;background:none;border:none;color:var(--mut);font-size:11px;font-weight:700;
-  padding:9px 4px 11px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px}
+  padding:12px 4px 16px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;min-height:60px;touch-action:manipulation}
 .nav button span{font-size:21px;line-height:1}
 .nav button.on{color:var(--pri)}
 .badge{position:absolute;top:4px;right:50%;margin-right:-22px;background:var(--pri);color:#fff;font-size:10px;
@@ -148,6 +148,7 @@ body{padding-bottom:80px}
       </div>
       <div class="wait" id="queueInfo">Cargando cola…</div>
       <div class="wait" id="myInfo" style="display:none"></div>
+      <div id="reactLbl" style="display:none;font-size:12px;color:var(--mut);margin-top:12px;margin-bottom:2px">¿Te gusta lo que suena? Toca para reaccionar 👇</div>
       <div class="reacts" id="nowReacts"></div>
     </div>
     <div class="card">
@@ -454,15 +455,20 @@ function confirmReq(){
     confirmModal('Pedir con prioridad ⚡',msg,doReq);
   } else doReq();
 }
+let _reqInFlight=false;
 async function doReq(){
+  if(_reqInFlight)return;
+  _reqInFlight=true;
   closeSheet();
-  const body=Object.assign({},chosen,{priority:mode==='pri',super:mode==='super',token});
-  const r=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const j=await r.json();
-  if(j.ok){if(j.session)sess=j.session;
-    toast(mode==='super'?'⏫ ¡Tu canción al frente!':(mode==='pri'?'⚡ ¡Pedida con prioridad!':'¡Canción pedida!'),'ok');
-    $('q').value='';$('recoChips').style.display='flex';renderReco();refreshBal();}
-  else toast(j.error||'Error','err');
+  try{
+    const body=Object.assign({},chosen,{priority:mode==='pri',super:mode==='super',token});
+    const r=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const j=await r.json();
+    if(j.ok){if(j.session)sess=j.session;
+      toast(mode==='super'?'⏫ ¡Tu canción al frente!':(mode==='pri'?'⚡ ¡Pedida con prioridad!':'¡Canción pedida!'),'ok');
+      $('q').value='';$('recoChips').style.display='flex';renderReco();refreshBal();}
+    else toast(j.error||'Error',j.race?'warn':'err');
+  }finally{_reqInFlight=false;}
 }
 let cfCb=null,cfNoCb=null;
 function confirmModal(title,msg,cb,opts){
@@ -566,9 +572,9 @@ function applyTicker(el){
   el.dataset.tkd='1';
   if(el.scrollWidth<=el.clientWidth+2)return; // título cabe, sin ticker
   const html=el.innerHTML;
-  const dur=Math.max(6,el.textContent.length*0.16)+'s';
+  const dur=Math.max(10,el.textContent.length*0.34)+'s';
   const span=document.createElement('span');
-  span.style.cssText=`display:inline-block;white-space:nowrap;animation:rowTick ${dur} linear infinite`;
+  span.style.cssText=`display:inline-block;white-space:nowrap;font-size:inherit;line-height:inherit;animation:rowTick ${dur} linear infinite`;
   span.innerHTML=`<span style="padding-right:40px">${html}</span><span style="padding-right:40px">${html}</span>`;
   el.innerHTML='';el.appendChild(span);
 }
@@ -670,6 +676,7 @@ function spawnEmoji(e){
 async function react(id,emoji){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   spawnEmoji(emoji);
+  toast(emoji+' ¡Reaccionaste a la canción!','ok');
   await fetch('/api/react',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id,emoji})});poll();
 }
 function boost(id){
@@ -814,6 +821,7 @@ async function poll(){
 
     // Reacciones + social
     $('nowReacts').innerHTML = np ? reactHtml(np) : '';
+    $('reactLbl').style.display = np ? '' : 'none';
     $('qcount').textContent = s.queue_count;
     renderList('queueList', s.queue, {boost:true, empty:'Nada en cola — suena la lista del local.'});
     renderList('historyList', s.history, {empty:'Todavía no ha sonado nada.'});

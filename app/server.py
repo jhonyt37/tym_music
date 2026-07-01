@@ -874,6 +874,9 @@ class H(BaseHTTPRequestHandler):
                 if _allowed and not any(kw in _haystack for kw in _allowed):
                     return self._send(400, {"error": "Esta canción no encaja con la música del local. ¡Prueba con otra! 🎶", "content_blocked": True})
                 if in_play_or_queue(yt):
+                    fresh = next((i for i in STATE["items"] if i["yt"] == yt and now - i.get("ts", 0) < 10), None)
+                    if fresh:
+                        return self._send(400, {"error": "Alguien más acaba de pedir esa canción al mismo tiempo. ¡Ya está en camino! 🎶", "race": True})
                     return self._send(400, {"error": "Esa canción ya está sonando o en la cola 🎶"})
                 rb = repeat_block_reason(yt, now)
                 if rb == "songs":
@@ -892,7 +895,7 @@ class H(BaseHTTPRequestHandler):
                 if sup:
                     np = STATE["now_playing"]
                     if not np or STATE.get("jump_used_for") == np["id"]:
-                        return self._send(400, {"error": "El salto al #1 ya se usó esta canción 🎵"})
+                        return self._send(400, {"error": "Alguien llegó primero al salto. Inténtalo en la próxima canción 🎵", "jump_conflict": True})
                     mode = "salto"; ckind = "salto al #1"
                     charge = STATE["settings"]["price_priority"] * STATE["settings"].get("jump_multiplier", 3)
                 elif priority:
@@ -997,7 +1000,7 @@ class H(BaseHTTPRequestHandler):
                 if not np:
                     return self._send(400, {"error": "No hay nada sonando aún."})
                 if STATE.get("jump_used_for") == np["id"]:
-                    return self._send(400, {"error": "Ya alguien saltó una canción al frente. Disponible en la próxima 🎵"})
+                    return self._send(400, {"error": "Alguien llegó primero al salto. Disponible en la próxima canción 🎵", "jump_conflict": True})
                 target = None
                 for i in STATE["items"]:
                     if i["id"] == d.get("id"):
