@@ -150,7 +150,10 @@ body{padding-bottom:80px}
       </div>
       <div class="wait" id="queueInfo">Cargando cola…</div>
       <div class="wait" id="myInfo" style="display:none"></div>
-      <div id="reactLbl" style="display:none;font-size:12px;color:var(--mut);margin-top:12px;margin-bottom:2px">¿Te gusta lo que suena? Toca para reaccionar 👇</div>
+      <div id="reactLbl" style="display:none;margin-top:12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--mut)">¿Te gusta lo que suena? Reacciona:</span>
+        <button id="likePubBtn" onclick="toggleLikePub()" style="font-size:11px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--txt);cursor:pointer;touch-action:manipulation"></button>
+      </div>
       <div class="reacts" id="nowReacts"></div>
     </div>
     <div class="card">
@@ -675,6 +678,20 @@ setInterval(()=>{
 },500);
 
 // ---------- Reacciones / social ----------
+let _likePub = localStorage.getItem('tym_like_pub') !== 'false';
+function toggleLikePub(){
+  _likePub=!_likePub;
+  localStorage.setItem('tym_like_pub',String(_likePub));
+  updateLikePubBtn();
+  toast(_likePub?'👁 Próximos likes visibles con tu mesa':'🙈 Próximos likes en incógnito','ok');
+}
+function updateLikePubBtn(){
+  const btn=$('likePubBtn');if(!btn)return;
+  btn.textContent=_likePub?'👁 Público':'🙈 Incógnito';
+  btn.style.color=_likePub?'var(--pri)':'var(--mut)';
+  btn.style.borderColor=_likePub?'var(--pri)':'var(--line)';
+}
+
 const EMOJIS=['❤️','🔥','👍'];
 function reactHtml(it){
   if(!it||it.id==null)return '';
@@ -692,8 +709,8 @@ function spawnEmoji(e){
 async function react(id,emoji){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   spawnEmoji(emoji);
-  toast(emoji+' ¡Reaccionaste a la canción!','ok');
-  await fetch('/api/react',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id,emoji})});poll();
+  toast(emoji+(_likePub?' ¡Reaccionaste! (visible con tu mesa)':' ¡Reaccionaste! (incógnito)'),'ok');
+  await fetch('/api/react',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id,emoji,public:_likePub})});poll();
 }
 function boost(id){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
@@ -770,7 +787,8 @@ function renderLoved(items){
   if(!items||!items.length){box.innerHTML='<div class="empty">Aún sin reacciones. ¡Sé el primero en reaccionar!</div>';return;}
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank';
-    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div><div class="love">❤️ ${it.total}</div>`;
+    const tables=it.tables&&it.tables.length?it.tables.slice(0,4).join(' · ')+(it.tables.length>4?' y '+(it.tables.length-4)+' más':''):'';
+    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div>${tables?`<div style="font-size:11px;color:var(--pri);margin-top:2px">🙌 ${tables}</div>`:''}</div><div class="love">❤️ ${it.total}</div>`;
     box.appendChild(d);
   });
   tickify(box);
@@ -837,7 +855,8 @@ async function poll(){
 
     // Reacciones + social
     $('nowReacts').innerHTML = np ? reactHtml(np) : '';
-    $('reactLbl').style.display = np ? '' : 'none';
+    $('reactLbl').style.display = np ? 'flex' : 'none';
+    updateLikePubBtn();
     $('qcount').textContent = s.queue_count;
     renderList('queueList', s.queue, {boost:true, empty:'Nada en cola — suena la lista del local.'});
     renderList('historyList', s.history, {empty:'Todavía no ha sonado nada.'});

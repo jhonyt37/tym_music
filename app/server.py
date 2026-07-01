@@ -88,6 +88,7 @@ def make_venue(name):
         "curated_shuffle": [],     # orden aleatorio actual del fallback
         "req_counts": {},
         "reactions": {},
+        "reaction_pub": {},    # {item_id: {emoji: set(tokens)}} — reacciones marcadas como públicas
         "jump_used_for": None,
         "learned_end": {},         # yt -> seg de corte aprendido por saltos manuales
         "assists": [],             # {id, table, ts, resolved, resolve_ts, token}
@@ -483,9 +484,19 @@ def public_state(token=None, admin=False):
     for it in (([np] if np else []) + STATE["items"] + STATE["history"]):
         _, _, tot = react_counts(it["id"])
         if tot > 0:
+            rp = STATE.get("reaction_pub", {}).get(it["id"], {})
+            pub_tables = set()
+            for e in EMOJIS:
+                for tok in rp.get(e, ()):
+                    s = get_session(tok)
+                    if s:
+                        pub_tables.add(s["table"])
             a = agg.setdefault(it["yt"], {"yt": it["yt"], "title": it["title"],
-                                          "artist": it.get("artist", ""), "total": 0})
+                                          "artist": it.get("artist", ""), "total": 0, "tables": []})
             a["total"] += tot
+            for t in pub_tables:
+                if t not in a["tables"]:
+                    a["tables"].append(t)
     top_loved = sorted(agg.values(), key=lambda x: -x["total"])[:5]
     req_songs = {}
     for e in STATE.get("request_log", []):
@@ -953,11 +964,18 @@ class H(BaseHTTPRequestHandler):
                 if emoji not in EMOJIS or item_id is None:
                     return self._send(400, {"error": "Reacción inválida"})
                 r = STATE["reactions"].setdefault(item_id, {e: set() for e in EMOJIS})
+                rp = STATE["reaction_pub"].setdefault(item_id, {e: set() for e in EMOJIS})
                 tok = d.get("token")
+                pub = bool(d.get("public", True))
                 if tok in r[emoji]:
                     r[emoji].discard(tok)
+                    rp[emoji].discard(tok)
                 else:
                     r[emoji].add(tok)
+                    if pub:
+                        rp[emoji].add(tok)
+                    else:
+                        rp[emoji].discard(tok)
                 counts, mine, total = react_counts(item_id, tok)
                 return self._send(200, {"ok": True, "reactions": counts, "my_reacts": mine, "react_total": total})
 
@@ -1249,6 +1267,8 @@ def venue_snapshot(v):
     snap = {k: v[k] for k in PERSIST_KEYS}
     snap["reactions"] = {str(k): {e: list(s) for e, s in r.items()}
                          for k, r in v["reactions"].items()}
+    snap["reaction_pub"] = {str(k): {e: list(s) for e, s in r.items()}
+                            for k, r in v.get("reaction_pub", {}).items()}
     return snap
 
 def _redis_strip_logos(data):
@@ -1318,6 +1338,8 @@ def _load_into(v, snap):
             v[k] = snap[k]
     v["reactions"] = {int(k): {e: set(lst) for e, lst in r.items()}
                       for k, r in snap.get("reactions", {}).items()}
+    v["reaction_pub"] = {int(k): {e: set(lst) for e, lst in r.items()}
+                         for k, r in snap.get("reaction_pub", {}).items()}
 
 def load_state():
     d = None
