@@ -87,6 +87,21 @@ body{padding-bottom:80px}
 
 /* ---- Active tables ---- */
 .active-t{text-align:center;font-size:12px;color:var(--mut);padding:0 0 10px}
+
+/* ---- Social tabs ---- */
+.stab-row{display:flex;gap:6px;margin-bottom:12px}
+.stab{flex:1;padding:9px 4px;border-radius:12px;border:1px solid var(--line);background:var(--bg2);color:var(--mut);font-size:12px;font-weight:700;cursor:pointer;text-align:center;touch-action:manipulation;-webkit-user-select:none;user-select:none}
+.stab.on{background:var(--pri);color:#fff;border-color:var(--pri)}
+
+/* ---- Now thumb clickable ---- */
+#nowImg{cursor:pointer;transition:transform .15s}
+#nowImg:active{transform:scale(.94)}
+
+/* ---- Now detail sheet ---- */
+#nowDetailImg{width:200px;height:200px;border-radius:16px;object-fit:cover;margin:0 auto 14px;display:block}
+
+/* ---- Guide button ---- */
+#guideBtn{background:none;border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;flex-none;touch-action:manipulation}
 </style>
 </head>
 <body>
@@ -100,6 +115,7 @@ body{padding-bottom:80px}
   <div class="tick-wrap" id="tickWrap" style="display:none">
     <div class="tick" id="headerTick"></div>
   </div>
+  <button id="guideBtn" onclick="openGuide()" title="¿Cómo usar la app?">?</button>
 </header>
 
 <!-- Gate de mesa -->
@@ -139,7 +155,7 @@ body{padding-bottom:80px}
       <h2><span class="pulse"></span>Sonando ahora</h2>
       <div class="active-t" id="activeTables"></div>
       <div class="now">
-        <img class="thumb" id="nowImg" alt="" onerror="this.removeAttribute('src')">
+        <img class="thumb" id="nowImg" alt="" onerror="this.removeAttribute('src')" onclick="openNowDetail()" title="Ver detalle">
         <div style="flex:1;min-width:0">
           <div class="t" id="nowT">—</div>
           <div class="a" id="nowA"></div>
@@ -167,12 +183,21 @@ body{padding-bottom:80px}
   <!-- ===== SOCIAL ===== -->
   <section class="tab" id="tab-social">
     <div class="card">
-      <h2>🏆 Lo más pedido aquí</h2>
-      <div class="list" id="topReqList"><div class="empty">Aún sin pedidos registrados.</div></div>
-    </div>
-    <div class="card">
-      <h2>❤️ Lo más querido de la noche</h2>
-      <div class="list" id="lovedList"><div class="empty">Aún sin reacciones. ¡Sé el primero en reaccionar!</div></div>
+      <div class="stab-row">
+        <button class="stab on" data-stab="loved" onclick="showSocialTab('loved')">❤️ Queridos</button>
+        <button class="stab" data-stab="requested" onclick="showSocialTab('requested')">🏆 Pedidos</button>
+        <button class="stab" data-stab="mylikes" onclick="showSocialTab('mylikes')">😍 Mis likes</button>
+      </div>
+      <div id="stab-loved" class="stab-pane">
+        <div class="list" id="lovedList"><div class="empty">Aún sin reacciones. ¡Sé el primero!</div></div>
+      </div>
+      <div id="stab-requested" class="stab-pane" style="display:none">
+        <div class="list" id="topReqList"><div class="empty">Aún sin pedidos registrados.</div></div>
+      </div>
+      <div id="stab-mylikes" class="stab-pane" style="display:none">
+        <div class="list" id="myLikesList"><div class="empty">Todavía no has dado likes. ¡Reacciona a las canciones!</div></div>
+      </div>
+      <button class="btn ghost block" style="margin-top:16px;font-size:13px" onclick="teaseCreditInvite()">🎁 Enviar crédito a otra mesa</button>
     </div>
     <div class="card">
       <h2>Ya sonaron 🕑</h2>
@@ -265,6 +290,33 @@ body{padding-bottom:80px}
       <button class="btn ghost" style="flex:1" id="cfNoBtn" onclick="cfNo()">Cancelar</button>
       <button class="btn gold" style="flex:2" id="cfYes">Confirmar</button>
     </div>
+  </div>
+</div>
+
+<!-- Now detail sheet -->
+<div class="sheet-bg" id="nowDetailBg" style="z-index:25">
+  <div class="sheet" style="text-align:center;padding-bottom:max(32px,env(safe-area-inset-bottom,32px))">
+    <button class="btn ghost sm" style="width:100%;margin-bottom:14px" onclick="closeNowDetail()">Cerrar ✕</button>
+    <img id="nowDetailImg" alt="" onerror="this.removeAttribute('src')">
+    <div id="nowDetailTitle" style="font-size:20px;font-weight:800;margin-bottom:4px;line-height:1.2"></div>
+    <div id="nowDetailArtist" style="color:var(--mut);font-size:14px;margin-bottom:6px"></div>
+    <div id="nowDetailWho" style="font-size:12px;color:var(--pri);font-weight:600;margin-bottom:18px"></div>
+    <a id="nowDetailLink" class="btn block" href="#" target="_blank" rel="noopener" style="display:none;text-decoration:none">▶ Ver en YouTube</a>
+  </div>
+</div>
+
+<!-- Guide sheet -->
+<div class="sheet-bg" id="guideBg" style="z-index:35">
+  <div class="sheet" style="max-height:85vh">
+    <h3>¿Cómo usar TYM Music? 🎵</h3>
+    <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
+      <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:26px;flex-none">🔎</span><div><b>Pedir</b><div class="small" style="margin-top:3px">Busca tu canción o artista y pídela. Aparece en la cola del bar.</div></div></div>
+      <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:26px;flex-none">▶️</span><div><b>Ahora</b><div class="small" style="margin-top:3px">Ve qué suena y qué viene en cola. Toca la miniatura para ver el detalle. Reacciona con ❤️🔥👍 e impulsa canciones.</div></div></div>
+      <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:26px;flex-none">❤️</span><div><b>Social</b><div class="small" style="margin-top:3px">Las más queridas y pedidas de la noche. Mira qué le gustó a todos y tus propias reacciones.</div></div></div>
+      <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:26px;flex-none">⚡</span><div><b>Prioridad</b><div class="small" style="margin-top:3px">Haz que tu canción suene antes comprando prioridad. Se suma a la cuenta de tu mesa.</div></div></div>
+      <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:26px;flex-none">🔔</span><div><b>Campana flotante</b><div class="small" style="margin-top:3px">Toca para llamar al personal. Toca de nuevo para avisar (zumbido). Mantén presionada para cancelar.</div></div></div>
+    </div>
+    <button class="btn block" style="margin-top:18px" onclick="closeGuide()">¡Entendido! 👍</button>
   </div>
 </div>
 
@@ -512,7 +564,9 @@ async function doReq(){
     const j=await r.json();
     if(j.ok){if(j.session)sess=j.session;
       toast(mode==='super'?'⏫ ¡Tu canción al frente!':(mode==='pri'?'⚡ ¡Pedida con prioridad!':'¡Canción pedida!'),'ok');
-      $('q').value='';$('recoChips').style.display='flex';renderReco();refreshBal();}
+      $('q').value='';$('recoChips').style.display='flex';
+      placeSimBox(false); // sugerencias arriba, catálogo del local abajo
+      renderReco();refreshBal();}
     else toast(j.error||'Error',j.race?'warn':'err');
   }finally{_reqInFlight=false;}
 }
@@ -596,11 +650,10 @@ async function cancelAssist(){
 }
 async function sendBuzz(){
   const remaining=Math.ceil((30000-(Date.now()-_lastBuzzTs))/1000);
-  if(_lastBuzzTs&&remaining>0){toast('Ya avisaste hace un momento. Espera '+remaining+' seg más ⏳','warn');return;}
-  _lastBuzzTs=Date.now();
+  if(_lastBuzzTs&&remaining>0){toast('Espera '+remaining+' seg más antes de volver a avisar ⏳','warn');return;}
   const j=await(await fetch('/api/assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,buzz:true})})).json();
-  if(j.ok)toast('🔔 ¡Zumbido enviado a la pantalla!','ok');
-  else if(j.wait){_lastBuzzTs=Date.now()-((30-j.wait)*1000);toast('Espera '+j.wait+' segundos más ⏳','warn');}
+  if(j.ok){_lastBuzzTs=Date.now();toast('🔔 ¡Zumbido enviado!','ok');}
+  else if(j.wait){_lastBuzzTs=Date.now()-((30-j.wait)*1000);toast('Espera '+j.wait+' seg más ⏳','warn');}
   else toast(j.error||'Error','err');
 }
 function toggleAssist(){
@@ -644,6 +697,48 @@ if (_pwaBtn) _pwaBtn.onclick = async () => {
   if (outcome === 'accepted') { _pwaPrompt = null; $('pwaInstallBox').style.display = 'none'; }
 };
 
+// ---------- Social tabs ----------
+function showSocialTab(name){
+  document.querySelectorAll('.stab-row .stab').forEach(b=>b.classList.toggle('on',b.dataset.stab===name));
+  document.querySelectorAll('.stab-pane').forEach(p=>p.style.display=p.id==='stab-'+name?'':'none');
+}
+
+// ---------- Now detail (thumbnail expand) ----------
+function openNowDetail(){
+  if(!_nowYt)return;
+  const img2=$('nowDetailImg');
+  img2.src=`https://i.ytimg.com/vi/${_nowYt}/hqdefault.jpg`;
+  $('nowDetailTitle').textContent=$('nowT').textContent;
+  $('nowDetailArtist').textContent=$('nowA').textContent;
+  $('nowDetailWho').textContent=$('nowW').textContent;
+  const link=$('nowDetailLink');
+  link.href='https://youtube.com/watch?v='+_nowYt;
+  link.style.display='';
+  $('nowDetailBg').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
+}
+function closeNowDetail(){
+  $('nowDetailBg').classList.remove('open');document.body.style.overflow='';
+  if(!$('sheet').classList.contains('open')&&!$('confirmBg').classList.contains('open')&&!$('guideBg').classList.contains('open'))
+    $('nav').classList.remove('modal-open');
+}
+
+// ---------- Guide onboarding ----------
+function openGuide(){
+  $('guideBg').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
+}
+function closeGuide(){
+  $('guideBg').classList.remove('open');document.body.style.overflow='';
+  if(!$('sheet').classList.contains('open')&&!$('confirmBg').classList.contains('open')&&!$('nowDetailBg').classList.contains('open'))
+    $('nav').classList.remove('modal-open');
+}
+
+// ---------- Credit invite (placeholder) ----------
+function teaseCreditInvite(){
+  toast('Próximamente 🚀 — ¡Gracias por el interés!','ok');
+  if(token) fetch('/api/feature_interest',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({token,feature:'credit_invite'})}).catch(()=>{});
+}
+
 // ---------- Row title ticker ----------
 function applyTicker(el){
   if(el.dataset.tkd)return;
@@ -657,9 +752,9 @@ function applyTicker(el){
   el.innerHTML='';el.appendChild(span);
 }
 function tickify(parent){
-  requestAnimationFrame(()=>{
+  setTimeout(()=>{
     (parent||document).querySelectorAll('.info .t:not([data-tkd])').forEach(applyTicker);
-  });
+  },120);
 }
 
 // ---------- Header ticker ----------
@@ -771,13 +866,19 @@ async function react(id,emoji){
   toast(emoji+(_likePub?' ¡Reaccionaste! (visible con tu mesa)':' ¡Reaccionaste! (incógnito)'),'ok');
   await fetch('/api/react',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id,emoji,public:_likePub})});poll();
 }
-function boost(id){
+function boost(id, isMine){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   const now=Date.now()/1000;let msg;
   if(sess&&sess.pass_until>now) msg='Se impulsará con tu <b>pase activo</b> (sin cargo extra).';
   else if(sess&&sess.credits>0) msg='Usarás <b>1 crédito</b> (te quedan '+(sess.credits-1)+'). La prioridad se cobra a <b>tu</b> mesa.';
   else msg='Esta prioridad se cobrará a <b>TU mesa</b>'+(sess?' ('+sess.table+')':'')+': <b>'+cop(price)+'</b>.';
-  confirmModal('Impulsar canción ⚡',msg,()=>doBoost(id));
+  if(!isMine){
+    confirmModal('⚠ Impulsar canción ajena',
+      '¿Seguro? Estás a punto de impulsar la canción de <b>otra mesa</b>. El costo se cargará a <b>tu cuenta</b>.',
+      ()=>confirmModal('Confirmar impulso ⚡',msg,()=>doBoost(id)));
+  }else{
+    confirmModal('Impulsar canción ⚡',msg,()=>doBoost(id));
+  }
 }
 async function doBoost(id){
   const j=await (await fetch('/api/boost',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id})})).json();
@@ -796,16 +897,23 @@ function songRow(it,opts){
   const tag=it.super?'⏫ ':(it.priority?'⚡ ':'');
   div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+(it.table||it.artist||'')}</div></div>`;
   if(opts&&opts.boost){
-    if(!it.priority){const b=document.createElement('button');b.className='btn sm gold';b.textContent='⚡ Impulsar';b.onclick=()=>boost(it.id);div.appendChild(b);}
-    if(jumpAvail&&!it.super){const jb=document.createElement('button');jb.className='btn sm';jb.style.background='#7c3aed';jb.textContent='⏫ #1';jb.title='Saltar al primer lugar';jb.onclick=()=>jump(it.id);div.appendChild(jb);}
+    if(!it.priority){const b=document.createElement('button');b.className='btn sm gold';b.textContent='⚡ Impulsar';b.onclick=()=>boost(it.id,it.mine);div.appendChild(b);}
+    if(jumpAvail&&!it.super){const jb=document.createElement('button');jb.className='btn sm';jb.style.background='#7c3aed';jb.textContent='⏫ #1';jb.title='Saltar al primer lugar';jb.onclick=()=>jump(it.id,it.mine);div.appendChild(jb);}
   }
   const rr=document.createElement('div');rr.className='reacts';rr.style.flexBasis='100%';rr.innerHTML=reactHtml(it);div.appendChild(rr);
   return div;
 }
-function jump(id){
+function jump(id, isMine){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   if(!jumpAvail){toast('El salto ya se usó esta canción. Disponible en la próxima 🎵','err');return;}
-  confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> de la cola. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu mesa'+(sess?' ('+sess.table+')':'')+'. Solo se permite <b>una vez por canción</b>.',()=>doJump(id));
+  const msg='Esta canción pasará al <b>primer lugar</b> de la cola. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu mesa'+(sess?' ('+sess.table+')':'')+'. Solo se permite <b>una vez por canción</b>.';
+  if(!isMine){
+    confirmModal('⚠ Saltar canción ajena ⏫',
+      '¿Seguro? Vas a llevar al #1 la canción de <b>otra mesa</b>. El costo se cargará a <b>tu cuenta</b>.',
+      ()=>confirmModal('Confirmar salto al #1 ⏫',msg,()=>doJump(id)));
+  }else{
+    confirmModal('Saltar al #1 ⏫',msg,()=>doJump(id));
+  }
 }
 async function doJump(id){
   const j=await (await fetch('/api/jump',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id})})).json();
@@ -837,6 +945,17 @@ function renderTopRequested(items){
     const d=document.createElement('div');d.className='rank tappable';
     d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div><div class="love" style="color:var(--pri)">🎵 ${it.count}</div>`;
     d.onclick=()=>openSheet(it);
+    box.appendChild(d);
+  });
+  tickify(box);
+}
+function renderMyLikes(items){
+  const box=$('myLikesList');if(!box)return;box.innerHTML='';
+  if(!items||!items.length){box.innerHTML='<div class="empty">Todavía no has dado likes. ¡Reacciona a las canciones!</div>';return;}
+  items.forEach((it,i)=>{
+    const d=document.createElement('div');d.className='rank';
+    const emojis=(it.my_reacts||[]).join(' ');
+    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div><div class="love">${emojis}</div>`;
     box.appendChild(d);
   });
   tickify(box);
@@ -921,6 +1040,7 @@ async function poll(){
     renderList('historyList', s.history, {empty:'Todavía no ha sonado nada.'});
     renderLoved(s.top_loved);
     renderTopRequested(s.top_requested);
+    renderMyLikes(s.my_liked||[]);
 
     // Badges de navegación
     $('badgeQ').style.display=s.queue_count?'':'none';$('badgeQ').textContent=s.queue_count;

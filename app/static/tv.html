@@ -38,8 +38,10 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #up .chip{display:inline-block;background:rgba(255,255,255,.10);border:1px solid #2a3550;border-radius:999px;
   padding:10px 18px;margin:0 10px 10px 0;font-size:22px;font-weight:600}
 #up .chip.p{border-color:rgba(245,179,1,.5)}
-/* Reacciones */
-#nowReacts{margin-top:16px;font-size:28px;font-weight:800;display:flex;gap:26px;text-shadow:0 2px 10px rgba(0,0,0,.8)}
+/* Reacciones — panel separado, aparece en otro momento del ciclo */
+#reactPanel{left:0;right:0;bottom:0;padding:40px 40px 52px;
+  background:linear-gradient(transparent,rgba(0,0,0,.75))}
+#nowReacts{font-size:34px;font-weight:800;display:flex;gap:32px;text-shadow:0 2px 10px rgba(0,0,0,.8)}
 #nowReacts.rpulse{animation:rp .6s}
 @keyframes rp{0%{transform:scale(1)}40%{transform:scale(1.22)}100%{transform:scale(1)}}
 /* Ranking lo más querido */
@@ -124,6 +126,8 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   <div class="title" id="title">Esperando canciones…</div>
   <div class="artist" id="artist"></div>
   <div class="who" id="who"></div>
+</div>
+<div class="panel" id="reactPanel">
   <div id="nowReacts"></div>
 </div>
 <div class="panel" id="up"><span class="lbl" id="upLbl"></span><span id="upChips"></span></div>
@@ -349,18 +353,23 @@ function paintNext(q,count){
   count=count||0;
   if(!q||!q.length){$('upLbl').innerHTML='Cola vacía · suena la lista del local';$('upChips').innerHTML='';return;}
   $('upLbl').innerHTML=`A continuación · <b>${count} en cola</b>`;
-  $('upChips').innerHTML=q.slice(0,4).map(it=>`<span class="chip${it.priority?' p':''}">${it.priority?'⚡ ':''}${it.title}</span>`).join('')+(count>4?`<span class="chip">+${count-4} más</span>`:'');
+  $('upChips').innerHTML=q.slice(0,3).map(it=>`<span class="chip${it.priority?' p':''}">${it.priority?'⚡ ':''}${it.title}</span>`).join('')+(count>3?`<span class="chip">+${count-3} más</span>`:'');
 }
 
 // ---- Apariciones escalonadas ----
 function burst(el,dur){el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),dur);}
 function burstNow(){burst($('brand'),13000);burst($('now'),13000);burst($('bar'),13000);}
+function burstReacts(){
+  const tot=parseInt(($('nowReacts').textContent.match(/\d+/g)||[]).reduce((s,n)=>s+Number(n),0)||0);
+  if(tot>0)burst($('reactPanel'),11000);
+}
 function schedule(fn,period,offset){setTimeout(()=>{fn();setInterval(fn,period);},offset);}
 const CYCLE=90000;
 schedule(burstNow,CYCLE,1500);
 schedule(()=>burst($('up'),11000),CYCLE,30000);
 schedule(()=>burst($('qr'),30000),CYCLE,15000);
 schedule(()=>{if(topLoved.length)burst($('loved'),9000);},CYCLE,75000);
+schedule(burstReacts,CYCLE,50000); // reacciones a mitad del ciclo, lejos del nombre de la canción
 
 // ---- Pantalla completa ----
 function toggleFs(){

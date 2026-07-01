@@ -13,6 +13,7 @@ from urllib.parse import urlparse, parse_qs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
+VERSION = "0.0.2-demo"
 PORT = int(os.environ.get("PORT", 8000))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 # Upstash Redis (backup remoto: evita perder datos en Render/hosts con disco efímero)
@@ -532,7 +533,8 @@ def public_state(token=None, admin=False):
         "priority_queue_min": int(sum(i.get("duration", DEFAULT_DUR)
                                       for i in queue_view() if i.get("priority")) // 60),
         "tv_active": (time.time() - STATE.get("tv_lastseen", 0)) < 15,
-        "active_sessions": len(STATE.get("sessions", {})),
+        "active_sessions": len({se["table"] for se in STATE.get("sessions", {}).values()
+                               if time.time() - se.get("created", 0) < 7200}),
         "assists": [a for a in STATE.get("assists", []) if not a.get("resolved")],
         "queue": qout,
         "queue_count": len(q),
@@ -557,6 +559,14 @@ def public_state(token=None, admin=False):
             if it.get("token") == token:
                 likes += react_counts(it["id"])[2]
         out["my_likes_total"] = likes
+        # canciones que este usuario ha reaccionado (para "Mis likes" en social)
+        my_liked = []
+        for it in (([np] if np else []) + STATE["items"] + STATE["history"]):
+            _, my_r, _ = react_counts(it["id"], token)
+            if my_r:
+                my_liked.append({"id": it["id"], "yt": it["yt"], "title": it["title"],
+                                 "artist": it.get("artist", ""), "my_reacts": my_r})
+        out["my_liked"] = my_liked[:20]
     if admin:
         out["pending"] = [public_item(i, token) for i in pending_view()]
         out["ledger"] = list(reversed(STATE["ledger"]))[:40]
@@ -784,6 +794,17 @@ class H(BaseHTTPRequestHandler):
             return self._file("offline.html", "text/html; charset=utf-8")
         if path == "/sw.js":
             return self._file("sw.js", "application/javascript; charset=utf-8")
+        if path == "/version.js":
+            js = (
+                f'const TYM_VERSION="{VERSION}";\n'
+                'document.addEventListener("DOMContentLoaded",()=>{'
+                'document.querySelectorAll("[data-tym-version]")'
+                '.forEach(e=>e.textContent="v"+TYM_VERSION);});\n'
+            ).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript; charset=utf-8")
+            self.send_header("Content-Length", str(len(js)))
+            self.end_headers(); self.wfile.write(js); return
         return self._send(404, {"error": "not found"})
 
     def _body(self):
@@ -1054,6 +1075,16 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "price": price})
 
             # ---- Captura de email (crecimiento) ----
+            if path == "/api/feature_interest":
+                feature = (d.get("feature") or "")[:64]
+                sess_fi = get_session(d.get("token"))
+                TYM.setdefault("feature_interest", []).append({
+                    "feature": feature, "venue": CUR_VID,
+                    "table": sess_fi["table"] if sess_fi else "",
+                    "ts": time.time()
+                })
+                return self._send(200, {"ok": True})
+
             if path == "/api/subscribe":
                 email = (d.get("email") or "").strip()
                 if "@" not in email or "." not in email or len(email) < 5:
@@ -1075,10 +1106,16 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True})
                 # Buzz en asistencia existente (con cooldown)
                 def _do_buzz(a):
-                    since = time.time() - a.get("buzzed_at", 0)
-                    if since < 30:
-                        return self._send(400, {"error": "Espera antes de volver a llamar", "wait": int(30 - since)})
-                    a["buzzed_at"] = time.time()
+                    now_t = time.time()
+                    since_created = now_t - a.get("ts", now_t)
+                    since_buzzed = now_t - a.get("buzzed_at", 0)
+                    # Primer minuto: no se permite buzz (dar tiempo al personal de verlo)
+                    if since_created < 60 and not a.get("buzzed_at"):
+                        wait = int(60 - since_created)
+                        return self._send(400, {"error": "Espera antes de volver a llamar", "wait": wait})
+                    if since_buzzed < 30:
+                        return self._send(400, {"error": "Espera antes de volver a llamar", "wait": int(30 - since_buzzed)})
+                    a["buzzed_at"] = now_t
                     a["buzz_count"] = a.get("buzz_count", 1) + 1
                     return self._send(200, {"ok": True, "buzzed": True, "id": a["id"]})
                 if d.get("buzz"):

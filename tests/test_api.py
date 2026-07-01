@@ -499,11 +499,14 @@ class TestAssist(TYMTestCase):
         self._post("/api/assist", {"token": self.token})
         s0 = self._state()
         self.assertEqual(s0["assists"][0].get("buzz_count", 1), 1, "Initial buzz_count is 1")
-        # First buzz succeeds
+        # Immediate buzz is blocked for 60s (dar tiempo al personal de ver la asistencia)
         d, status = self._post("/api/assist", {"token": self.token, "buzz": True})
-        self.assertEqual(status, 200)
+        self.assertEqual(status, 400, "Buzz inmediato bloqueado durante el primer minuto")
+        self.assertIn("wait", d, "Respuesta incluye tiempo de espera")
+        self.assertGreater(d["wait"], 0, "Tiempo de espera es positivo")
+        # buzz_count no sube porque el buzz fue bloqueado
         s1 = self._state()
-        self.assertEqual(s1["assists"][0]["buzz_count"], 2, "buzz_count increments to 2 after first buzz")
+        self.assertEqual(s1["assists"][0]["buzz_count"], 1, "buzz_count no aumenta si buzz fue bloqueado")
 
     def test_assist_has_buzz_count_field(self):
         self._post("/api/assist", {"token": self.token})
