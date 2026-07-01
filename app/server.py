@@ -498,9 +498,9 @@ def public_state(token=None, admin=False):
             pub_tables = set()
             for e in EMOJIS:
                 for tok in rp.get(e, ()):
-                    s = get_session(tok)
-                    if s:
-                        pub_tables.add(s["table"])
+                    tok_sess = get_session(tok)
+                    if tok_sess:
+                        pub_tables.add(tok_sess["table"])
             a = agg.setdefault(it["yt"], {"yt": it["yt"], "title": it["title"],
                                           "artist": it.get("artist", ""), "total": 0, "tables": []})
             a["total"] += tot
@@ -1262,16 +1262,15 @@ class H(BaseHTTPRequestHandler):
             if path == "/api/admin/move":
                 item_id = d.get("id")
                 direction = d.get("dir")  # "up" o "down"
-                q = [i for i in STATE["items"] if i["status"] == "approved"]
+                q = queue_view()   # sorted order — this is what we're reordering
                 idx = next((i for i, it in enumerate(q) if it["id"] == item_id), None)
                 if idx is None:
                     return self._send(400, {"error": "No encontrado"})
                 if direction == "up" and idx > 0:
-                    q[idx], q[idx - 1] = q[idx - 1], q[idx]
+                    # Swap ts so queue_view sort preserves new order
+                    q[idx]["ts"], q[idx - 1]["ts"] = q[idx - 1]["ts"], q[idx]["ts"]
                 elif direction == "down" and idx < len(q) - 1:
-                    q[idx], q[idx + 1] = q[idx + 1], q[idx]
-                pending = [i for i in STATE["items"] if i["status"] != "approved"]
-                STATE["items"] = q + pending
+                    q[idx]["ts"], q[idx + 1]["ts"] = q[idx + 1]["ts"], q[idx]["ts"]
                 return self._send(200, {"ok": True})
 
             if path == "/api/admin/close_table":
@@ -1298,6 +1297,10 @@ class H(BaseHTTPRequestHandler):
                 STATE["sessions"] = {}
                 STATE["req_counts"] = {}
                 STATE["reactions"] = {}
+                STATE["reaction_pub"] = {}
+                STATE["react_log"] = []
+                STATE["repeat_exceptions"] = set()
+                STATE["assists"] = []
                 STATE["jump_used_for"] = None
                 _id[0] = 0
                 FB_IDX[0] = 0
