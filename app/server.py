@@ -1036,6 +1036,15 @@ class H(BaseHTTPRequestHandler):
                 if d.get("cancel"):
                     STATE["assists"] = [a for a in STATE.get("assists", []) if a.get("token") != tok]
                     return self._send(200, {"ok": True})
+                if d.get("buzz"):
+                    for a in STATE.get("assists", []):
+                        if a.get("token") == tok:
+                            since = time.time() - a.get("buzzed_at", 0)
+                            if since < 30:
+                                return self._send(400, {"error": "Espera antes de volver a llamar", "wait": int(30 - since)})
+                            a["buzzed_at"] = time.time()
+                            return self._send(200, {"ok": True, "buzzed": True})
+                    return self._send(400, {"error": "No tienes una asistencia activa"})
                 aid = nid()
                 STATE["assists"].append({"id": aid, "table": sess["table"],
                                           "ts": time.time(), "resolved": False,

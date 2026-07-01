@@ -43,10 +43,12 @@ if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 body{padding-bottom:80px}
 .tab{display:none}
 .tab.on{display:block}
-.nav{position:fixed;left:0;right:0;bottom:0;z-index:15;display:flex;max-width:520px;margin:0 auto;
-  background:rgba(14,19,32,.97);backdrop-filter:blur(10px);border-top:1px solid var(--line)}
+.nav{position:fixed;left:0;right:0;bottom:0;z-index:50;display:flex;max-width:520px;margin:0 auto;
+  background:rgba(14,19,32,.97);backdrop-filter:blur(10px);border-top:1px solid var(--line);
+  padding-bottom:env(safe-area-inset-bottom,0px);will-change:transform}
 .nav button{position:relative;flex:1;background:none;border:none;color:var(--mut);font-size:11px;font-weight:700;
-  padding:12px 4px 16px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;min-height:60px;touch-action:manipulation}
+  padding:14px 4px 14px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:4px;
+  min-height:60px;touch-action:manipulation;-webkit-tap-highlight-color:transparent;user-select:none;-webkit-user-select:none}
 .nav button span{font-size:21px;line-height:1}
 .nav button.on{color:var(--pri)}
 .badge{position:absolute;top:4px;right:50%;margin-right:-22px;background:var(--pri);color:#fff;font-size:10px;
@@ -281,7 +283,7 @@ let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=fals
 const VENUE=new URLSearchParams(location.search).get('v')||'';
 let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], pass_obj={minutes:30,price:5000};
 let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='';
-let assistActive=false, assistId=null;
+let assistActive=false, assistId=null, _lastBuzzTs=0;
 let _simLoadedForId=null, _nowYt=null;
 let _npState=null;
 const $=id=>document.getElementById(id);
@@ -530,9 +532,18 @@ async function cancelAssist(){
   if(j.ok){assistActive=false;assistId=null;updateAssistBtn();toast('Llamada cancelada.');}
   else toast(j.error||'Error','err');
 }
+async function sendBuzz(){
+  const remaining=Math.ceil((30000-(Date.now()-_lastBuzzTs))/1000);
+  if(_lastBuzzTs&&remaining>0){toast('Ya avisaste hace un momento. Espera '+remaining+' seg más ⏳','warn');return;}
+  _lastBuzzTs=Date.now();
+  const j=await(await fetch('/api/assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,buzz:true})})).json();
+  if(j.ok)toast('🔔 ¡Zumbido enviado a la pantalla!','ok');
+  else if(j.wait){_lastBuzzTs=Date.now()-((30-j.wait)*1000);toast('Espera '+j.wait+' segundos más ⏳','warn');}
+  else toast(j.error||'Error','err');
+}
 function toggleAssist(){
   if(!token){toast('Ingresa el código de tu mesa primero','err');return;}
-  if(assistActive){cancelAssist();}
+  if(assistActive){sendBuzz();}
   else{confirmModal('Llamar asistencia 🔔','El personal de '+((sess&&sess.table)||'tu mesa')+' será avisado que necesitas atención.',doAssist);}
 }
 function updateAssistBtn(){
