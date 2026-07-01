@@ -70,6 +70,7 @@
   <button class="tabBtn" onclick="showTab('tables')" id="tbtn-tables">🍽️ Mesas</button>
   <button class="tabBtn" onclick="showTab('content')" id="tbtn-content">🎵 Contenido</button>
   <button class="tabBtn" onclick="showTab('reports')" id="tbtn-reports">📊 Informes</button>
+  <button class="tabBtn" onclick="showTab('history')" id="tbtn-history">📋 Historial</button>
 </nav>
 
 <!-- ============================================================
@@ -270,6 +271,23 @@
   </div>
 </div>
 
+<div id="tab-history" class="tabpanel">
+  <div class="wrap wide">
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <p class="sec" style="margin:0">📋 Historial de pedidos</p>
+        <div style="display:flex;gap:6px;margin-left:auto">
+          <button class="btn sm ghost" onclick="loadHistory(1)" id="hbtn1">Hoy</button>
+          <button class="btn sm ghost" onclick="loadHistory(2)" id="hbtn2">2 días</button>
+          <button class="btn sm ghost active" onclick="loadHistory(3)" id="hbtn3">3 días</button>
+        </div>
+        <span class="small" id="histCount" style="color:var(--mut)"></span>
+      </div>
+      <div class="list" id="histList"><div class="empty">Cargando…</div></div>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -284,6 +302,7 @@ function showTab(id){
   document.getElementById('tab-'+id).classList.add('active');
   document.getElementById('tbtn-'+id).classList.add('active');
   try{sessionStorage.setItem('adminTab',id);}catch(e){}
+  if(id==='history')loadHistory(3);
 }
 
 const THEMES={
@@ -551,6 +570,34 @@ async function loadAnalytics(){
       abox.appendChild(r);
     });
   }catch(e){}
+}
+
+// ---------- Historial de pedidos ----------
+const MODE_LABEL={normal:'🆓 Gratis',credito:'⚡ Crédito',pase:'⚡ Pase',salto:'⏫ Salto',single:'💰 Cobrado'};
+const hm3=ts=>{const d=new Date(ts*1000);return d.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'});};
+async function loadHistory(days){
+  ['hbtn1','hbtn2','hbtn3'].forEach(id=>$('btn'+id.slice(4))&&$('btn'+id.slice(4)).classList.remove('active'));
+  // highlight active btn
+  ['hbtn1','hbtn2','hbtn3'].forEach(id=>{const b=$(id);if(b)b.classList.toggle('active',id==='hbtn'+days);});
+  try{
+    const d=await(await fetch('/api/admin/request_log?days='+days)).json();
+    const list=d.log||[];
+    const box=$('histList');box.innerHTML='';
+    $('histCount').textContent=list.length+' pedidos';
+    if(!list.length){box.innerHTML='<div class="empty">Sin pedidos en este período.</div>';return;}
+    list.forEach(e=>{
+      const r=document.createElement('div');r.className='row';
+      const badge=MODE_LABEL[e.mode]||e.mode;
+      const price=e.charge>0?`<span class="chip pri" style="margin-left:4px">${cop(e.charge)}</span>`:'';
+      r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${e.yt}/mqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${e.yt}/hqdefault.jpg';this.onerror=null">
+        <div class="info">
+          <div class="t">${e.title}</div>
+          <div class="a">${e.artist?e.artist+' · ':''}<b>${e.table||'—'}</b> · ${hm3(e.ts)}</div>
+        </div>
+        <span class="chip" style="white-space:nowrap">${badge}</span>${price}`;
+      box.appendChild(r);
+    });
+  }catch(err){$('histList').innerHTML='<div class="empty">Error cargando historial.</div>';}
 }
 
 $('tymLogoFile').onchange=e=>readImg(e.target.files[0],d=>{tymLogoData=d;renderLogoPrev();});

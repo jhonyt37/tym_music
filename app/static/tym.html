@@ -59,6 +59,17 @@
     <div class="list" id="accts"></div>
   </div>
 
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+      <h2 style="margin:0">📋 Historial de pedidos</h2>
+      <select id="logVenueFilter" style="padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);color:var(--txt);font-size:13px" onchange="loadTymLog()">
+        <option value="">Todos los locales</option>
+      </select>
+      <span class="small" id="tymLogCount" style="margin-left:auto;color:var(--mut)"></span>
+    </div>
+    <div class="list" id="tymLog"><div class="empty">Cargando…</div></div>
+  </div>
+
   <div class="grid2">
     <div class="card">
       <h2>Locales registrados (<span id="venueCount">0</span>)</h2>
@@ -87,6 +98,34 @@ const hm=ts=>{if(!ts)return '—';const d=new Date(ts*1000);return d.toLocaleStr
 let VENMAP={};
 async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';}
 async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
+
+const MODE_LABEL={normal:'🆓 Gratis',credito:'⚡ Crédito',pase:'⚡ Pase',salto:'⏫ Salto',single:'💰 Cobrado'};
+const hm2=ts=>{const d=new Date(ts*1000);return d.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'});};
+async function loadTymLog(){
+  try{
+    const v=$('logVenueFilter').value;
+    const url='/api/tym/request_log?days=3'+(v?'&v='+encodeURIComponent(v):'');
+    const data=await(await fetch(url)).json();
+    const box=$('tymLog');box.innerHTML='';
+    // Flatten all entries sorted by ts desc
+    let all=[];
+    Object.values(data).forEach(vd=>{(vd.log||[]).forEach(e=>all.push(e));});
+    all.sort((a,b)=>b.ts-a.ts);
+    $('tymLogCount').textContent=all.length+' pedidos (3 días)';
+    if(!all.length){box.innerHTML='<div class="empty">Sin pedidos en los últimos 3 días.</div>';return;}
+    all.slice(0,300).forEach(e=>{
+      const r=document.createElement('div');r.className='row';
+      const badge=MODE_LABEL[e.mode]||e.mode;
+      const vname=e.venue_name?`<span style="color:var(--pri);font-weight:700">${e.venue_name}</span> · `:'';
+      r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${e.yt}/mqdefault.jpg" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none">
+        <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.title}</div>
+        <div style="color:var(--mut);font-size:12px">${vname}${e.table||'—'} · ${hm2(e.ts)}</div></div>
+        <span style="font-size:12px;padding:3px 8px;border-radius:999px;background:var(--bg2);border:1px solid var(--line);white-space:nowrap">${badge}</span>
+        ${e.charge>0?`<span style="font-size:12px;font-weight:800;color:var(--gold)">${cop(e.charge)}</span>`:''}`;
+      box.appendChild(r);
+    });
+  }catch(err){$('tymLog').innerHTML='<div class="empty">Error cargando historial.</div>';}
+}
 
 async function load(){
   const r=await fetch('/api/tym/analytics');
@@ -126,6 +165,11 @@ async function load(){
     row.innerHTML=`<div class="info"><div class="t">${info.name||info} <span class="tag" style="font-size:11px;background:rgba(59,130,246,.2);border-radius:4px;padding:2px 6px">${vid}</span></div><div class="a">👤 ${own?own.username:'—'} · ${info.tables||0} mesas · <a href="/?v=${vid}" target="_blank" class="small">Ver app</a></div></div>`;
     vl.appendChild(row);
   });
+  // Popula selector de local en historial
+  const sel=$('logVenueFilter');
+  while(sel.options.length>1)sel.remove(1);
+  venues.forEach(([vid,info])=>{const o=document.createElement('option');o.value=vid;o.textContent=info.name||vid;sel.appendChild(o);});
+  loadTymLog();
 }
 async function createVenue(){
   const vid=$('nVid').value.trim(),name=$('nName').value.trim();

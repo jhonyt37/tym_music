@@ -81,6 +81,7 @@ def make_venue(name):
         "items": [],
         "ledger": [],
         "history": [],
+        "request_log": [],         # todos los pedidos, últimos 3 días
         "curated": [dict(s) for s in CATALOG if s["genre"] in ("reggaeton", "pop latino")][:8],
         "curated_shuffle": [],     # orden aleatorio actual del fallback
         "req_counts": {},
@@ -697,6 +698,30 @@ class H(BaseHTTPRequestHandler):
                 return self._send(401, {"error": "no auth"})
             with LOCK:
                 return self._send(200, venue_analytics(av))
+        if path == "/api/admin/request_log":
+            av = self.authed_venue()
+            if not av or av not in VENUES:
+                return self._send(401, {"error": "no auth"})
+            with LOCK:
+                days = min(int(self._q("days") or 3), 3)
+                cutoff = time.time() - days * 24 * 3600
+                log = [e for e in VENUES[av].get("request_log", []) if e["ts"] >= cutoff]
+                return self._send(200, {"log": list(reversed(log))})
+        if path == "/api/tym/request_log":
+            if self.authed_venue() != "*":
+                return self._send(403, {"error": "Solo TYM master"})
+            with LOCK:
+                vid_filter = self._q("v")
+                days = min(int(self._q("days") or 3), 3)
+                cutoff = time.time() - days * 24 * 3600
+                result = {}
+                for vid, venue in VENUES.items():
+                    if vid_filter and vid != vid_filter:
+                        continue
+                    log = [dict(e, venue=vid, venue_name=venue["settings"]["venue_name"])
+                           for e in venue.get("request_log", []) if e["ts"] >= cutoff]
+                    result[vid] = {"name": venue["settings"]["venue_name"], "log": list(reversed(log))}
+                return self._send(200, result)
         if path == "/manifest.json":
             v = self._q("v") or DEFAULT_VID
             name = VENUES.get(v, VENUES[DEFAULT_VID])["settings"]["venue_name"]
@@ -874,6 +899,16 @@ class H(BaseHTTPRequestHandler):
                 STATE["items"].append(item)
                 bump_count(yt, title, artist)
                 log_order(table, d.get("token"), mode, title, yt)   # analítica (free/premium)
+                # Log de pedidos (3 días)
+                _now = time.time()
+                STATE["request_log"].append({
+                    "ts": _now, "title": title, "artist": artist or "",
+                    "yt": yt, "table": table, "mode": mode,
+                    "priority": priority, "charge": charge,
+                })
+                _cutoff = _now - 3 * 24 * 3600
+                if len(STATE["request_log"]) > 5000 or (STATE["request_log"] and STATE["request_log"][0]["ts"] < _cutoff):
+                    STATE["request_log"] = [e for e in STATE["request_log"] if e["ts"] >= _cutoff]
                 if sup and STATE["now_playing"]:
                     STATE["jump_used_for"] = STATE["now_playing"]["id"]
                 if STATE["now_playing"] is None and item["status"] == "approved":
@@ -1172,7 +1207,8 @@ class H(BaseHTTPRequestHandler):
 # =================== Persistencia (archivo JSON; fácil de migrar a DB/multi-bar) ===================
 DATA_FILE = os.path.join(HERE, "data.json")
 PERSIST_KEYS = ("settings", "tables", "sessions", "now_playing", "items", "ledger",
-                "history", "curated", "req_counts", "jump_used_for", "learned_end", "assists")
+                "history", "curated", "req_counts", "jump_used_for", "learned_end", "assists",
+                "request_log")
 
 def venue_snapshot(v):
     snap = {k: v[k] for k in PERSIST_KEYS}
