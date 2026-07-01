@@ -13,7 +13,7 @@ from urllib.parse import urlparse, parse_qs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
-VERSION = "0.0.2-demo"
+VERSION = "0.0.3-demo"
 PORT = int(os.environ.get("PORT", 8000))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 # Upstash Redis (backup remoto: evita perder datos en Render/hosts con disco efímero)
@@ -23,6 +23,8 @@ REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY   = "tym_state"
 DEFAULT_DUR = 210  # 3:30 si no se conoce la duracion
 EMOJIS = ["❤️", "🔥", "👍"]  # reacciones positivas
+VIBES = ["🔥 Que todo el mundo cante", "💃 Más baile", "🎸 Más suave", "✨ Así está perfecto"]
+BIS_THRESHOLD = 3
 
 LOCK = threading.Lock()
 _id = [0]
@@ -96,6 +98,10 @@ def make_venue(name):
         "learned_end": {},         # yt -> seg de corte aprendido por saltos manuales
         "assists": [],             # {id, table, ts, resolved, resolve_ts, token}
         "tv_lastseen": 0,          # timestamp del último ping de la TV activa
+        "dedicas": [],             # [{id, from_table, to_table, message, ts, shown_tv}]
+        "bis_votes": {},           # {yt: set(tokens)} — votos de bis por canción
+        "poll": None,              # {options:[{yt,title,artist}], votes:{yt:set(tokens)}, active, created_at}
+        "vibe_votes": {},          # {emoji: set(tokens)} — votos de vibe
         "_id": 0, "_fb": 0,
     }
 
@@ -458,7 +464,7 @@ def public_item(it, token):
             "requeue_count": it.get("requeue_count", 0),
             "reactions": counts, "my_reacts": mine, "react_total": total}
 
-def public_state(token=None, admin=False):
+def public_state(token=None, admin=False, mark_dedica=None):
     s = STATE["settings"]
     np = STATE["now_playing"]
     q = queue_view()
@@ -482,6 +488,7 @@ def public_state(token=None, admin=False):
                   "fallback": np.get("fallback", False),
                   "duration": np.get("duration", DEFAULT_DUR), "position": np.get("position", 0),
                   "learned_end": STATE["learned_end"].get(np["yt"]),
+                  "message": (np.get("message") or ""),
                   "reactions": ncounts, "my_reacts": nmine, "react_total": ntotal}
         now_ts = time.time()
         np_pub["recent_reacts"] = [
@@ -518,6 +525,78 @@ def public_state(token=None, admin=False):
             req_songs[yt] = {"yt": yt, "title": e.get("title", "?"), "artist": e.get("artist", ""), "count": 0}
         req_songs[yt]["count"] += 1
     top_requested = sorted(req_songs.values(), key=lambda x: -x["count"])[:10]
+
+    # ---- Top mesas de la noche ----
+    _skip_tables = ("Lista del local", "Admin", "Bis ↩️", "Votación 🗳️")
+    table_stats = {}
+    for entry in STATE.get("request_log", []):
+        tbl = entry.get("table", "")
+        if tbl and tbl not in _skip_tables:
+            if tbl not in table_stats:
+                table_stats[tbl] = {"table": tbl, "songs_requested": 0, "likes_received": 0}
+            table_stats[tbl]["songs_requested"] += 1
+    for it in (([np] if np else []) + STATE["items"] + STATE["history"]):
+        tbl = it.get("table", "")
+        if tbl and tbl not in _skip_tables:
+            _, _, tot = react_counts(it["id"])
+            if tot > 0:
+                if tbl not in table_stats:
+                    table_stats[tbl] = {"table": tbl, "songs_requested": 0, "likes_received": 0}
+                table_stats[tbl]["likes_received"] += tot
+    top_tables = sorted(table_stats.values(), key=lambda x: -(x["songs_requested"] + x["likes_received"]))[:5]
+
+    # ---- Dedica pending (para TV) ----
+    if mark_dedica:
+        try:
+            mid = int(mark_dedica)
+            for ded in STATE.get("dedicas", []):
+                if ded["id"] == mid:
+                    ded["shown_tv"] = True
+                    break
+        except Exception:
+            pass
+    dedica_pending = None
+    for ded in reversed(STATE.get("dedicas", [])):
+        if not ded.get("shown_tv"):
+            dedica_pending = ded
+            break
+
+    # ---- Bis votes ----
+    bis_votes_pub = {yt: len(v) for yt, v in STATE.get("bis_votes", {}).items()}
+    my_bis_votes = []
+    if token:
+        for yt, voters in STATE.get("bis_votes", {}).items():
+            if token in voters:
+                my_bis_votes.append(yt)
+
+    # ---- Poll (votación de próxima canción) ----
+    poll_state = None
+    _p = STATE.get("poll")
+    if _p:
+        my_vote_poll = None
+        if token:
+            for _yt, _voters in _p.get("votes", {}).items():
+                if token in _voters:
+                    my_vote_poll = _yt
+                    break
+        poll_state = {
+            "options": _p.get("options", []),
+            "votes": {_yt: len(_v) for _yt, _v in _p.get("votes", {}).items()},
+            "my_vote": my_vote_poll,
+            "active": _p.get("active", False),
+        }
+
+    # ---- Vibe votes ----
+    vibe_votes_state = STATE.get("vibe_votes", {})
+    my_vibe = None
+    if token:
+        for _vemoji, _vvoters in vibe_votes_state.items():
+            if token in _vvoters:
+                my_vibe = _vemoji
+                break
+    vibe_state = {v: len(vibe_votes_state.get(v, set())) for v in VIBES}
+    vibe_state["my_vote"] = my_vibe
+
     out = {
         "settings": dict({k: s.get(k) for k in ("venue_name", "price_priority", "style", "auto_approve",
                                        "genre", "credit_packages", "time_pass",
@@ -545,6 +624,13 @@ def public_state(token=None, admin=False):
         "history": history,
         "top_loved": top_loved,
         "top_requested": top_requested,
+        "top_tables": top_tables,
+        "dedica_pending": dedica_pending,
+        "bis_votes": bis_votes_pub,
+        "my_bis_votes": my_bis_votes,
+        "bis_threshold": BIS_THRESHOLD,
+        "poll": poll_state,
+        "vibe": vibe_state,
         "session": (None if not sess else {"table": sess["table"], "credits": sess["credits"],
                                            "pass_until": sess["pass_until"]}),
     }
@@ -730,7 +816,8 @@ class H(BaseHTTPRequestHandler):
                     self.set_venue(av)
                 else:
                     self.set_venue(self.resolve_vid())
-                return self._send(200, public_state(self._q("token") or None, admin))
+                return self._send(200, public_state(self._q("token") or None, admin,
+                                                       mark_dedica=self._q("mark_dedica") or None))
         if path == "/api/admin/tables":
             av = self.authed_venue()
             if not av or av not in VENUES:
@@ -840,7 +927,8 @@ class H(BaseHTTPRequestHandler):
         ADMIN_PATHS = ("/api/advance", "/api/progress", "/api/admin/approve", "/api/admin/reject",
                        "/api/admin/remove", "/api/admin/settings", "/api/admin/tables",
                        "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset",
-                       "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move")
+                       "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move",
+                       "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset")
         vid = self.resolve_vid(d)
         if path in ADMIN_PATHS:
             av = self.authed_venue()
@@ -959,12 +1047,14 @@ class H(BaseHTTPRequestHandler):
                         sess["credits"] -= 1; mode = "credito"
                     else:
                         mode = "single"; charge = STATE["settings"]["price_priority"]
+                req_msg = (d.get("message") or "").strip()[:80]
                 item = {"id": nid(), "title": title, "artist": artist, "yt": yt,
                         "token": d.get("token"), "table": table, "priority": priority,
                         "super": sup, "mode": mode, "duration": dur,
                         "status": "approved" if STATE["settings"]["auto_approve"] else "pending",
                         "play_status": "pending", "played_enough": False, "requeue_count": 0,
-                        "ts": time.time(), "charge_on_play": charge, "charged": False, "charge_kind": ckind}
+                        "ts": time.time(), "charge_on_play": charge, "charged": False, "charge_kind": ckind,
+                        "message": req_msg}
                 STATE["items"].append(item)
                 bump_count(yt, title, artist)
                 log_order(table, d.get("token"), mode, title, yt)   # analítica (free/premium)
@@ -1349,8 +1439,161 @@ class H(BaseHTTPRequestHandler):
                 STATE["repeat_exceptions"] = set()
                 STATE["assists"] = []
                 STATE["jump_used_for"] = None
+                STATE["dedicas"] = []
+                STATE["bis_votes"] = {}
+                STATE["poll"] = None
+                STATE["vibe_votes"] = {}
                 _id[0] = 0
                 FB_IDX[0] = 0
+                return self._send(200, {"ok": True})
+
+            # ---- Dedicatorias ----
+            if path == "/api/dedica":
+                sess = get_session(d.get("token"))
+                if not sess:
+                    return self._send(400, {"error": "Ingresa el código de tu mesa primero."})
+                to_table = (d.get("to_table") or "").strip()
+                message = (d.get("message") or "").strip()
+                valid_tables = [t["name"] for t in STATE["tables"]]
+                if to_table not in valid_tables:
+                    return self._send(400, {"error": "Mesa de destino inválida."})
+                if not message:
+                    return self._send(400, {"error": "El mensaje no puede estar vacío."})
+                if len(message) > 80:
+                    return self._send(400, {"error": "El mensaje no puede tener más de 80 caracteres."})
+                ded = {"id": nid(), "from_table": sess["table"], "to_table": to_table,
+                       "message": message, "ts": time.time(), "shown_tv": False}
+                STATE.setdefault("dedicas", []).append(ded)
+                if len(STATE["dedicas"]) > 50:
+                    STATE["dedicas"] = STATE["dedicas"][-50:]
+                return self._send(200, {"ok": True})
+
+            # ---- Solicitar bis ----
+            if path == "/api/bis":
+                sess = get_session(d.get("token"))
+                if not sess:
+                    return self._send(400, {"error": "Ingresa el código de tu mesa primero."})
+                yt = (d.get("yt") or "").strip()
+                if not yt:
+                    return self._send(400, {"error": "Falta el ID de la canción."})
+                tok = d.get("token")
+                bis_votes = STATE.setdefault("bis_votes", {})
+                if yt not in bis_votes:
+                    bis_votes[yt] = set()
+                voters = bis_votes[yt]
+                if tok in voters:
+                    voters.discard(tok)
+                    count = len(voters)
+                    return self._send(200, {"ok": True, "voted": False, "count": count})
+                voters.add(tok)
+                count = len(voters)
+                if count >= BIS_THRESHOLD:
+                    song = next((h for h in STATE.get("history", []) if h.get("yt") == yt), None)
+                    if song:
+                        bis_item = {"id": nid(), "title": song["title"], "artist": song.get("artist", ""),
+                                    "yt": yt, "token": None, "table": "Bis ↩️", "priority": False,
+                                    "super": False, "mode": "normal", "duration": song.get("duration", DEFAULT_DUR),
+                                    "status": "approved", "play_status": "pending", "played_enough": False,
+                                    "requeue_count": 0, "ts": time.time(), "charge_on_play": 0,
+                                    "charged": False, "charge_kind": "", "repeat_exception": True, "message": ""}
+                        STATE["items"].append(bis_item)
+                        STATE.setdefault("repeat_exceptions", set()).add(yt)
+                    bis_votes.pop(yt, None)
+                    if STATE.get("now_playing") is None:
+                        promote_next()
+                    return self._send(200, {"ok": True, "voted": True, "count": count, "queued": True})
+                return self._send(200, {"ok": True, "voted": True, "count": count})
+
+            # ---- Voto en votación ----
+            if path == "/api/poll/vote":
+                sess = get_session(d.get("token"))
+                if not sess:
+                    return self._send(400, {"error": "Ingresa el código de tu mesa primero."})
+                _p = STATE.get("poll")
+                if not _p or not _p.get("active"):
+                    return self._send(400, {"error": "No hay votación activa."})
+                yt = (d.get("yt") or "").strip()
+                valid_yts = [opt["yt"] for opt in _p.get("options", [])]
+                if yt not in valid_yts:
+                    return self._send(400, {"error": "Opción inválida."})
+                tok = d.get("token")
+                votes = _p.setdefault("votes", {})
+                already_voted = next((v_yt for v_yt, v_set in votes.items() if tok in v_set), None)
+                if already_voted == yt:
+                    votes[yt].discard(tok)
+                    my_vote = None
+                else:
+                    if already_voted:
+                        votes[already_voted].discard(tok)
+                    votes.setdefault(yt, set()).add(tok)
+                    my_vote = yt
+                return self._send(200, {"ok": True, "votes": {k: len(v) for k, v in votes.items()},
+                                        "my_vote": my_vote})
+
+            # ---- Vibe ----
+            if path == "/api/vibe":
+                sess = get_session(d.get("token"))
+                if not sess:
+                    return self._send(400, {"error": "Ingresa el código de tu mesa primero."})
+                emoji = d.get("emoji", "")
+                if emoji not in VIBES:
+                    return self._send(400, {"error": "Vibe inválido."})
+                tok = d.get("token")
+                vibe_votes = STATE.setdefault("vibe_votes", {})
+                already_this = tok in vibe_votes.get(emoji, set())
+                for v in VIBES:
+                    if v in vibe_votes:
+                        vibe_votes[v].discard(tok)
+                if not already_this:
+                    vibe_votes.setdefault(emoji, set()).add(tok)
+                my_vibe = None if already_this else emoji
+                counts = {v: len(vibe_votes.get(v, set())) for v in VIBES}
+                return self._send(200, {"ok": True, "vibe": counts, "my_vote": my_vibe})
+
+            # ---- Admin: crear votación ----
+            if path == "/api/admin/poll":
+                options = d.get("options", [])
+                valid_opts = [{"yt": (o.get("yt") or "").strip(),
+                               "title": str(o.get("title", "Canción"))[:120],
+                               "artist": str(o.get("artist", ""))[:80]}
+                              for o in options if (o.get("yt") or "").strip()]
+                if len(valid_opts) < 2:
+                    return self._send(400, {"error": "Se necesitan al menos 2 opciones válidas."})
+                if len(valid_opts) > 3:
+                    valid_opts = valid_opts[:3]
+                STATE["poll"] = {"options": valid_opts,
+                                 "votes": {o["yt"]: set() for o in valid_opts},
+                                 "active": True, "created_at": time.time()}
+                return self._send(200, {"ok": True})
+
+            # ---- Admin: cerrar votación ----
+            if path == "/api/admin/poll/close":
+                _p = STATE.get("poll")
+                if not _p:
+                    return self._send(400, {"error": "No hay votación activa."})
+                _p["active"] = False
+                votes = _p.get("votes", {})
+                if votes:
+                    winner_yt = max(votes.keys(), key=lambda _y: len(votes[_y]))
+                    if len(votes[winner_yt]) > 0:
+                        winner_opt = next((o for o in _p.get("options", []) if o["yt"] == winner_yt), None)
+                        if winner_opt:
+                            poll_item = {"id": nid(), "title": winner_opt["title"],
+                                         "artist": winner_opt.get("artist", ""), "yt": winner_yt,
+                                         "token": None, "table": "Votación 🗳️", "priority": False,
+                                         "super": False, "mode": "normal", "duration": DEFAULT_DUR,
+                                         "status": "approved", "play_status": "pending", "played_enough": False,
+                                         "requeue_count": 0, "ts": time.time(), "charge_on_play": 0,
+                                         "charged": False, "charge_kind": "", "repeat_exception": True, "message": ""}
+                            STATE["items"].append(poll_item)
+                            STATE.setdefault("repeat_exceptions", set()).add(winner_yt)
+                            if STATE.get("now_playing") is None:
+                                promote_next()
+                return self._send(200, {"ok": True})
+
+            # ---- Admin: reiniciar vibe ----
+            if path == "/api/admin/vibe/reset":
+                STATE["vibe_votes"] = {}
                 return self._send(200, {"ok": True})
 
         # ---- TYM Master: gestión de locales ----
@@ -1379,7 +1622,7 @@ class H(BaseHTTPRequestHandler):
 DATA_FILE = os.path.join(HERE, "data.json")
 PERSIST_KEYS = ("settings", "tables", "sessions", "now_playing", "items", "ledger",
                 "history", "curated", "req_counts", "jump_used_for", "learned_end", "assists",
-                "request_log")
+                "request_log", "dedicas")
 
 def venue_snapshot(v):
     snap = {k: v[k] for k in PERSIST_KEYS}
@@ -1388,6 +1631,15 @@ def venue_snapshot(v):
     snap["reaction_pub"] = {str(k): {e: list(s) for e, s in r.items()}
                             for k, r in v.get("reaction_pub", {}).items()}
     snap["repeat_exceptions"] = list(v.get("repeat_exceptions", set()))
+    snap["bis_votes"] = {yt: list(tokens) for yt, tokens in v.get("bis_votes", {}).items()}
+    snap["vibe_votes"] = {emoji: list(tokens) for emoji, tokens in v.get("vibe_votes", {}).items()}
+    _poll = v.get("poll")
+    if _poll:
+        _pc = dict(_poll)
+        _pc["votes"] = {yt: list(tokens) for yt, tokens in _pc.get("votes", {}).items()}
+        snap["poll"] = _pc
+    else:
+        snap["poll"] = None
     return snap
 
 def _redis_strip_logos(data):
@@ -1460,6 +1712,15 @@ def _load_into(v, snap):
     v["reaction_pub"] = {int(k): {e: set(lst) for e, lst in r.items()}
                          for k, r in snap.get("reaction_pub", {}).items()}
     v["repeat_exceptions"] = set(snap.get("repeat_exceptions", []))
+    v["bis_votes"] = {yt: set(tokens) for yt, tokens in snap.get("bis_votes", {}).items()}
+    v["vibe_votes"] = {emoji: set(tokens) for emoji, tokens in snap.get("vibe_votes", {}).items()}
+    _ps = snap.get("poll")
+    if _ps:
+        _pc = dict(_ps)
+        _pc["votes"] = {yt: set(tokens) for yt, tokens in _pc.get("votes", {}).items()}
+        v["poll"] = _pc
+    else:
+        v["poll"] = None
 
 def load_state():
     d = None

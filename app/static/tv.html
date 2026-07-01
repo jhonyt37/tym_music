@@ -58,6 +58,35 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #bar{position:fixed;left:0;bottom:0;height:7px;width:100%;background:rgba(255,255,255,.12);z-index:5;opacity:0;transition:opacity 1.1s ease}
 #bar.show{opacity:1}
 #bar .fill{height:100%;width:0%;background:var(--pri);transition:width .8s linear}
+/* Overlay de dedicatoria */
+#dedicaOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:22;pointer-events:none}
+#dedicaBox{background:rgba(10,14,22,.88);border:2px solid var(--gold);border-radius:24px;padding:30px 40px;max-width:700px;text-align:center;backdrop-filter:blur(10px);animation:dedicaIn .6s cubic-bezier(.34,1.56,.64,1)}
+@keyframes dedicaIn{from{transform:scale(.7);opacity:0}to{transform:scale(1);opacity:1}}
+#dedicaBox .dedica-from{font-size:18px;color:#9aa7c2;font-weight:700;margin-bottom:6px}
+#dedicaBox .dedica-msg{font-size:38px;font-weight:800;color:#fff;text-shadow:0 2px 14px rgba(0,0,0,.9);line-height:1.2}
+#dedicaBox .dedica-to{font-size:20px;color:var(--gold);font-weight:700;margin-top:8px}
+
+/* Mensaje de canción (dedicatoria inline al pedir) */
+#songMsg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:19;padding:30px}
+#songMsgText{font-size:54px;font-weight:800;color:#fff;text-shadow:0 3px 18px rgba(0,0,0,.95);text-align:center;opacity:0;max-width:80%}
+@keyframes dedicaPulse{0%,100%{transform:scale(1);opacity:0}15%{opacity:.82}50%{transform:scale(1.12);opacity:.88}85%{opacity:.82}}
+
+/* Panel de votación en TV */
+#pollPanel{position:fixed;bottom:84px;left:50%;transform:translateX(-50%);z-index:20;
+  background:rgba(10,14,22,.90);border:1px solid #2a3550;border-radius:20px;
+  padding:18px 28px;min-width:340px;max-width:520px;backdrop-filter:blur(10px);display:none}
+#pollPanel .pp-title{font-size:17px;font-weight:800;color:#fff;margin-bottom:12px;text-align:center}
+.pp-opt{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.pp-opt .pp-title-s{flex:1;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pp-bar{flex:2;height:8px;background:#2a3550;border-radius:4px;overflow:hidden}
+.pp-bar .fill{height:100%;background:var(--pri);border-radius:4px;transition:width .6s}
+.pp-count{font-size:12px;color:#9aa7c2;width:36px;text-align:right;font-weight:700}
+
+/* Indicador de vibe (esquina inferior derecha) */
+#vibeIndicator{position:fixed;bottom:90px;right:26px;z-index:21;background:rgba(10,14,22,.80);
+  border:1px solid #2a3550;border-radius:12px;padding:8px 16px;font-size:15px;font-weight:700;
+  color:#fff;display:none;backdrop-filter:blur(6px)}
+
 /* Botones de control (aparecen con movimiento del mouse) */
 .ctrl{position:fixed;bottom:24px;z-index:25;background:rgba(10,14,22,.85);color:#fff;
   border:1px solid #2a3550;border-radius:12px;padding:12px 16px;font-size:16px;font-weight:700;
@@ -159,6 +188,27 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 <div id="duplWarn" style="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#b45309;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;z-index:34;display:none">📺 Pestaña secundaria — solo visualización, no controla audio</div>
 <div id="assistZone"></div>
 
+<!-- Overlay dedicatoria standalone -->
+<div id="dedicaOverlay">
+  <div id="dedicaBox">
+    <div class="dedica-from" id="dedicaFrom">💌 Mensaje de …</div>
+    <div class="dedica-msg" id="dedicaMsgTv"></div>
+    <div class="dedica-to" id="dedicaToTv">Para …</div>
+  </div>
+</div>
+
+<!-- Mensaje de canción (dedicatoria inline) -->
+<div id="songMsg"><div id="songMsgText"></div></div>
+
+<!-- Panel de votación -->
+<div id="pollPanel">
+  <div class="pp-title">🗳️ ¿Qué suena después? Vota en la app</div>
+  <div id="ppOpts"></div>
+</div>
+
+<!-- Indicador de vibe dominante -->
+<div id="vibeIndicator" id="vibeIndicator"></div>
+
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
 const $=id=>document.getElementById(id);
@@ -177,6 +227,9 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 let player,ready=false,curYt=null,curId=null,wantAudio=false;
 let topLoved=[],lastReactTotal=0,lastReactId=null,_lastReactTs=0,authok=false;
 let isPrimary=true,advancingId=undefined;
+let _lastDedicaId=null,_dedicaToMark=null,_dedicaTimeout=null;
+let _songMsgTimeouts=[],_songMsgNpId=null;
+const VIBES_TV=["🔥 Que todo el mundo cante","💃 Más baile","🎸 Más suave","✨ Así está perfecto"];
 
 // Si ya inició antes en esta sesión (redeploy sin refresh), restaurar
 try{if(sessionStorage.getItem('tym_tv_started')==='1'){
@@ -237,6 +290,60 @@ function spawnReact(emoji,table){
   if(table){s.innerHTML='<div>'+emoji+'</div><div style="font-size:13px;font-weight:800;text-align:center;color:#fff;text-shadow:0 1px 5px rgba(0,0,0,.9);margin-top:-4px">'+table+'</div>';}
   else s.textContent=emoji;
   document.getElementById('fx').appendChild(s);setTimeout(()=>s.remove(),4300);
+}
+
+// ---- Dedicatoria overlay ----
+function showDedicaOverlay(ded){
+  $('dedicaFrom').textContent='💌 De '+ded.from_table;
+  $('dedicaMsgTv').textContent=ded.message;
+  $('dedicaToTv').textContent='Para '+ded.to_table;
+  const ov=$('dedicaOverlay');ov.style.display='flex';
+  clearTimeout(_dedicaTimeout);
+  _dedicaTimeout=setTimeout(()=>{ov.style.display='none';_dedicaToMark=ded.id;_dedicaTimeout=null;},8000);
+}
+
+// ---- Mensaje de canción (dedicatoria inline) ----
+function showSongMessage(msg,dur){
+  _songMsgTimeouts.forEach(clearTimeout);_songMsgTimeouts=[];
+  const el=$('songMsgText');if(!el||!msg)return;
+  const durMs=(dur||210)*1000;
+  const times=[5000,Math.max(8000,durMs*0.45),Math.max(12000,durMs-35000)].filter(t=>t<durMs-4000);
+  times.forEach(t=>{
+    const tid=setTimeout(()=>{
+      el.textContent=msg;
+      el.style.animation='none';void el.offsetWidth;
+      el.style.animation='dedicaPulse 6s ease-in-out forwards';
+    },t);
+    _songMsgTimeouts.push(tid);
+  });
+}
+
+// ---- Poll panel ----
+function renderPollTV(poll){
+  const panel=$('pollPanel');if(!panel)return;
+  if(!poll||!poll.active){panel.style.display='none';return;}
+  panel.style.display='';
+  const opts=poll.options||[];const votes=poll.votes||{};
+  const totalV=Object.values(votes).reduce((a,n)=>a+n,0)||1;
+  const box=$('ppOpts');box.innerHTML='';
+  opts.forEach(opt=>{
+    const count=votes[opt.yt]||0;const pct=Math.round(100*count/totalV);
+    const row=document.createElement('div');row.className='pp-opt';
+    row.innerHTML=`<div class="pp-title-s">${opt.title}</div><div class="pp-bar"><div class="fill" style="width:${pct}%"></div></div><div class="pp-count">${count}</div>`;
+    box.appendChild(row);
+  });
+}
+
+// ---- Vibe indicator ----
+function renderVibeTV(vibe){
+  const el=$('vibeIndicator');if(!el)return;
+  if(!vibe){el.style.display='none';return;}
+  let maxEmoji='',maxCount=0;
+  VIBES_TV.forEach(v=>{const c=vibe[v]||0;if(c>maxCount){maxCount=c;maxEmoji=v;}});
+  if(!maxCount){el.style.display='none';return;}
+  el.style.display='';
+  const parts=maxEmoji.split(' ');
+  el.textContent=parts[0]+' '+maxCount+' quieren '+parts.slice(1).join(' ').toLowerCase();
 }
 
 const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
@@ -410,7 +517,9 @@ async function tick(){
 setInterval(async()=>{
   if(!authok)return;
   try{
-    const s=await (await fetch('/api/state'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'')+'')).json();
+    let _tvUrl='/api/state'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
+    if(_dedicaToMark){_tvUrl+=(_tvUrl.includes('?')?'&':'?')+'mark_dedica='+_dedicaToMark;_dedicaToMark=null;}
+    const s=await (await fetch(_tvUrl)).json();
     applyBrand(s.settings);
 
     // Watchdog: nunca silencio
@@ -454,6 +563,30 @@ setInterval(async()=>{
     $('lovedItems').innerHTML=topLoved.slice(0,3).map((it,i)=>`<div class="it">${i+1}. ${it.title}<span class="love">❤️ ${it.total}</span></div>`).join('');
     paintNext(s.queue,s.queue_count);
     renderAssists(s.assists||[]);
+
+    // Dedicatorias standalone
+    if(s.dedica_pending&&s.dedica_pending.id!==_lastDedicaId&&!_dedicaTimeout){
+      _lastDedicaId=s.dedica_pending.id;
+      showDedicaOverlay(s.dedica_pending);
+    }
+
+    // Mensaje de canción (dedicatoria inline al pedir)
+    if(s.now_playing&&s.now_playing.id!==_songMsgNpId){
+      _songMsgNpId=s.now_playing.id;
+      _songMsgTimeouts.forEach(clearTimeout);_songMsgTimeouts=[];
+      if(s.now_playing.message){
+        showSongMessage(s.now_playing.message,s.now_playing.duration);
+      }else{
+        const el=$('songMsgText');if(el){el.textContent='';el.style.animation='none';}
+      }
+    }
+
+    // Poll TV
+    renderPollTV(s.poll);
+
+    // Vibe indicator
+    renderVibeTV(s.vibe);
+
     fetch('/api/tv_ping',{method:'POST'}).catch(()=>{});
   }catch(e){}
 },2000);

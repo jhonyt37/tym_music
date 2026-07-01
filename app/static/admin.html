@@ -72,6 +72,7 @@
     🎚️ En vivo
     <span class="tabBadge" id="liveBadge"></span>
   </button>
+  <button class="tabBtn" onclick="showTab('social')" id="tbtn-social">🎭 Social</button>
   <button class="tabBtn" onclick="showTab('settings')" id="tbtn-settings">⚙️ Ajustes</button>
   <button class="tabBtn" onclick="showTab('tables')" id="tbtn-tables">🍽️ Mesas</button>
   <button class="tabBtn" onclick="showTab('content')" id="tbtn-content">🎵 Contenido</button>
@@ -305,6 +306,36 @@
     <div class="card">
       <p class="sec">Correos capturados (<span id="subCount">0</span>)</p>
       <div class="list" id="subList"><div class="empty">Aún no hay correos.</div></div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ============================================================
+     TAB: SOCIAL (Votación + Vibe)
+     ============================================================ -->
+<div id="tab-social" class="tabpanel">
+  <div class="wrap" style="max-width:600px">
+
+    <!-- Votación -->
+    <div class="card" style="margin-bottom:14px">
+      <p class="sec">🗳️ Votación de próxima canción</p>
+      <div id="pollAdminStatus" style="margin-bottom:12px"></div>
+      <div id="pollAdminForm">
+        <div class="small" style="margin-bottom:8px;color:var(--mut)">Busca y selecciona 2-3 canciones para la votación:</div>
+        <input class="field" id="pollSearch" placeholder="Buscar canción para la votación…" oninput="pollAdminSearch()">
+        <div class="list" id="pollSearchResults" style="margin-top:6px;max-height:160px;overflow:auto"></div>
+        <div id="pollSelected" style="margin-top:10px"></div>
+        <button class="btn block" style="margin-top:10px" onclick="createPoll()">🗳️ Crear votación</button>
+      </div>
+      <button class="btn ghost block sm" id="closePollBtn" style="margin-top:10px;display:none" onclick="closePoll()">✕ Cerrar votación (encola ganador)</button>
+    </div>
+
+    <!-- Vibe -->
+    <div class="card">
+      <p class="sec">🎭 Encuesta de vibe</p>
+      <div id="vibeAdminResults" style="margin-bottom:12px"></div>
+      <button class="btn ghost block sm" onclick="resetVibe()">↺ Reiniciar encuesta</button>
     </div>
 
   </div>
@@ -631,6 +662,9 @@ async function tick(){
     const badge=$('liveBadge');
     if(badgeN>0){badge.textContent=badgeN;badge.classList.add('show');}
     else{badge.classList.remove('show');}
+
+    // Social tab
+    renderSocialAdmin(s);
   }catch(e){}
 }
 
@@ -718,6 +752,103 @@ async function loadHistory(days){
 
 $('tymLogoFile').onchange=e=>readImg(e.target.files[0],d=>{tymLogoData=d;renderLogoPrev();});
 $('venueLogoFile').onchange=e=>readImg(e.target.files[0],d=>{venueLogoData=d;renderLogoPrev();});
+
+// =================== Social: Poll + Vibe ===================
+const VIBES_ADMIN=["🔥 Que todo el mundo cante","💃 Más baile","🎸 Más suave","✨ Así está perfecto"];
+let _pollSongs=[], _pollSearchTimer=null;
+
+function pollAdminSearch(){
+  const q=($('pollSearch').value||'').trim();
+  clearTimeout(_pollSearchTimer);
+  const box=$('pollSearchResults');
+  if(!q){box.innerHTML='';return;}
+  box.innerHTML='<div class="empty">Buscando…</div>';
+  _pollSearchTimer=setTimeout(async()=>{
+    try{
+      const res=await (await fetch('/api/search?q='+encodeURIComponent(q))).json();
+      box.innerHTML='';
+      if(!res||!res.length){box.innerHTML='<div class="empty">Sin resultados.</div>';return;}
+      res.slice(0,6).forEach(s=>{
+        const r=document.createElement('div');r.className='row';
+        r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${s.yt}/mqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div>`;
+        const addBtn=document.createElement('button');addBtn.className='btn green sm';addBtn.textContent='+ Agregar';
+        addBtn.onclick=()=>{
+          if(_pollSongs.length>=3){toast('Máximo 3 opciones');return;}
+          if(_pollSongs.some(x=>x.yt===s.yt)){toast('Ya está en la lista');return;}
+          _pollSongs.push({yt:s.yt,title:s.title,artist:s.artist||''});
+          renderPollSelected();
+          $('pollSearch').value='';box.innerHTML='';
+        };
+        r.appendChild(addBtn);box.appendChild(r);
+      });
+    }catch(e){box.innerHTML='<div class="empty">Error al buscar.</div>';}
+  },350);
+}
+
+function renderPollSelected(){
+  const box=$('pollSelected');box.innerHTML='';
+  if(!_pollSongs.length){box.innerHTML='<div class="small" style="color:var(--mut)">Sin canciones seleccionadas aún.</div>';return;}
+  _pollSongs.forEach((s,i)=>{
+    const r=document.createElement('div');r.className='row';
+    r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${s.yt}/mqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist}</div></div>`;
+    const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';
+    rm.onclick=()=>{_pollSongs.splice(i,1);renderPollSelected();};
+    r.appendChild(rm);box.appendChild(r);
+  });
+}
+
+async function createPoll(){
+  if(_pollSongs.length<2){toast('Agrega al menos 2 canciones','err');return;}
+  const j=await post('/api/admin/poll',{options:_pollSongs});
+  if(j.ok){toast('¡Votación creada!','ok');_pollSongs=[];renderPollSelected();tick();}
+  else toast(j.error||'Error','err');
+}
+
+async function closePoll(){
+  const j=await post('/api/admin/poll/close',{});
+  if(j.ok){toast('Votación cerrada — ganador encolado','ok');tick();}
+  else toast(j.error||'Error','err');
+}
+
+async function resetVibe(){
+  const j=await post('/api/admin/vibe/reset',{});
+  if(j.ok){toast('Encuesta de vibe reiniciada');tick();}else toast(j.error||'Error','err');
+}
+
+function renderSocialAdmin(s){
+  // Poll status
+  const p=s.poll;
+  const statusBox=$('pollAdminStatus');
+  const formBox=$('pollAdminForm');
+  const closeBtn=$('closePollBtn');
+  if(p&&p.active){
+    formBox.style.display='none';closeBtn.style.display='';
+    const totalV=Object.values(p.votes||{}).reduce((a,n)=>a+n,0)||0;
+    let html='<div class="small" style="color:var(--mut);margin-bottom:6px">Votación activa — '+totalV+' voto'+(totalV!==1?'s':'')+'</div>';
+    (p.options||[]).forEach(opt=>{
+      const count=(p.votes&&p.votes[opt.yt])||0;
+      const pct=totalV>0?Math.round(100*count/totalV):0;
+      html+=`<div class="row" style="flex-wrap:wrap;margin-bottom:4px"><div class="info" style="flex:1"><div class="t">${opt.title}</div></div><span class="chip">${count} votos (${pct}%)</span><div style="flex-basis:100%;height:5px;background:var(--line);border-radius:3px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--pri);border-radius:3px;transition:width .4s"></div></div></div>`;
+    });
+    statusBox.innerHTML=html;
+  }else{
+    formBox.style.display='';closeBtn.style.display='none';
+    if(p&&!p.active){statusBox.innerHTML='<div class="small" style="color:var(--mut)">Votación cerrada.</div>';}
+    else statusBox.innerHTML='';
+  }
+  // Vibe results
+  const vibeVotes=s.vibe||{};
+  const vbox=$('vibeAdminResults');vbox.innerHTML='';
+  const totalV2=VIBES_ADMIN.reduce((a,v)=>a+(vibeVotes[v]||0),0)||0;
+  VIBES_ADMIN.forEach(v=>{
+    const count=vibeVotes[v]||0;const pct=totalV2>0?Math.round(100*count/totalV2):0;
+    const parts=v.split(' ');const emoji=parts[0];const label=parts.slice(1).join(' ');
+    const row=document.createElement('div');row.style.cssText='margin-bottom:8px';
+    row.innerHTML=`<div style="display:flex;justify-content:space-between;font-size:13px;font-weight:600;margin-bottom:3px"><span>${emoji} ${label}</span><span style="color:var(--mut)">${count} voto${count!==1?'s':''}</span></div><div style="height:8px;background:var(--line);border-radius:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--pri);border-radius:4px;transition:width .4s"></div></div>`;
+    vbox.appendChild(row);
+  });
+  if(!totalV2)vbox.innerHTML='<div class="empty">Aún sin votos de vibe.</div>';
+}
 
 async function doLogin(){
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});

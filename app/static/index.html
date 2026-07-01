@@ -97,6 +97,32 @@ body{padding-bottom:80px}
 #nowImg{cursor:pointer;transition:transform .15s}
 #nowImg:active{transform:scale(.94)}
 
+/* ---- Vibe buttons ---- */
+.vibe-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
+.vibe-btn{padding:12px 8px;border-radius:14px;border:1px solid var(--line);background:var(--bg2);
+  color:var(--txt);font-size:13px;font-weight:700;cursor:pointer;text-align:center;
+  touch-action:manipulation;-webkit-user-select:none;user-select:none;display:flex;flex-direction:column;gap:4px;align-items:center}
+.vibe-btn.on{border-color:var(--pri);background:rgba(59,130,246,.18);color:var(--pri)}
+.vibe-count{font-size:11px;font-weight:600;opacity:.7}
+
+/* ---- Poll ---- */
+.poll-opt{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);
+  border-radius:12px;padding:10px 12px;margin-top:8px;cursor:pointer;touch-action:manipulation}
+.poll-opt.on{border-color:var(--pri);background:rgba(59,130,246,.15)}
+.poll-bar{height:5px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden;flex-basis:100%}
+.poll-bar-fill{height:100%;background:var(--pri);border-radius:3px;transition:width .5s}
+.poll-vote-n{font-size:11px;color:var(--mut);font-weight:700;margin-left:auto;white-space:nowrap}
+
+/* ---- Top mesas ranking ---- */
+.mesa-rank{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:6px}
+.mesa-rank .pos{font-size:22px;flex-none;width:30px;text-align:center}
+.mesa-rank .info{flex:1}
+.mesa-rank .meta{font-size:11px;color:var(--mut);margin-top:2px}
+
+/* ---- Dedica form ---- */
+.dedica-form{display:flex;flex-direction:column;gap:10px}
+.dedica-char{font-size:11px;color:var(--mut);text-align:right;margin-top:-6px}
+
 /* ---- Now detail sheet ---- */
 #nowDetailImg{width:200px;height:200px;border-radius:16px;object-fit:cover;margin:0 auto 14px;display:block}
 
@@ -182,11 +208,28 @@ body{padding-bottom:80px}
 
   <!-- ===== SOCIAL ===== -->
   <section class="tab" id="tab-social">
+
+    <!-- Votación activa (solo si hay poll) -->
+    <div class="card" id="pollCard" style="display:none">
+      <h2>🗳️ ¿Qué suena después?</h2>
+      <div class="small" style="color:var(--mut);margin-bottom:8px">¡Vota por la próxima canción!</div>
+      <div id="pollOptions"></div>
+    </div>
+
+    <!-- Vibe de la noche -->
+    <div class="card" id="vibeCard">
+      <h2>¿Cómo va la noche? 🎭</h2>
+      <div class="vibe-grid" id="vibeButtons"></div>
+    </div>
+
+    <!-- Social principal con sub-tabs -->
     <div class="card">
-      <div class="stab-row">
-        <button class="stab on" data-stab="loved" onclick="showSocialTab('loved')">❤️ Queridos</button>
-        <button class="stab" data-stab="requested" onclick="showSocialTab('requested')">🏆 Pedidos</button>
-        <button class="stab" data-stab="mylikes" onclick="showSocialTab('mylikes')">😍 Mis likes</button>
+      <div class="stab-row" style="overflow-x:auto;scrollbar-width:none;padding-bottom:2px">
+        <button class="stab on" data-stab="loved" onclick="showSocialTab('loved')" style="flex:none;white-space:nowrap">❤️ Queridos</button>
+        <button class="stab" data-stab="requested" onclick="showSocialTab('requested')" style="flex:none;white-space:nowrap">🏆 Pedidos</button>
+        <button class="stab" data-stab="mylikes" onclick="showSocialTab('mylikes')" style="flex:none;white-space:nowrap">😍 Mis likes</button>
+        <button class="stab" data-stab="topmesas" onclick="showSocialTab('topmesas')" style="flex:none;white-space:nowrap">🥇 Top mesas</button>
+        <button class="stab" data-stab="historial" onclick="showSocialTab('historial')" style="flex:none;white-space:nowrap">🕑 Ya sonaron</button>
       </div>
       <div id="stab-loved" class="stab-pane">
         <div class="list" id="lovedList"><div class="empty">Aún sin reacciones. ¡Sé el primero!</div></div>
@@ -197,12 +240,33 @@ body{padding-bottom:80px}
       <div id="stab-mylikes" class="stab-pane" style="display:none">
         <div class="list" id="myLikesList"><div class="empty">Todavía no has dado likes. ¡Reacciona a las canciones!</div></div>
       </div>
+      <div id="stab-topmesas" class="stab-pane" style="display:none">
+        <div id="topMesasList"><div class="empty">Aún sin pedidos esta noche.</div></div>
+      </div>
+      <div id="stab-historial" class="stab-pane" style="display:none">
+        <div class="list" id="historyList"><div class="empty">Todavía no ha sonado nada.</div></div>
+      </div>
       <button class="btn ghost block" style="margin-top:16px;font-size:13px" onclick="teaseCreditInvite()">🎁 Enviar crédito a otra mesa</button>
     </div>
-    <div class="card">
-      <h2>Ya sonaron 🕑</h2>
-      <div class="list" id="historyList"><div class="empty">Todavía no ha sonado nada.</div></div>
+
+    <!-- Dedicatorias (solo con sesión) -->
+    <div class="card" id="dedicaCard" style="display:none">
+      <h2>💌 Enviar dedicatoria</h2>
+      <div class="small" style="color:var(--mut);margin-bottom:12px">Manda un mensaje especial a otra mesa — aparece en la pantalla del bar.</div>
+      <div class="dedica-form">
+        <div>
+          <label class="small" style="font-weight:700">Para:</label>
+          <select class="field" id="dedicaTo" style="margin-top:4px"></select>
+        </div>
+        <div>
+          <label class="small" style="font-weight:700">Mensaje:</label>
+          <input class="field" id="dedicaMsg" maxlength="80" placeholder="Ej: ¡Feliz cumpleaños! 🎂" style="margin-top:4px" oninput="updateDedicaCount()">
+          <div class="dedica-char" id="dedicaChar">0/80</div>
+        </div>
+        <button class="btn block" onclick="sendDedica()">💌 Enviar dedicatoria</button>
+      </div>
     </div>
+
     <div class="card">
       <h2>Síguenos 🎶</h2>
       <div class="small">Llévate TYM Music a donde vayas — síguenos y entérate de novedades.</div>
@@ -273,6 +337,10 @@ body{padding-bottom:80px}
     <div class="opt" id="optSuper" onclick="pick('super')" style="display:none">
       <div><b>⏫ Al frente (#1)</b><div class="small">Suena de primera, ¡ya mismo!</div></div>
       <div class="price" id="superPrice" style="color:#a78bfa">$3.000</div>
+    </div>
+    <div style="margin-top:14px" id="sheetDedicaBox">
+      <label style="font-size:12px;color:var(--mut);font-weight:700">💌 Dedicatoria (opcional)</label>
+      <input class="field" id="sheetDedicaMsg" maxlength="80" placeholder="Ej: ¡Feliz cumpleaños María! 🎂" style="margin-top:4px">
     </div>
     <div style="display:flex;gap:10px;margin-top:16px">
       <button class="btn ghost" style="flex:1" onclick="closeSheet()">Cancelar</button>
@@ -539,7 +607,7 @@ function pick(m){mode=m;
   const c=$('confirmBtn');
   c.textContent = m==='super'?'Saltar al #1 ⏫':(m==='pri'?'Pedir con prioridad ⚡':'Pedir canción');
   c.classList.toggle('gold',m!=='normal');}
-function closeSheet(){$('sheet').classList.remove('open');document.body.style.overflow='';$('nav').classList.remove('modal-open');}
+function closeSheet(){$('sheet').classList.remove('open');document.body.style.overflow='';$('nav').classList.remove('modal-open');try{$('sheetDedicaMsg').value='';}catch(e){}}
 function confirmReq(){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   if(mode==='super'){
@@ -559,7 +627,8 @@ async function doReq(){
   _reqInFlight=true;
   closeSheet();
   try{
-    const body=Object.assign({},chosen,{priority:mode==='pri',super:mode==='super',token});
+    const sheetMsg=($('sheetDedicaMsg').value||'').trim().slice(0,80);
+    const body=Object.assign({},chosen,{priority:mode==='pri',super:mode==='super',token,message:sheetMsg||undefined});
     const r=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const j=await r.json();
     if(j.ok){if(j.session)sess=j.session;
@@ -701,6 +770,126 @@ if (_pwaBtn) _pwaBtn.onclick = async () => {
 function showSocialTab(name){
   document.querySelectorAll('.stab-row .stab').forEach(b=>b.classList.toggle('on',b.dataset.stab===name));
   document.querySelectorAll('.stab-pane').forEach(p=>p.style.display=p.id==='stab-'+name?'':'none');
+}
+
+// ---------- Vibe ----------
+const VIBES=["🔥 Que todo el mundo cante","💃 Más baile","🎸 Más suave","✨ Así está perfecto"];
+function renderVibe(vibe){
+  const box=$('vibeButtons');if(!box)return;box.innerHTML='';
+  const myVote=vibe&&vibe.my_vote;
+  VIBES.forEach(v=>{
+    const count=(vibe&&vibe[v])||0;
+    const on=myVote===v;
+    const parts=v.split(' ');const emoji=parts[0];const label=parts.slice(1).join(' ');
+    const btn=document.createElement('button');btn.className='vibe-btn'+(on?' on':'');
+    btn.innerHTML=`<span style="font-size:26px">${emoji}</span><span>${label}</span><span class="vibe-count">${count>0?count+' voto'+(count!==1?'s':''):''}</span>`;
+    btn.onclick=()=>voteVibe(v);
+    box.appendChild(btn);
+  });
+}
+async function voteVibe(emoji){
+  if(!token){toast('Ingresa el código de tu mesa','err');return;}
+  const j=await (await fetch('/api/vibe',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,emoji})})).json();
+  if(j.ok)poll();else toast(j.error||'Error','err');
+}
+
+// ---------- Poll / Votación ----------
+function renderPoll(poll){
+  const card=$('pollCard');if(!card)return;
+  if(!poll||!poll.active){card.style.display='none';return;}
+  card.style.display='';
+  const box=$('pollOptions');box.innerHTML='';
+  const opts=poll.options||[];const votes=poll.votes||{};const myVote=poll.my_vote;
+  const totalVotes=Object.values(votes).reduce((s,n)=>s+n,0)||1;
+  opts.forEach(opt=>{
+    const count=votes[opt.yt]||0;const pct=Math.round(100*count/totalVotes);const on=myVote===opt.yt;
+    const div=document.createElement('div');div.className='poll-opt'+(on?' on':'');div.style.flexWrap='wrap';
+    div.innerHTML=`<img class="mini" src="${img(opt.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${opt.title}</div><div class="a">${opt.artist||''}</div></div><div class="poll-vote-n">${count} voto${count!==1?'s':''}</div><div class="poll-bar" style="flex-basis:100%"><div class="poll-bar-fill" style="width:${on?pct:0}%"></div></div>`;
+    div.onclick=()=>votePoll(opt.yt);
+    box.appendChild(div);
+  });
+  setTimeout(()=>{box.querySelectorAll('.poll-bar-fill').forEach((el,i)=>{const count=votes[(opts[i]||{}).yt]||0;const pct=Math.round(100*count/totalVotes);el.style.width=pct+'%';});},50);
+}
+async function votePoll(yt){
+  if(!token){toast('Ingresa el código de tu mesa','err');return;}
+  const j=await (await fetch('/api/poll/vote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,yt})})).json();
+  if(j.ok)poll();else toast(j.error||'Error','err');
+}
+
+// ---------- Top mesas ----------
+function renderTopTables(tables){
+  const box=$('topMesasList');if(!box)return;
+  if(!tables||!tables.length){box.innerHTML='<div class="empty">Aún sin pedidos esta noche.</div>';return;}
+  const medals=['🥇','🥈','🥉'];
+  box.innerHTML='';
+  tables.forEach((t,i)=>{
+    const div=document.createElement('div');div.className='mesa-rank';
+    div.innerHTML=`<div class="pos">${medals[i]||('#'+(i+1))}</div><div class="info"><div class="t">${t.table}</div><div class="meta">🎵 ${t.songs_requested} canciones · ❤️ ${t.likes_received} likes</div></div>`;
+    box.appendChild(div);
+  });
+}
+
+// ---------- Historial con bis ----------
+function renderHistorialSocial(history,bisVotes,bisThreshold,myBisVotes){
+  const box=$('historyList');if(!box)return;box.innerHTML='';
+  if(!history||!history.length){box.innerHTML='<div class="empty">Todavía no ha sonado nada.</div>';return;}
+  history.forEach(it=>{
+    const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
+    div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div>`;
+    const react_total=it.react_total||0;
+    if(react_total>=5){
+      const bisCount=(bisVotes&&bisVotes[it.yt])||0;
+      const voted=(myBisVotes||[]).includes(it.yt);
+      const bisBtn=document.createElement('button');
+      bisBtn.className='btn sm'+(voted?' on':'');
+      bisBtn.style.background=voted?'var(--pri)':'var(--bg2)';
+      bisBtn.style.border='1px solid '+(voted?'var(--pri)':'var(--line)');
+      bisBtn.style.color=voted?'#fff':'var(--mut)';
+      bisBtn.textContent='↩️ Bis ('+bisCount+'/'+bisThreshold+')';
+      bisBtn.onclick=()=>voteBis(it.yt,it.title);
+      div.appendChild(bisBtn);
+    }
+    const rr=document.createElement('div');rr.className='reacts';rr.style.flexBasis='100%';rr.innerHTML=reactHtml(it);div.appendChild(rr);
+    box.appendChild(div);
+  });
+  tickify(box);
+}
+async function voteBis(yt,title){
+  if(!token){toast('Ingresa el código de tu mesa','err');return;}
+  const j=await (await fetch('/api/bis',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,yt})})).json();
+  if(j.ok){
+    if(j.queued)toast('↩️ ¡'+title+' vuelve a la cola!','ok');
+    else toast(j.voted?'↩️ Bis votado!':'Voto de bis cancelado','ok');
+    poll();
+  }else toast(j.error||'Error','err');
+}
+
+// ---------- Dedicatorias ----------
+function updateDedicaCount(){
+  const len=($('dedicaMsg').value||'').length;
+  const el=$('dedicaChar');if(el)el.textContent=len+'/80';
+}
+function renderDedicaCard(tables,session){
+  const card=$('dedicaCard');if(!card)return;
+  if(!session){card.style.display='none';return;}
+  card.style.display='';
+  const sel=$('dedicaTo');if(!sel)return;
+  const prev=sel.value;sel.innerHTML='';
+  (tables||[]).forEach(t=>{
+    if(t===session.table)return; // no se dedica a uno mismo
+    const o=document.createElement('option');o.value=t;o.textContent=t;sel.appendChild(o);
+  });
+  if(prev&&[...sel.options].some(o=>o.value===prev))sel.value=prev;
+}
+async function sendDedica(){
+  if(!token){toast('Ingresa el código de tu mesa','err');return;}
+  const to_table=$('dedicaTo').value;
+  const message=($('dedicaMsg').value||'').trim();
+  if(!to_table){toast('Selecciona una mesa destino','err');return;}
+  if(!message){toast('Escribe un mensaje','err');return;}
+  const j=await (await fetch('/api/dedica',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,to_table,message})})).json();
+  if(j.ok){toast('💌 ¡Dedicatoria enviada!','ok');$('dedicaMsg').value='';updateDedicaCount();}
+  else toast(j.error||'Error','err');
 }
 
 // ---------- Now detail (thumbnail expand) ----------
@@ -1037,10 +1226,14 @@ async function poll(){
     updateLikePubBtn();
     $('qcount').textContent = s.queue_count;
     renderList('queueList', s.queue, {boost:true, empty:'Nada en cola — suena la lista del local.'});
-    renderList('historyList', s.history, {empty:'Todavía no ha sonado nada.'});
+    renderHistorialSocial(s.history,s.bis_votes,s.bis_threshold||3,s.my_bis_votes||[]);
     renderLoved(s.top_loved);
     renderTopRequested(s.top_requested);
     renderMyLikes(s.my_liked||[]);
+    renderTopTables(s.top_tables||[]);
+    renderPoll(s.poll);
+    renderVibe(s.vibe);
+    renderDedicaCard(s.tables,s.session);
 
     // Badges de navegación
     $('badgeQ').style.display=s.queue_count?'':'none';$('badgeQ').textContent=s.queue_count;
