@@ -117,14 +117,14 @@ body{padding-bottom:80px}
     <div class="card">
       <h2>Pon tu canción 🎵</h2>
       <input class="search" id="q" placeholder="Buscar canción, artista o pega un link de YouTube…" autocomplete="off">
+      <!-- Sugerencias basadas en lo que suena — arriba del catálogo -->
+      <div id="simBox" style="display:none;margin-top:14px">
+        <div class="sim-lbl">🎵 Por si te gustó — <span id="simLabel"></span></div>
+        <div class="list" id="simList"></div>
+      </div>
       <div id="recoBox" style="margin-top:14px">
         <div class="chips" id="recoChips"></div>
         <div class="list" id="results"></div>
-      </div>
-      <!-- Sugerencias basadas en lo que suena -->
-      <div id="simBox" style="display:none">
-        <div class="sim-lbl">🎵 Por si te gustó — <span id="simLabel"></span></div>
-        <div class="list" id="simList"></div>
       </div>
     </div>
   </section>
@@ -382,20 +382,29 @@ function renderResults(list){
 }
 
 // ---------- Sugerencias basadas en lo que suena ----------
-async function loadSimilar(artist){
+async function loadSimilar(artists){
+  const unique=[...new Set((Array.isArray(artists)?artists:[artists]).filter(Boolean))].slice(0,3);
+  if(!unique.length){$('simBox').style.display='none';return;}
+  $('simBox').style.display='';
+  $('simLabel').textContent=unique.join(' · ');
+  $('simList').innerHTML='<div class="empty" style="font-size:13px">Buscando…</div>';
   try{
-    $('simLabel').textContent=artist;
-    $('simBox').style.display='';
-    $('simList').innerHTML='<div class="empty" style="font-size:13px">Buscando…</div>';
-    const list=await (await fetch('/api/search?q='+encodeURIComponent(artist))).json();
+    const seen=new Set([_nowYt]);
+    const all=[];
+    await Promise.all(unique.map(async a=>{
+      try{
+        const list=await(await fetch('/api/search?q='+encodeURIComponent(a))).json();
+        list.forEach(s=>{if(s.yt&&!seen.has(s.yt)){seen.add(s.yt);all.push(s);}});
+      }catch(e){}
+    }));
     const box=$('simList');box.innerHTML='';
-    list.filter(s=>s.yt!==_nowYt).slice(0,5).forEach(s=>{
+    all.slice(0,9).forEach(s=>{
       const r=document.createElement('div');r.className='row tappable';
       r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
       r.onclick=()=>openSheet(s);
       box.appendChild(r);
     });
-    if(!box.children.length) $('simBox').style.display='none';
+    if(!box.children.length)$('simBox').style.display='none';
     else tickify(box);
   }catch(e){$('simBox').style.display='none';}
 }
@@ -786,7 +795,9 @@ async function poll(){
 
     // Sugerencias basadas en lo que suena
     if(np&&np.artist&&!np.fallback&&np.id!==_simLoadedForId){
-      _simLoadedForId=np.id;_nowYt=np.yt;loadSimilar(np.artist);
+      _simLoadedForId=np.id;_nowYt=np.yt;
+      const simArtists=[np.artist,(s.history[0]||{}).artist,(s.history[1]||{}).artist];
+      loadSimilar(simArtists);
     }else if(!np){$('simBox').style.display='none';_simLoadedForId=null;}
 
     // Now playing

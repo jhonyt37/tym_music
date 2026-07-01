@@ -325,7 +325,7 @@ function schedule(fn,period,offset){setTimeout(()=>{fn();setInterval(fn,period);
 const CYCLE=90000;
 schedule(burstNow,CYCLE,1500);
 schedule(()=>burst($('up'),11000),CYCLE,30000);
-schedule(()=>burst($('qr'),13000),CYCLE,60000);
+schedule(()=>burst($('qr'),30000),CYCLE,15000);
 schedule(()=>{if(topLoved.length)burst($('loved'),9000);},CYCLE,75000);
 
 // ---- Pantalla completa ----
