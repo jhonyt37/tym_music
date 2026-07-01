@@ -44,7 +44,8 @@ header.bar{
 .list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
 .row{display:flex;align-items:center;gap:12px;background:var(--bg2);border:1px solid var(--line);
   border-radius:12px;padding:10px 12px}
-.row .mini{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none;background:#0b0f1a}
+.row .mini{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none;background:#0b0f1a;pointer-events:none}
+.tappable{cursor:pointer}
 .row .info{flex:1;min-width:0}
 .row .btn{flex:none}
 .row .info .t{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden}
