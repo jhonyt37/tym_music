@@ -310,6 +310,29 @@ class TestStyleCSS(unittest.TestCase):
         # Fix for social tab image sizing
         self.assertIn(".rank .mini", self.css)
 
+    def test_toast_z_index_above_nav(self):
+        # Nav has z-index:50; toast must be above it so messages aren't hidden
+        css_compact = self.css.replace(" ", "").replace("\n", "")
+        toast_idx = css_compact.index(".toast{")
+        toast_block = css_compact[toast_idx:toast_idx + 300]
+        # Extract z-index value from toast rule
+        m = re.search(r'z-index:(\d+)', toast_block)
+        self.assertIsNotNone(m, "Toast must have an explicit z-index")
+        self.assertGreater(int(m.group(1)), 50,
+            "Toast z-index must be > 50 (nav z-index) so it appears above the nav")
+
+    def test_toast_bottom_clears_nav(self):
+        # Toast bottom must be high enough to clear the nav bar (~60px + safe area)
+        # Either uses calc(env(safe-area-inset-bottom,...)+Npx) with N>=70, or plain Npx>=70
+        css_compact = self.css.replace(" ", "").replace("\n", "")
+        toast_idx = css_compact.index(".toast{")
+        toast_block = css_compact[toast_idx:toast_idx + 300]
+        self.assertIn("bottom:", toast_block.replace("bottom:", "bottom:") or toast_block,
+            "Toast must have explicit bottom")
+        # Check it's not the original 24px that sits behind the nav
+        self.assertNotIn("bottom:24px", toast_block,
+            "bottom:24px is too low — sits behind the nav bar")
+
 
 # ===========================================================================
 # Tests: server.py source integrity
