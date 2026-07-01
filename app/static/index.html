@@ -117,14 +117,14 @@ body{padding-bottom:80px}
     <div class="card">
       <h2>Pon tu canción 🎵</h2>
       <input class="search" id="q" placeholder="Buscar canción, artista o pega un link de YouTube…" autocomplete="off">
-      <!-- Sugerencias basadas en lo que suena — arriba del catálogo -->
-      <div id="simBox" style="display:none;margin-top:14px">
-        <div class="sim-lbl">🎵 Por si te gustó — <span id="simLabel"></span></div>
-        <div class="list" id="simList"></div>
-      </div>
       <div id="recoBox" style="margin-top:14px">
         <div class="chips" id="recoChips"></div>
         <div class="list" id="results"></div>
+      </div>
+      <!-- Sugerencias basadas en lo que suena -->
+      <div id="simBox" style="display:none;margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
+        <div class="sim-lbl">🎵 Por si te gustó — <span id="simLabel"></span></div>
+        <div class="list" id="simList"></div>
       </div>
     </div>
   </section>
@@ -353,7 +353,12 @@ function renderReco(){
 const YT_RE=/youtu\.?be|youtube\.com\/(watch|shorts|embed)/i;
 function onSearch(term){
   clearTimeout(searchTimer);
-  if(!term.trim()){$('recoChips').style.display='flex';renderReco();return;}
+  const card=$('recoBox').parentNode;
+  if(!term.trim()){
+    card.insertBefore($('simBox'),$('recoBox')); // simBox arriba del catálogo
+    $('recoChips').style.display='flex';renderReco();return;
+  }
+  card.appendChild($('simBox')); // resultados primero, simBox abajo con separador
   $('recoChips').style.display='none';
   if(YT_RE.test(term)){renderResults([{_link:term}]);return;}
   $('results').innerHTML='<div class="empty">Buscando…</div>';
