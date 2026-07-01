@@ -129,6 +129,34 @@ class TestIndexHTML(unittest.TestCase):
         self.assertIn("renderTopRequested", self.h.src)
     def test_render_loved_defined(self):
         self.assertIn("renderLoved", self.h.src)
+    def test_sim_interleave_function_defined(self):
+        self.assertIn("function interleaveArtists", self.h.src)
+
+    def test_sim_uses_interleave(self):
+        # loadSimilar must call interleaveArtists (not raw slice)
+        idx = self.h.src.index("async function loadSimilar(")
+        block = self.h.src[idx:idx+1500]
+        self.assertIn("interleaveArtists", block)
+
+    def test_sim_per_artist_parallel_fetch(self):
+        # Must fetch per artist with Promise.all, not sequential
+        idx = self.h.src.index("async function loadSimilar(")
+        block = self.h.src[idx:idx+1500]
+        self.assertIn("Promise.all", block)
+
+    def test_sim_artist_buttons_rendered(self):
+        # Must render "Más de [artist]" buttons from shownArtists
+        idx = self.h.src.index("async function loadSimilar(")
+        block = self.h.src[idx:idx+2500]
+        self.assertIn("Más de", block)
+        self.assertIn("shownArtists", block)
+
+    def test_toast_uses_dynamic_bottom(self):
+        # toast() must measure nav.offsetHeight at call time
+        idx = self.h.src.index("function toast(")
+        block = self.h.src[idx:idx+300]
+        self.assertIn("offsetHeight", block)
+
     def test_bell_long_press_cancels(self):
         self.assertIn("cancelAssist", self.h.src)
         self.assertIn("longPress", self.h.src)

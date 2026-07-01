@@ -236,6 +236,76 @@ function sortQueue(items) {
 
 
 // ---------------------------------------------------------------------------
+// Test: interleaveArtists() — round-robin variety for "Por si te gustó"
+// ---------------------------------------------------------------------------
+console.log('\ninterleaveArtists() — round-robin variety');
+
+function interleaveArtists(perArtist, max) {
+  const out = [];
+  for (let i = 0; out.length < max; i++) {
+    let any = false;
+    for (const ar of perArtist) {
+      if (i < ar.length) { out.push(ar[i]); any = true; if (out.length >= max) break; }
+    }
+    if (!any) break;
+  }
+  return out;
+}
+
+// 3 artists × 5 songs → 9 total, each artist gets exactly 3
+{
+  const a = [{id:'a1'},{id:'a2'},{id:'a3'},{id:'a4'},{id:'a5'}];
+  const b = [{id:'b1'},{id:'b2'},{id:'b3'},{id:'b4'},{id:'b5'}];
+  const c = [{id:'c1'},{id:'c2'},{id:'c3'},{id:'c4'},{id:'c5'}];
+  const res = interleaveArtists([a,b,c], 9);
+  assertEqual(res.length, 9, '3 artists → 9 results');
+  assertEqual(res[0].id, 'a1', 'slot 0 = artist A first song');
+  assertEqual(res[1].id, 'b1', 'slot 1 = artist B first song');
+  assertEqual(res[2].id, 'c1', 'slot 2 = artist C first song');
+  assertEqual(res[3].id, 'a2', 'slot 3 = artist A second song');
+  assertEqual(res.filter(s=>s.id.startsWith('a')).length, 3, 'exactly 3 from artist A');
+  assertEqual(res.filter(s=>s.id.startsWith('b')).length, 3, 'exactly 3 from artist B');
+  assertEqual(res.filter(s=>s.id.startsWith('c')).length, 3, 'exactly 3 from artist C');
+}
+// 2 artists × 5 songs → 6 results interleaved
+{
+  const a = [{id:'a1'},{id:'a2'},{id:'a3'},{id:'a4'},{id:'a5'}];
+  const b = [{id:'b1'},{id:'b2'},{id:'b3'},{id:'b4'},{id:'b5'}];
+  const res = interleaveArtists([a,b], 6);
+  assertEqual(res.length, 6, '2 artists → 6 results');
+  assertEqual(res[0].id, 'a1', '2-artist: slot 0 = A');
+  assertEqual(res[1].id, 'b1', '2-artist: slot 1 = B');
+  assertEqual(res[2].id, 'a2', '2-artist: slot 2 = A again');
+}
+// Short lists: fewer total songs than max
+{
+  const a = [{id:'a1'},{id:'a2'}];
+  const b = [{id:'b1'}];
+  const res = interleaveArtists([a,b], 9);
+  assertEqual(res.length, 3, 'stops at total available (3) not max (9)');
+  assertEqual(res[0].id, 'a1', 'a1 first');
+  assertEqual(res[1].id, 'b1', 'b1 second');
+  assertEqual(res[2].id, 'a2', 'a2 third (b exhausted)');
+}
+// 1 artist: returns all up to max
+{
+  const a = [{id:'a1'},{id:'a2'},{id:'a3'},{id:'a4'},{id:'a5'}];
+  const res = interleaveArtists([a], 9);
+  assertEqual(res.length, 5, '1 artist with 5 songs returns all 5 (< max 9)');
+}
+// Empty
+{
+  assertEqual(interleaveArtists([], 9).length, 0, 'empty input → empty output');
+  assertEqual(interleaveArtists([[],[]], 9).length, 0, 'all-empty artists → empty output');
+}
+// max=0
+{
+  const a = [{id:'a1'},{id:'a2'}];
+  assertEqual(interleaveArtists([a], 0).length, 0, 'max=0 → empty');
+}
+
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 console.log(`\n${'─'.repeat(50)}`);

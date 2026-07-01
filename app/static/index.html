@@ -399,31 +399,60 @@ function renderResults(list){
 }
 
 // ---------- Sugerencias basadas en lo que suena ----------
+// Función pura exportable — intercala resultados por artista en round-robin
+function interleaveArtists(perArtist, max){
+  const out=[];
+  for(let i=0;out.length<max;i++){
+    let any=false;
+    for(const ar of perArtist){
+      if(i<ar.length){out.push(ar[i]);any=true;if(out.length>=max)break;}
+    }
+    if(!any)break;
+  }
+  return out;
+}
 async function loadSimilar(artists){
   const unique=[...new Set((Array.isArray(artists)?artists:[artists]).filter(Boolean))].slice(0,3);
   if(!unique.length){$('simBox').style.display='none';return;}
-  if(!$('q').value.trim()) placeSimBox(false);
+  if(!$('q').value.trim())placeSimBox(false);
   $('simBox').style.display='';
   $('simLabel').textContent=unique.join(' · ');
   $('simList').innerHTML='<div class="empty" style="font-size:13px">Buscando…</div>';
   try{
+    // Busca todos los artistas en paralelo
+    const perArtist=await Promise.all(unique.map(a=>
+      fetch('/api/search?q='+encodeURIComponent(a)).then(r=>r.json()).catch(()=>[])
+    ));
+    // Dedup global (excluye la canción actual)
     const seen=new Set([_nowYt]);
-    const all=[];
-    await Promise.all(unique.map(async a=>{
-      try{
-        const list=await(await fetch('/api/search?q='+encodeURIComponent(a))).json();
-        list.forEach(s=>{if(s.yt&&!seen.has(s.yt)){seen.add(s.yt);all.push(s);}});
-      }catch(e){}
+    const filtered=perArtist.map(ar=>ar.filter(s=>{
+      if(!s.yt||seen.has(s.yt))return false;
+      seen.add(s.yt);return true;
     }));
+    // Round-robin: garantiza al menos 3 canciones de cada artista en 9 slots
+    const merged=interleaveArtists(filtered,9);
     const box=$('simList');box.innerHTML='';
-    all.slice(0,9).forEach(s=>{
+    if(!merged.length){$('simBox').style.display='none';return;}
+    merged.forEach(s=>{
       const r=document.createElement('div');r.className='row tappable';
-      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
+      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${[s.artist,s.length].filter(Boolean).join(' · ')}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
       r.onclick=()=>openSheet(s);
       box.appendChild(r);
     });
-    if(!box.children.length)$('simBox').style.display='none';
-    else tickify(box);
+    // Botones "Más de [Artista]" — uno por artista único en la lista mostrada
+    const shownArtists=[...new Set(merged.map(s=>s.artist).filter(Boolean))];
+    if(shownArtists.length){
+      const wrap=document.createElement('div');
+      wrap.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid var(--line)';
+      shownArtists.forEach(a=>{
+        const b=document.createElement('button');b.className='btn sm ghost';
+        b.textContent='Más de '+a;
+        b.onclick=()=>{$('q').value=a;onSearch(a);};
+        wrap.appendChild(b);
+      });
+      box.appendChild(wrap);
+    }
+    tickify(box);
   }catch(e){$('simBox').style.display='none';}
 }
 
@@ -502,7 +531,12 @@ function cfNo(){
   if(!$('sheet').classList.contains('open'))$('nav').classList.remove('modal-open');
   if(cfNoCb){cfNoCb();cfNoCb=null;}
 }
-function toast(t,type){const e=$('toast');e.textContent=t;e.className='toast'+(type?' '+type:'');e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
+function toast(t,type){
+  const e=$('toast'),nav=$('nav');
+  e.style.bottom=nav?(nav.offsetHeight+16)+'px':'80px';
+  e.textContent=t;e.className='toast'+(type?' '+type:'');e.classList.add('show');
+  setTimeout(()=>e.classList.remove('show'),2200);
+}
 
 // ---------- Campana flotante: drag + tap corto + tap largo ----------
 function initBellDrag(){
