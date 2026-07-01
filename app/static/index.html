@@ -65,6 +65,7 @@ body{padding-bottom:80px}
   transition:background .2s,border-color .2s;user-select:none;touch-action:none}
 #floatBell.show{display:flex}
 #floatBell.ringing{background:#dc2626;border-color:#dc2626;animation:assistRing 2s ease-in-out infinite}
+#floatBell.holding{transform:scale(0.82);background:#7f1d1d;border-color:#7f1d1d;transition:transform .15s,background .15s}
 @keyframes assistRing{0%,100%{box-shadow:0 4px 18px rgba(220,38,38,.5)}50%{box-shadow:0 0 0 14px rgba(220,38,38,.1),0 4px 18px rgba(220,38,38,.8)}}
 
 /* ---- Header info ---- */
@@ -228,7 +229,7 @@ body{padding-bottom:80px}
 </nav>
 
 <!-- Floating bell (asistencia) -->
-<button id="floatBell" title="Llamar asistencia / cancelar">🔔</button>
+<button id="floatBell" title="Tap: llamar / zumbido  |  Mantén: cancelar">🔔</button>
 
 <!-- Sheet pedir -->
 <div class="sheet-bg" id="sheet">
@@ -497,30 +498,43 @@ function confirmModal(title,msg,cb,opts){
 function cfNo(){$('confirmBg').classList.remove('open');document.body.style.overflow='';if(cfNoCb){cfNoCb();cfNoCb=null;}}
 function toast(t,type){const e=$('toast');e.textContent=t;e.className='toast'+(type?' '+type:'');e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2200);}
 
-// ---------- Campana flotante: drag + click ----------
+// ---------- Campana flotante: drag + tap corto + tap largo ----------
 function initBellDrag(){
   const el=$('floatBell');
-  let ox=0,oy=0,bx=0,by=0,moved=false;
+  let ox=0,oy=0,bx=0,by=0,moved=false,_ht=null;
   try{const s=JSON.parse(localStorage.getItem('bell_pos')||'null');
     if(s){el.style.right='auto';el.style.bottom='auto';el.style.left=s.x+'px';el.style.top=s.y+'px';}}
   catch(e){}
-  function start(cx,cy){moved=false;ox=cx;oy=cy;const r=el.getBoundingClientRect();bx=r.left;by=r.top;}
+  function start(cx,cy){
+    moved=false;ox=cx;oy=cy;const r=el.getBoundingClientRect();bx=r.left;by=r.top;
+    // Feedback visual después de 500ms si no se movió y hay asistencia activa
+    _ht=setTimeout(()=>{if(!moved&&assistActive)el.classList.add('holding');},500);
+  }
   function move(cx,cy){
     const dx=cx-ox,dy=cy-oy;
-    if(!moved&&(Math.abs(dx)>6||Math.abs(dy)>6))moved=true;
+    if(!moved&&(Math.abs(dx)>6||Math.abs(dy)>6)){moved=true;clearTimeout(_ht);el.classList.remove('holding');}
     if(!moved)return;
     const nx=Math.max(0,Math.min(bx+cx-ox,window.innerWidth-el.offsetWidth));
     const ny=Math.max(0,Math.min(by+cy-oy,window.innerHeight-el.offsetHeight));
     el.style.right='auto';el.style.bottom='auto';el.style.left=nx+'px';el.style.top=ny+'px';
   }
   function end(){
-    if(moved){try{localStorage.setItem('bell_pos',JSON.stringify({x:parseInt(el.style.left),y:parseInt(el.style.top)}));}catch(e){}
-    }else{toggleAssist();}
+    clearTimeout(_ht);
+    const longPress=el.classList.contains('holding');
+    el.classList.remove('holding');
+    if(moved){
+      try{localStorage.setItem('bell_pos',JSON.stringify({x:parseInt(el.style.left),y:parseInt(el.style.top)}));}catch(e){}
+    }else if(longPress&&assistActive){
+      cancelAssist();
+    }else{
+      toggleAssist();
+    }
     moved=false;
   }
   el.addEventListener('touchstart',e=>{start(e.touches[0].clientX,e.touches[0].clientY);},{passive:true});
   el.addEventListener('touchmove',e=>{e.preventDefault();move(e.touches[0].clientX,e.touches[0].clientY);},{passive:false});
   el.addEventListener('touchend',end);
+  el.addEventListener('touchcancel',()=>{clearTimeout(_ht);el.classList.remove('holding');moved=false;});
   el.addEventListener('mousedown',e=>{e.preventDefault();start(e.clientX,e.clientY);
     const mm=m=>move(m.clientX,m.clientY);
     document.addEventListener('mousemove',mm);

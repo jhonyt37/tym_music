@@ -129,6 +129,11 @@ class TestIndexHTML(unittest.TestCase):
         self.assertIn("renderTopRequested", self.h.src)
     def test_render_loved_defined(self):
         self.assertIn("renderLoved", self.h.src)
+    def test_bell_long_press_cancels(self):
+        self.assertIn("cancelAssist", self.h.src)
+        self.assertIn("longPress", self.h.src)
+    def test_bell_holding_class_defined(self):
+        self.assertIn("holding", self.h.src)
 
 
 # ===========================================================================
