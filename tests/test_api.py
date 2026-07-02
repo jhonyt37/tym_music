@@ -26,6 +26,7 @@ def _start_server():
     env["PORT"]  = str(PORT)
     env["UPSTASH_REDIS_REST_URL"]   = ""
     env["UPSTASH_REDIS_REST_TOKEN"] = ""
+    env["TYM_OWNER_BARDEMO_PASS"] = "tym1234"  # contraseña conocida para tests
     _proc = subprocess.Popen(
         [sys.executable, "server.py"],
         cwd=_tmpdir, env=env,

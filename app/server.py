@@ -44,17 +44,24 @@ def gen_token():
 def _hash_pass(p):
     return hashlib.sha256(p.encode("utf-8")).hexdigest()
 
-def _verify_pass(input_pass, stored_hash):
-    return hmac.compare_digest(_hash_pass(input_pass), stored_hash)
-
-def _owner_pass_hash(username, legacy_default):
-    """Lee contraseña de variable de entorno; si no está, usa el default (imprime aviso)."""
-    env_key = f"TYM_OWNER_{username.upper()}_PASS"
-    p = os.environ.get(env_key, "")
-    if p:
-        return _hash_pass(p)
-    print(f"⚠️  AVISO DE SEGURIDAD: {env_key} no está definida. Usando contraseña por defecto.")
-    return _hash_pass(legacy_default)
+def _ensure_owner_passwords():
+    """Primer arranque sin data.json: asigna contraseñas iniciales.
+    Si existe TYM_OWNER_<USER>_PASS se usa ese valor (útil en CI/tests).
+    En producción con data.json ya guardado, esta función no toca nada."""
+    changed = False
+    for uname, odata in TYM["owners"].items():
+        if not odata.get("pass_hash"):
+            env_key = f"TYM_OWNER_{uname.upper()}_PASS"
+            p = os.environ.get(env_key, "")
+            if p:
+                pwd = p
+            else:
+                pwd = secrets.token_urlsafe(12)
+                print(f"🔑 Contraseña inicial para '{uname}': {pwd}  ← guárdala y cámbiala desde el panel admin")
+            odata["pass_hash"] = _hash_pass(pwd)
+            changed = True
+    if changed:
+        save_state()
 
 # ---- Rate limiting (por IP) ----
 _RATE = {}
@@ -169,9 +176,9 @@ TYM = {
     "tym_logo": "",
     "subscribers": [],         # {email, table, venue, ts}
     "owners": {                # login de cada cliente TYM (dueño de bar). "*" = TYM master
-        "bardemo": {"pass_hash": _owner_pass_hash("bardemo", "tym1234"), "venue": "bardemo"},
-        "lazona":  {"pass_hash": _owner_pass_hash("lazona",  "tym1234"), "venue": "lazona"},
-        "tym":     {"pass_hash": _owner_pass_hash("tym",     "tymmaster"), "venue": "*"},
+        "bardemo": {"pass_hash": None, "venue": "bardemo"},
+        "lazona":  {"pass_hash": None, "venue": "lazona"},
+        "tym":     {"pass_hash": None, "venue": "*"},
     },
     "events": [],              # analítica: {venue, table, account, ts, ev, ...}
     "accounts": {},            # token -> {id,venue,table,opened_at,closed_at,total,orders_free,orders_premium}
@@ -1001,7 +1008,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset",
                        "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move",
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
-                       "/api/admin/dedica/delete")
+                       "/api/admin/dedica/delete", "/api/admin/change_password")
         vid = self.resolve_vid(d)
         if path in ADMIN_PATHS:
             av = self.authed_venue()
@@ -1712,6 +1719,23 @@ class H(BaseHTTPRequestHandler):
                 STATE["vibe_votes"] = {}
                 return self._send(200, {"ok": True})
 
+            # ---- Admin: cambiar contraseña propia ----
+            if path == "/api/admin/change_password":
+                av = self.authed_venue()
+                new_pass = (d.get("new_pass") or "").strip()
+                if len(new_pass) < 8:
+                    return self._send(400, {"error": "La contraseña debe tener al menos 8 caracteres."})
+                updated = False
+                for uname, odata in TYM["owners"].items():
+                    if odata.get("venue") == av:
+                        odata["pass_hash"] = _hash_pass(new_pass)
+                        updated = True
+                        break
+                if not updated:
+                    return self._send(400, {"error": "No se encontró el usuario."})
+                save_state()
+                return self._send(200, {"ok": True})
+
             # ---- Admin: eliminar dedicatoria ----
             if path == "/api/admin/dedica/delete":
                 ded_id = d.get("id")
@@ -1871,21 +1895,14 @@ def load_state():
             for k in ("socials", "tym_logo", "subscribers", "events", "accounts"):
                 if k in d["tym"]:
                     TYM[k] = d["tym"][k]
-            # Carga owners guardados (nuevas cuentas creadas con create_venue)
+            # Carga todos los owners desde la DB (iniciales + creados dinámicamente)
             for uname, odata in d["tym"].get("owners", {}).items():
-                if uname not in TYM["owners"]:
-                    od = dict(odata)
-                    # Migra contraseñas en texto plano de versiones antiguas
-                    if "pass" in od and "pass_hash" not in od:
-                        od["pass_hash"] = _hash_pass(od.pop("pass"))
-                    od.pop("pass", None)
-                    TYM["owners"][uname] = od
-            # Las env vars siempre tienen prioridad sobre lo guardado
-            for uname in TYM["owners"]:
-                env_key = f"TYM_OWNER_{uname.upper()}_PASS"
-                p = os.environ.get(env_key, "")
-                if p:
-                    TYM["owners"][uname]["pass_hash"] = _hash_pass(p)
+                od = dict(odata)
+                # Migra contraseñas en texto plano de versiones antiguas del código
+                if "pass" in od and "pass_hash" not in od:
+                    od["pass_hash"] = _hash_pass(od.pop("pass"))
+                od.pop("pass", None)
+                TYM["owners"][uname] = od
         for vid, snap in d.get("venues", {}).items():
             tvid = "bardemo" if vid == "default" else vid          # migra venue v2 "default"
             if tvid not in VENUES:
@@ -1929,6 +1946,7 @@ def make_qr(url):
 
 if __name__ == "__main__":
     load_state()
+    _ensure_owner_passwords()
     threading.Thread(target=autosave_loop, daemon=True).start()
     ip = lan_ip()
     url = PUBLIC_URL.rstrip("/") + "/" if PUBLIC_URL else f"http://{ip}:{PORT}/"
@@ -1941,7 +1959,7 @@ if __name__ == "__main__":
     print(f"  Cliente (QR por bar):  {base}/?v=bardemo   (o ?v=lazona)")
     print(f"  Panel dueño / TV / Pantalla:  {base}/admin   {base}/tv   {base}/player")
     print(f"  Dashboard TYM (global):       {base}/tym")
-    print("  LOGIN dueños:  bardemo/tym1234 · lazona/tym1234   |  TYM master:  tym/tymmaster")
+    print("  Contraseñas: ver logs de primer arranque o cambiar en panel admin → Ajustes")
     print("  PINs de mesa: 1111..5555")
     print("=" * 64)
     ThreadingHTTPServer(("0.0.0.0", PORT), H).serve_forever()

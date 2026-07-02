@@ -213,6 +213,12 @@
 
       <button class="btn block" style="margin-top:22px" onclick="save()">Guardar ajustes</button>
       <button class="btn ghost block sm" style="margin-top:8px" onclick="reset()">Reiniciar demo</button>
+
+      <p class="sec" style="margin-top:28px">Seguridad — Cambiar contraseña</p>
+      <label class="small">Nueva contraseña (mín. 8 caracteres)</label>
+      <input class="field" id="newPass" type="password" placeholder="Nueva contraseña" autocomplete="new-password">
+      <input class="field" id="newPassConfirm" type="password" placeholder="Repetir contraseña" autocomplete="new-password" style="margin-top:8px">
+      <button class="btn ghost block sm" style="margin-top:10px" onclick="changePassword()">🔑 Cambiar contraseña</button>
     </div>
   </div>
 </div>
@@ -881,6 +887,15 @@ async function deleteDedica(id){
   tick();
 }
 
+async function changePassword(){
+  const np=($('newPass').value||'').trim();
+  const nc=($('newPassConfirm').value||'').trim();
+  if(np.length<8){toast('La contraseña debe tener al menos 8 caracteres.','err');return;}
+  if(np!==nc){toast('Las contraseñas no coinciden.','err');return;}
+  const r=await post('/api/admin/change_password',{new_pass:np});
+  if(r&&r.ok){toast('Contraseña actualizada ✓','ok');$('newPass').value='';$('newPassConfirm').value='';}
+  else toast(r&&r.error||'Error al cambiar contraseña','err');
+}
 async function doLogin(){
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});
   if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';
