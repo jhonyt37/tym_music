@@ -612,7 +612,7 @@ async function tick(){
       ac.style.display='';al.innerHTML='';
       assists.forEach(a=>{
         const r=document.createElement('div');r.className='row';r.style.borderLeft='4px solid #dc2626';r.style.paddingLeft='10px';
-        const ts=new Date(a.ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+        const ts=new Date(a.ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/Bogota'});
         r.innerHTML=`<div class="info"><div class="t">${a.table}</div><div class="a">${ts}</div></div>`;
         const b=document.createElement('button');b.className='btn green sm';b.textContent='✓ Resolver';b.onclick=()=>resolveAssist(a.id);
         r.appendChild(b);al.appendChild(r);
@@ -732,7 +732,7 @@ async function loadAnalytics(){
     });
     // Cuentas recientes
     const abox=$('analAccts');const accts=d.cuentas_recientes||[];abox.innerHTML='';
-    const hm2=ts=>{if(!ts)return '—';const dt=new Date(ts*1000);return dt.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'});};
+    const hm2=ts=>{if(!ts)return '—';const dt=new Date(ts*1000);return dt.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit',timeZone:'America/Bogota'});};
     if(!accts.length)abox.innerHTML='<div class="empty">Sin cuentas aún.</div>';
     accts.forEach(a=>{
       const r=document.createElement('div');r.className='row';
@@ -744,7 +744,7 @@ async function loadAnalytics(){
 
 // ---------- Historial de pedidos ----------
 const MODE_LABEL={normal:'🆓 Gratis',credito:'⚡ Crédito',pase:'⚡ Pase',salto:'⏫ Salto',single:'💰 Cobrado'};
-const hm3=ts=>{const d=new Date(ts*1000);return d.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'});};
+const hm3=ts=>{const d=new Date(ts*1000);return d.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short',timeZone:'America/Bogota'});};
 async function loadHistory(days){
   ['hbtn1','hbtn2','hbtn3'].forEach(id=>$('btn'+id.slice(4))&&$('btn'+id.slice(4)).classList.remove('active'));
   // highlight active btn
@@ -876,7 +876,7 @@ function renderSocialAdmin(s){
   dbox.innerHTML='';
   deds.forEach(dd=>{
     const d=document.createElement('div');d.className='row';
-    const ts=new Date(dd.ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+    const ts=new Date(dd.ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/Bogota'});
     d.innerHTML=`<div class="info" style="flex:1"><div class="t" style="font-size:13px">"${dd.message}"</div><div class="a">${dd.from_table} → ${dd.to_table} · ${ts}${dd.shown_tv?' · ✓ TV':''}</div></div><button class="btn sm red" onclick="deleteDedica(${dd.id})">✕</button>`;
     dbox.appendChild(d);
   });

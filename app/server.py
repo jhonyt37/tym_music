@@ -27,6 +27,10 @@ EMOJIS = ["❤️", "🔥", "👍"]  # reacciones positivas
 VIBES = ["🔥 Que todo el mundo cante", "💃 Más baile", "🎸 Más suave", "✨ Así está perfecto"]
 BIS_THRESHOLD = 3
 
+BOGOTA_TZ = datetime.timezone(datetime.timedelta(hours=-5))
+def _bogota_hour(ts):
+    return datetime.datetime.fromtimestamp(ts, tz=BOGOTA_TZ).hour
+
 LOCK = threading.Lock()
 _id = [0]
 FB_IDX = [0]   # índice para recorrer la lista sugerida en orden (nunca silencio)
@@ -222,7 +226,7 @@ def tym_analytics():
     fact_local, hour_rev, hour_ord = {}, {k: 0 for k in range(24)}, {k: 0 for k in range(24)}
     free = prem = total = 0
     for e in TYM["events"]:
-        h = datetime.datetime.fromtimestamp(e["ts"]).hour
+        h = _bogota_hour(e["ts"])
         if e["ev"] == "charge":
             fact_local[e["venue"]] = fact_local.get(e["venue"], 0) + e["amount"]
             hour_rev[h] += e["amount"]; total += e["amount"]
@@ -249,7 +253,7 @@ def venue_analytics(vid):
     for e in TYM["events"]:
         if e.get("venue") != vid:
             continue
-        h = datetime.datetime.fromtimestamp(e["ts"]).hour
+        h = _bogota_hour(e["ts"])
         if e["ev"] == "charge":
             hour_rev[h] += e.get("amount", 0)
             total += e.get("amount", 0)
