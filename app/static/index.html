@@ -212,9 +212,13 @@ body{padding-bottom:80px}
   <section class="tab" id="tab-social">
 
     <!-- Votación activa (solo si hay poll) -->
-    <div class="card" id="pollCard" style="display:none">
+    <div class="card" id="pollCard" style="display:none;border-color:var(--pri);box-shadow:0 0 0 1px rgba(59,130,246,.2),0 6px 24px rgba(59,130,246,.1)">
       <h2>🗳️ ¿Qué suena después?</h2>
-      <div class="small" style="color:var(--mut);margin-bottom:8px">¡Vota por la próxima canción!</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="small" style="color:var(--mut)">¡Vota por la próxima canción!</div>
+        <div id="pollTimer" style="font-size:13px;font-weight:800;color:var(--pri);letter-spacing:.5px"></div>
+      </div>
+      <div class="prog" style="margin-top:0;margin-bottom:12px"><div class="prog-fill" id="pollTimerBar" style="background:var(--pri)"></div></div>
       <div id="pollOptions"></div>
     </div>
 
@@ -316,7 +320,7 @@ body{padding-bottom:80px}
 <nav class="nav" id="nav">
   <button data-tab="pedir" class="on"><span>🔎</span>Pedir</button>
   <button data-tab="ahora"><span>▶️</span>Ahora<i class="badge" id="badgeQ" style="display:none">0</i></button>
-  <button data-tab="social"><span>❤️</span>Social</button>
+  <button data-tab="social"><span>❤️</span>Social<i class="badge" id="badgePoll" style="display:none">🗳️</i></button>
   <button data-tab="prio"><span>⚡</span>Prioridad<i class="badge gold" id="badgeC" style="display:none">0</i></button>
 </nav>
 
@@ -443,6 +447,7 @@ function showTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.id==='tab-'+name));
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===name));
   window.scrollTo(0,0);
+  if(name==='social'){$('badgePoll').style.display='none';_subscribePush();}
 }
 
 async function enterPin(){
@@ -798,10 +803,31 @@ async function voteVibe(emoji){
 }
 
 // ---------- Poll / Votación ----------
+let _pollEndsAt=null,_pollTimerRaf=null;
+function _pollTimerTick(){
+  if(!_pollEndsAt){return;}
+  const rem=Math.max(0,Math.round(_pollEndsAt-Date.now()/1000));
+  const m=Math.floor(rem/60),s=String(rem%60).padStart(2,'0');
+  const el=$('pollTimer');const bar=$('pollTimerBar');
+  if(el)el.textContent=rem>0?`⏱ ${m}:${s}`:'⌛ Cerrando…';
+  if(bar){const dur=_pollDuration||120;bar.style.width=Math.round(100*rem/dur)+'%';}
+  if(rem>0)_pollTimerRaf=setTimeout(_pollTimerTick,500);
+}
+let _pollDuration=120;
 function renderPoll(poll){
   const card=$('pollCard');if(!card)return;
-  if(!poll||!poll.active){card.style.display='none';return;}
+  const badge=$('badgePoll');
+  if(!poll||!poll.active){
+    card.style.display='none';
+    if(badge)badge.style.display='none';
+    _pollEndsAt=null;clearTimeout(_pollTimerRaf);
+    return;
+  }
   card.style.display='';
+  if(badge)badge.style.display='';
+  _pollEndsAt=poll.ends_at||null;
+  _pollDuration=poll.duration||120;
+  clearTimeout(_pollTimerRaf);_pollTimerTick();
   const box=$('pollOptions');box.innerHTML='';
   const opts=poll.options||[];const votes=poll.votes||{};const myVote=poll.my_vote;
   const totalVotes=Object.values(votes).reduce((s,n)=>s+n,0)||1;
@@ -1171,7 +1197,7 @@ function renderLoved(items){
 }
 
 // ---------- Poll ----------
-let _lastNpId=null;
+let _lastNpId=null,_lastPollActive=false;
 async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
@@ -1253,7 +1279,16 @@ async function poll(){
     renderTopRequested(s.top_requested);
     renderMyLikes(s.my_liked||[]);
     renderTopTables(s.top_tables||[]);
+    _pollDuration=s.settings.poll_duration_secs||120;
     renderPoll(s.poll);
+    const _pollNowActive=!!(s.poll&&s.poll.active);
+    if(_pollNowActive&&!_lastPollActive){
+      toast('🗳️ ¡Nueva votación! Ve a Social para votar','ok');
+      _triggerPushPoll(s.poll);
+      const socialTab=document.querySelector('[data-tab="social"]');
+      if(socialTab&&!socialTab.classList.contains('active'))$('badgePoll').style.display='';
+    }
+    _lastPollActive=_pollNowActive;
     renderVibe(s.vibe);
     renderDedicaCard(s.tables,s.session);
 
@@ -1287,6 +1322,61 @@ async function voteSkip(){
     poll();
   }catch(e){toast('Error de conexión','err');}
 }
+// ---------- Web Push / Notificaciones ----------
+let _swReg=null,_pushSubscribed=false;
+async function _initSW(){
+  if(!('serviceWorker' in navigator))return;
+  try{
+    _swReg=await navigator.serviceWorker.register('/sw.js');
+    await _swReg.update();
+  }catch(e){}
+}
+async function _triggerPushPoll(poll){
+  if(!('Notification' in window))return;
+  // Pedir permiso si no se ha dado
+  if(Notification.permission==='default'){
+    Notification.requestPermission().then(p=>{if(p==='granted'){_subscribePush();_triggerPushPoll(poll);}});
+    return;
+  }
+  if(Notification.permission!=='granted')return;
+  _subscribePush();
+  const opts=poll&&poll.options||[];
+  const body=opts.length>0?'Elige entre: '+opts.slice(0,3).map(o=>o.title).join(', '):'¡Vota por la próxima canción!';
+  if(_swReg){
+    try{
+      await _swReg.showNotification('🗳️ ¡Nueva votación TYM!',{
+        body,icon:'/icon-192.png',badge:'/icon-192.png',
+        tag:'tym-poll',renotify:true,
+        data:{url:location.href.replace(/#.*/,'')+'#social'}
+      });
+      return;
+    }catch(e){}
+  }
+  try{new Notification('🗳️ ¡Nueva votación TYM!',{body,icon:'/icon-192.png'});}catch(e){}
+}
+async function _subscribePush(){
+  if(_pushSubscribed||!_swReg)return;
+  try{
+    const r=await fetch('/api/push/vapid-public-key?v='+encodeURIComponent(VENUE));
+    if(!r.ok)return;
+    const {public_key}=await r.json();
+    const sub=await _swReg.pushManager.subscribe({
+      userVisibleOnly:true,
+      applicationServerKey:_urlB64ToUint8Array(public_key)
+    });
+    await fetch('/api/push/subscribe',{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({venue:VENUE,token:token||'',subscription:sub.toJSON()})
+    });
+    _pushSubscribed=true;
+  }catch(e){}
+}
+function _urlB64ToUint8Array(b64){
+  const pad='='.repeat((4-b64.length%4)%4);
+  const raw=atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/'));
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+}
+_initSW();
 boot();
 // Refresca la sesión cada 5 min: si el servidor la perdió (reinicio), vuelve a pedir PIN
 setInterval(async()=>{

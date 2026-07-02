@@ -11,10 +11,16 @@ import hashlib, hmac, secrets
 import urllib.request, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
+try:
+    from pywebpush import webpush, WebPushException
+    from py_vapid import Vapid
+    _WEBPUSH_OK = True
+except ImportError:
+    _WEBPUSH_OK = False
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
-VERSION = "0.0.5-demo"
+VERSION = "0.0.6-demo"
 PORT = int(os.environ.get("PORT", 8000))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 # Upstash Redis (backup remoto: evita perder datos en Render/hosts con disco efímero)
@@ -66,6 +72,53 @@ def _ensure_owner_passwords():
             changed = True
     if changed:
         save_state()
+
+def _ensure_vapid_keys():
+    if not _WEBPUSH_OK:
+        return
+    if TYM.get("vapid", {}).get("private_key_pem"):
+        return
+    try:
+        v = Vapid()
+        v.generate_keys()
+        import base64
+        from cryptography.hazmat.primitives.serialization import (
+            Encoding, PublicFormat, PrivateFormat, NoEncryption)
+        priv_pem = v.private_key.private_bytes(Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption()).decode()
+        pub_b64 = base64.urlsafe_b64encode(
+            v.public_key.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
+        ).rstrip(b"=").decode()
+        TYM["vapid"] = {"private_key_pem": priv_pem, "public_key_b64": pub_b64}
+        save_state()
+        print("🔔 VAPID keys generadas para Web Push")
+    except Exception as exc:
+        print(f"⚠️  No se pudieron generar VAPID keys: {exc}")
+
+def _send_venue_push(vid, title, body, url="/"):
+    if not _WEBPUSH_OK:
+        return
+    vapid = TYM.get("vapid", {})
+    priv_pem = vapid.get("private_key_pem")
+    if not priv_pem:
+        return
+    subs = TYM.get("push_subs", {}).get(vid, [])
+    dead = []
+    for sub in subs:
+        try:
+            webpush(
+                subscription_info=sub,
+                data=json.dumps({"title": title, "body": body, "url": url,
+                                 "icon": "/icon-192.png", "tag": "tym-poll"}),
+                vapid_private_key=priv_pem,
+                vapid_claims={"sub": "mailto:tym@example.com"},
+            )
+        except WebPushException as ex:
+            if ex.response and ex.response.status_code in (404, 410):
+                dead.append(sub)
+        except Exception:
+            pass
+    if dead:
+        TYM["push_subs"][vid] = [s for s in subs if s not in dead]
 
 # ---- Rate limiting (por IP) ----
 _RATE = {}
@@ -140,6 +193,7 @@ def make_venue(name):
             "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
             "allowed_keywords": [],        # si hay entradas, la canción DEBE tener al menos una
             "allow_skip_vote": False,      # permite que las mesas voten para saltar la canción
+            "poll_duration_secs": 120,     # duración del timer de la votación (segundos)
         },
         "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4} for i in range(1, 6)],  # PINs 1111..5555
         "sessions": {},
@@ -161,7 +215,8 @@ def make_venue(name):
         "tv_lastseen": 0,          # timestamp del último ping de la TV activa
         "dedicas": [],             # [{id, from_table, to_table, message, ts, shown_tv}]
         "bis_votes": {},           # {yt: set(tokens)} — votos de bis por canción
-        "poll": None,              # {options:[{yt,title,artist}], votes:{yt:set(tokens)}, active, created_at}
+        "poll": None,              # {options, votes, active, created_at, ends_at, triggered_by_np_id, auto}
+        "poll_launched_for_id": None,  # np.id para el que se lanzó/cerró el último poll
         "vibe_votes": {},          # {emoji: set(tokens)} — votos de vibe
         "skip_votes": set(),       # set de tokens que votaron para saltar la canción actual
         "_id": 0, "_fb": 0,
@@ -186,6 +241,8 @@ TYM = {
     },
     "events": [],              # analítica: {venue, table, account, ts, ev, ...}
     "accounts": {},            # token -> {id,venue,table,opened_at,closed_at,total,orders_free,orders_premium}
+    "vapid": {},               # {private_key_pem, public_key_b64}
+    "push_subs": {},           # venue_id -> [{endpoint, keys:{p256dh,auth}}]
 }
 
 CUR_VID = DEFAULT_VID   # bar del request actual (se fija bajo LOCK)
@@ -511,6 +568,95 @@ def bump_count(yt, title, artist):
     else:
         STATE["req_counts"][yt] = {"yt": yt, "title": title, "artist": artist, "count": 1}
 
+def _close_poll_winner(p, vid=None):
+    """Cierra el poll y encola el ganador. Llamar bajo LOCK con STATE apuntando al venue correcto."""
+    p["active"] = False
+    votes = p.get("votes", {})
+    if not votes:
+        return
+    max_v = max(len(v) for v in votes.values())
+    if max_v == 0:
+        return
+    winners = [yt for yt, v in votes.items() if len(v) == max_v]
+    winner_yt = random.choice(winners)
+    winner_opt = next((o for o in p.get("options", []) if o["yt"] == winner_yt), None)
+    if not winner_opt:
+        return
+    poll_item = {"id": nid(), "title": winner_opt["title"],
+                 "artist": winner_opt.get("artist", ""), "yt": winner_yt,
+                 "token": None, "table": "Votación 🗳️", "priority": False,
+                 "super": False, "mode": "normal", "duration": DEFAULT_DUR,
+                 "status": "approved", "play_status": "pending", "played_enough": False,
+                 "requeue_count": 0, "ts": time.time(), "charge_on_play": 0,
+                 "charged": False, "charge_kind": "", "repeat_exception": True, "message": ""}
+    STATE["items"].append(poll_item)
+    STATE.setdefault("repeat_exceptions", set()).add(winner_yt)
+    if STATE.get("now_playing") is None:
+        promote_next()
+
+def _auto_create_poll_bg(vid, np_id, np_yt, np_artist, history_artists, genre, played_yts):
+    """Corre en hilo background: busca candidatos y crea el poll bajo LOCK."""
+    candidates = []
+    seen = set(played_yts)
+    artists = [a for a in ([np_artist] + history_artists) if a]
+    artists = list(dict.fromkeys(artists))[:4]  # únicos, orden de aparición
+    for artist in artists:
+        try:
+            results = yt_search(artist, 6)
+            for r in results:
+                if r["yt"] not in seen:
+                    candidates.append(r)
+                    seen.add(r["yt"])
+                if len(candidates) >= 9:
+                    break
+        except Exception:
+            pass
+        if len(candidates) >= 9:
+            break
+    # Fallback: género del local
+    if len(candidates) < 2:
+        try:
+            for r in yt_search(f"mejores {genre}", 9):
+                if r["yt"] not in seen:
+                    candidates.append(r)
+                    seen.add(r["yt"])
+        except Exception:
+            pass
+    if len(candidates) < 2:
+        return
+    selected = random.sample(candidates[:9], min(3, len(candidates)))
+    duration = 120
+    with LOCK:
+        v = VENUES.get(vid)
+        if not v:
+            return
+        # Re-verificar condiciones bajo lock
+        if v.get("poll_launched_for_id") == np_id:
+            return
+        if v.get("poll", {}) and v["poll"].get("active"):
+            return
+        duration = int(v["settings"].get("poll_duration_secs", 120))
+        now = time.time()
+        v["poll"] = {
+            "options": [{"yt": s["yt"], "title": s["title"], "artist": s.get("artist", "")} for s in selected],
+            "votes": {s["yt"]: set() for s in selected},
+            "active": True,
+            "created_at": now,
+            "ends_at": now + duration,
+            "auto": True,
+            "triggered_by_np_id": np_id,
+        }
+        v["poll_launched_for_id"] = np_id
+        venue_name = v["settings"].get("venue_name", "TYM Music")
+        opts_titles = [s["title"] for s in selected[:3]]
+
+    # Enviar push fuera del lock
+    try:
+        body = "Elige entre: " + ", ".join(opts_titles)
+        _send_venue_push(vid, f"🗳️ ¡Nueva votación en {venue_name}!", body)
+    except Exception:
+        pass
+
 def react_counts(item_id, token=None):
     r = STATE["reactions"].get(item_id, {})
     counts = {e: len(r.get(e, ())) for e in EMOJIS}
@@ -632,9 +778,32 @@ def public_state(token=None, admin=False, mark_dedica=None):
             if token in voters:
                 my_bis_votes.append(yt)
 
-    # ---- Poll (votación de próxima canción) ----
-    poll_state = None
+    # ---- Poll: auto-cerrar si expiró ----
     _p = STATE.get("poll")
+    if _p and _p.get("active") and _p.get("ends_at") and time.time() >= _p["ends_at"]:
+        _close_poll_winner(_p)
+
+    # ---- Poll: auto-lanzar si condiciones se cumplen ----
+    _p = STATE.get("poll")
+    if np and not np.get("fallback"):
+        _queue_len = len(q)
+        _no_active_poll = not (_p and _p.get("active"))
+        _not_launched = STATE.get("poll_launched_for_id") != np["id"]
+        if _queue_len <= 2 and _no_active_poll and _not_launched:
+            STATE["poll_launched_for_id"] = np["id"]  # reservar para evitar doble disparo
+            _hist_artists = [h.get("artist", "") for h in STATE.get("history", [])[:5]]
+            _played = {np["yt"]} | {h["yt"] for h in STATE.get("history", [])} | {i["yt"] for i in STATE.get("items", [])}
+            _vid = CUR_VID
+            threading.Thread(
+                target=_auto_create_poll_bg,
+                args=(_vid, np["id"], np["yt"], np.get("artist", ""), _hist_artists,
+                      s.get("genre", "reggaeton"), _played),
+                daemon=True
+            ).start()
+
+    # ---- Poll (estado público) ----
+    _p = STATE.get("poll")
+    poll_state = None
     if _p:
         my_vote_poll = None
         if token:
@@ -647,6 +816,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
             "votes": {_yt: len(_v) for _yt, _v in _p.get("votes", {}).items()},
             "my_vote": my_vote_poll,
             "active": _p.get("active", False),
+            "ends_at": _p.get("ends_at"),
+            "auto": _p.get("auto", False),
         }
 
     # ---- Vibe votes ----
@@ -667,7 +838,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "free_per_window", "free_window_min", "jump_multiplier",
                                        "venue_logo", "max_priority_queue_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
-                                       "allow_skip_vote")},
+                                       "allow_skip_vote", "poll_duration_secs")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "tables": [t["name"] for t in STATE["tables"]],
         "now_playing": np_pub,
@@ -968,6 +1139,10 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/javascript; charset=utf-8")
             self.send_header("Content-Length", str(len(js)))
             self.end_headers(); self.wfile.write(js); return
+        if path == "/api/push/vapid-public-key":
+            pub = TYM.get("vapid", {}).get("public_key_b64", "")
+            return self._send(200, {"public_key": pub})
+
         return self._send(404, {"error": "not found"})
 
     def _body(self):
@@ -1273,6 +1448,18 @@ class H(BaseHTTPRequestHandler):
                 TYM["subscribers"].append({"email": email[:120],
                                            "table": sess["table"] if sess else "",
                                            "venue": CUR_VID, "ts": time.time()})
+                return self._send(200, {"ok": True})
+
+            if path == "/api/push/subscribe":
+                sub = d.get("subscription")
+                vid = d.get("venue") or CUR_VID
+                if not sub or not sub.get("endpoint"):
+                    return self._send(400, {"error": "subscription inválida"})
+                subs = TYM.setdefault("push_subs", {}).setdefault(vid, [])
+                # Evitar duplicados por endpoint
+                endpoint = sub["endpoint"]
+                if not any(s.get("endpoint") == endpoint for s in subs):
+                    subs.append(sub)
                 return self._send(200, {"ok": True})
 
             # ---- Solicitud de asistencia en mesa ----
@@ -1688,9 +1875,15 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "Se necesitan al menos 2 opciones válidas."})
                 if len(valid_opts) > 3:
                     valid_opts = valid_opts[:3]
+                duration = int(STATE["settings"].get("poll_duration_secs", 120))
+                np_id = (STATE.get("now_playing") or {}).get("id")
+                now = time.time()
                 STATE["poll"] = {"options": valid_opts,
                                  "votes": {o["yt"]: set() for o in valid_opts},
-                                 "active": True, "created_at": time.time()}
+                                 "active": True, "created_at": now,
+                                 "ends_at": now + duration,
+                                 "triggered_by_np_id": np_id, "auto": False}
+                STATE["poll_launched_for_id"] = np_id
                 return self._send(200, {"ok": True})
 
             # ---- Admin: cerrar votación ----
@@ -1698,24 +1891,7 @@ class H(BaseHTTPRequestHandler):
                 _p = STATE.get("poll")
                 if not _p:
                     return self._send(400, {"error": "No hay votación activa."})
-                _p["active"] = False
-                votes = _p.get("votes", {})
-                if votes:
-                    winner_yt = max(votes.keys(), key=lambda _y: len(votes[_y]))
-                    if len(votes[winner_yt]) > 0:
-                        winner_opt = next((o for o in _p.get("options", []) if o["yt"] == winner_yt), None)
-                        if winner_opt:
-                            poll_item = {"id": nid(), "title": winner_opt["title"],
-                                         "artist": winner_opt.get("artist", ""), "yt": winner_yt,
-                                         "token": None, "table": "Votación 🗳️", "priority": False,
-                                         "super": False, "mode": "normal", "duration": DEFAULT_DUR,
-                                         "status": "approved", "play_status": "pending", "played_enough": False,
-                                         "requeue_count": 0, "ts": time.time(), "charge_on_play": 0,
-                                         "charged": False, "charge_kind": "", "repeat_exception": True, "message": ""}
-                            STATE["items"].append(poll_item)
-                            STATE.setdefault("repeat_exceptions", set()).add(winner_yt)
-                            if STATE.get("now_playing") is None:
-                                promote_next()
+                _close_poll_winner(_p)
                 return self._send(200, {"ok": True})
 
             # ---- Admin: reiniciar vibe ----
@@ -1774,7 +1950,7 @@ class H(BaseHTTPRequestHandler):
 DATA_FILE = os.path.join(HERE, "data.json")
 PERSIST_KEYS = ("settings", "tables", "sessions", "now_playing", "items", "ledger",
                 "history", "curated", "req_counts", "jump_used_for", "learned_end", "assists",
-                "request_log", "dedicas")
+                "request_log", "dedicas", "poll_launched_for_id")
 
 def venue_snapshot(v):
     snap = {k: v[k] for k in PERSIST_KEYS}
@@ -1896,7 +2072,7 @@ def load_state():
         return
     try:
         if "tym" in d:
-            for k in ("socials", "tym_logo", "subscribers", "events", "accounts"):
+            for k in ("socials", "tym_logo", "subscribers", "events", "accounts", "vapid", "push_subs"):
                 if k in d["tym"]:
                     TYM[k] = d["tym"][k]
             # Carga todos los owners desde la DB (iniciales + creados dinámicamente)
@@ -1951,6 +2127,7 @@ def make_qr(url):
 if __name__ == "__main__":
     load_state()
     _ensure_owner_passwords()
+    _ensure_vapid_keys()
     threading.Thread(target=autosave_loop, daemon=True).start()
     ip = lan_ip()
     url = PUBLIC_URL.rstrip("/") + "/" if PUBLIC_URL else f"http://{ip}:{PORT}/"

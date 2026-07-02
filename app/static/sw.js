@@ -18,6 +18,34 @@ self.addEventListener('activate', e => {
   self.clients.claim();
 });
 
+self.addEventListener('push', e => {
+  let data = {};
+  try { data = e.data ? e.data.json() : {}; } catch(_) {}
+  const title = data.title || '🗳️ TYM Music';
+  const opts = {
+    body: data.body || '¡Nueva votación disponible! Abre la app para votar.',
+    icon: data.icon || '/icon-192.png',
+    badge: '/icon-192.png',
+    tag: data.tag || 'tym-poll',
+    renotify: true,
+    data: { url: data.url || '/' }
+  };
+  e.waitUntil(self.registration.showNotification(title, opts));
+});
+
+self.addEventListener('notificationclick', e => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(wcs => {
+      for (const wc of wcs) {
+        if ('focus' in wc) return wc.focus();
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(url);
+    })
+  );
+});
+
 self.addEventListener('fetch', e => {
   const url = e.request.url;
   // API, YouTube y recursos externos: siempre red, sin caché
