@@ -7,13 +7,14 @@ Novedades: sesion de mesa por PIN, paquetes (creditos + pase), progreso de
 reproduccion, recomendadas (mas pedido / del local / populares / genero).
 """
 import json, os, re, socket, threading, time, random, datetime, struct, zlib
+import hashlib, hmac, secrets
 import urllib.request, urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
-VERSION = "0.0.4-demo"
+VERSION = "0.0.5-demo"
 PORT = int(os.environ.get("PORT", 8000))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 # Upstash Redis (backup remoto: evita perder datos en Render/hosts con disco efímero)
@@ -34,10 +35,58 @@ def nid():
     return _id[0]
 
 def gen_pin():
-    return f"{random.randint(0, 9999):04d}"
+    return f"{secrets.randbelow(10000):04d}"
 
 def gen_token():
-    return f"{random.randint(0, 9999999999):010d}{random.randint(0,9999):04d}"
+    return secrets.token_hex(16)
+
+# ---- Seguridad: contraseñas ----
+def _hash_pass(p):
+    return hashlib.sha256(p.encode("utf-8")).hexdigest()
+
+def _verify_pass(input_pass, stored_hash):
+    return hmac.compare_digest(_hash_pass(input_pass), stored_hash)
+
+def _owner_pass_hash(username, legacy_default):
+    """Lee contraseña de variable de entorno; si no está, usa el default (imprime aviso)."""
+    env_key = f"TYM_OWNER_{username.upper()}_PASS"
+    p = os.environ.get(env_key, "")
+    if p:
+        return _hash_pass(p)
+    print(f"⚠️  AVISO DE SEGURIDAD: {env_key} no está definida. Usando contraseña por defecto.")
+    return _hash_pass(legacy_default)
+
+# ---- Rate limiting (por IP) ----
+_RATE = {}
+_RATE_LOCK = threading.Lock()
+# group -> (max_requests, window_seconds)
+_RATE_LIMITS = {
+    "login":   (5,  60),
+    "session": (10, 60),
+    "request": (6,  60),
+    "social":  (30, 60),
+    "search":  (20, 60),
+}
+
+_LOCALHOST = {"127.0.0.1", "::1", "localhost"}
+
+def _rate_ok(ip, group):
+    if ip in _LOCALHOST:
+        return True  # localhost never rate-limited (dev + tests)
+    limit, window = _RATE_LIMITS[group]
+    now = time.time()
+    with _RATE_LOCK:
+        bucket = _RATE.setdefault(ip, {}).setdefault(group, [])
+        bucket[:] = [t for t in bucket if now - t < window]
+        if len(bucket) >= limit:
+            return False
+        bucket.append(now)
+        if len(_RATE) > 2000:
+            stale = [k for k, v in _RATE.items()
+                     if all(now - t > window for ts in v.values() for t in ts)]
+            for k in stale[:200]:
+                del _RATE[k]
+        return True
 
 # ---- Catalogo demo (videos de YouTube conocidos y embebibles) ----
 CATALOG = [
@@ -120,9 +169,9 @@ TYM = {
     "tym_logo": "",
     "subscribers": [],         # {email, table, venue, ts}
     "owners": {                # login de cada cliente TYM (dueño de bar). "*" = TYM master
-        "bardemo": {"pass": "tym1234", "venue": "bardemo"},
-        "lazona":  {"pass": "tym1234", "venue": "lazona"},
-        "tym":     {"pass": "tymmaster", "venue": "*"},
+        "bardemo": {"pass_hash": _owner_pass_hash("bardemo", "tym1234"), "venue": "bardemo"},
+        "lazona":  {"pass_hash": _owner_pass_hash("lazona",  "tym1234"), "venue": "lazona"},
+        "tym":     {"pass_hash": _owner_pass_hash("tym",     "tymmaster"), "venue": "*"},
     },
     "events": [],              # analítica: {venue, table, account, ts, ev, ...}
     "accounts": {},            # token -> {id,venue,table,opened_at,closed_at,total,orders_free,orders_premium}
@@ -670,6 +719,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         out["history"] = [{"id": h["id"], "yt": h["yt"], "title": h["title"],
                            "artist": h.get("artist", "")} for h in STATE["history"][:10]]
         out["repeat_exceptions"] = list(STATE.get("repeat_exceptions", set()))
+        out["all_dedicas"] = list(reversed(STATE.get("dedicas", [])))[:30]
     return out
 
 def _pad(lst, n=6, genre=None):
@@ -726,6 +776,9 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Referrer-Policy", "same-origin")
         self.end_headers()
         self.wfile.write(body)
 
@@ -798,7 +851,11 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/catalog":
             return self._send(200, CATALOG)
         if path == "/api/search":
-            return self._send(200, yt_search(self._q("q")))
+            ip = self.client_address[0]
+            if not _rate_ok(ip, "search"):
+                return self._send(429, {"error": "Demasiadas búsquedas. Espera un momento."})
+            q = self._q("q")[:150]
+            return self._send(200, yt_search(q))
         if path == "/api/me":
             av = self.authed_venue()
             if not av:
@@ -906,6 +963,9 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0) or 0)
         if not n:
             return {}
+        if n > 65536:
+            self.rfile.read(min(n, 131072))  # consume para no romper la conexión
+            return {}
         try:
             return json.loads(self.rfile.read(n) or b"{}")
         except Exception:
@@ -916,9 +976,13 @@ class H(BaseHTTPRequestHandler):
         d = self._body()
         # ---- Login / logout (dueños TYM) ----
         if path == "/api/login":
+            ip = self.client_address[0]
+            if not _rate_ok(ip, "login"):
+                return self._send(429, {"error": "Demasiados intentos. Espera un momento."})
             u = (d.get("user") or "").strip()
             o = TYM["owners"].get(u)
-            if not o or o["pass"] != (d.get("pass") or ""):
+            input_hash = _hash_pass(d.get("pass") or "")
+            if not o or not hmac.compare_digest(input_hash, o.get("pass_hash", "")):
                 return self._send(401, {"error": "Usuario o contraseña incorrectos"})
             tk = gen_token(); AUTH[tk] = o["venue"]
             body = json.dumps({"ok": True, "venue": o["venue"]}).encode("utf-8")
@@ -936,7 +1000,8 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/remove", "/api/admin/settings", "/api/admin/tables",
                        "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset",
                        "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move",
-                       "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset")
+                       "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
+                       "/api/admin/dedica/delete")
         vid = self.resolve_vid(d)
         if path in ADMIN_PATHS:
             av = self.authed_venue()
@@ -947,6 +1012,8 @@ class H(BaseHTTPRequestHandler):
             self.set_venue(vid)
             # ---- Sesion de mesa ----
             if path == "/api/session":
+                if not _rate_ok(self.client_address[0], "session"):
+                    return self._send(429, {"error": "Demasiados intentos. Espera un momento."})
                 table = find_table_by_pin(d.get("pin"))
                 if not table:
                     return self._send(400, {"error": "Código de mesa incorrecto"})
@@ -990,6 +1057,8 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Pedir cancion ----
             if path == "/api/request":
+                if not _rate_ok(self.client_address[0], "request"):
+                    return self._send(429, {"error": "Demasiadas solicitudes. Espera un momento."})
                 sess = get_session(d.get("token"))
                 if not sess:
                     return self._send(400, {"error": "Ingresa el código de tu mesa para pedir."})
@@ -1086,6 +1155,8 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Reaccionar (positivo) ----
             if path == "/api/react":
+                if not _rate_ok(self.client_address[0], "social"):
+                    return self._send(429, {"error": "Demasiadas reacciones. Espera un momento."})
                 sess = get_session(d.get("token"))
                 if not sess:
                     return self._send(400, {"error": "Ingresa el código de tu mesa."})
@@ -1458,6 +1529,8 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Dedicatorias ----
             if path == "/api/dedica":
+                if not _rate_ok(self.client_address[0], "social"):
+                    return self._send(429, {"error": "Demasiadas solicitudes. Espera un momento."})
                 sess = get_session(d.get("token"))
                 if not sess:
                     return self._send(400, {"error": "Ingresa el código de tu mesa primero."})
@@ -1479,6 +1552,8 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Solicitar bis ----
             if path == "/api/bis":
+                if not _rate_ok(self.client_address[0], "social"):
+                    return self._send(429, {"error": "Demasiadas solicitudes. Espera un momento."})
                 sess = get_session(d.get("token"))
                 if not sess:
                     return self._send(400, {"error": "Ingresa el código de tu mesa primero."})
@@ -1541,6 +1616,8 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Vibe ----
             if path == "/api/skip_vote":
+                if not _rate_ok(self.client_address[0], "social"):
+                    return self._send(429, {"error": "Demasiadas solicitudes. Espera un momento."})
                 if not STATE["settings"].get("allow_skip_vote"):
                     return self._send(400, {"error": "El skip por votación no está activado en este local."})
                 np_sv = STATE.get("now_playing")
@@ -1569,6 +1646,8 @@ class H(BaseHTTPRequestHandler):
                                         "threshold": threshold, "skipped": skipped})
 
             if path == "/api/vibe":
+                if not _rate_ok(self.client_address[0], "social"):
+                    return self._send(429, {"error": "Demasiadas solicitudes. Espera un momento."})
                 sess = get_session(d.get("token"))
                 if not sess:
                     return self._send(400, {"error": "Ingresa el código de tu mesa primero."})
@@ -1633,6 +1712,14 @@ class H(BaseHTTPRequestHandler):
                 STATE["vibe_votes"] = {}
                 return self._send(200, {"ok": True})
 
+            # ---- Admin: eliminar dedicatoria ----
+            if path == "/api/admin/dedica/delete":
+                ded_id = d.get("id")
+                if ded_id is None:
+                    return self._send(400, {"error": "Falta el id."})
+                STATE["dedicas"] = [dd for dd in STATE.get("dedicas", []) if dd["id"] != ded_id]
+                return self._send(200, {"ok": True})
+
         # ---- TYM Master: gestión de locales ----
         if path == "/api/tym/create_venue":
             if self.authed_venue() != "*":
@@ -1649,7 +1736,7 @@ class H(BaseHTTPRequestHandler):
                 if username in TYM["owners"]:
                     return self._send(400, {"error": f"El usuario '{username}' ya existe"})
                 VENUES[vid] = make_venue(name)
-                TYM["owners"][username] = {"pass": password, "venue": vid}
+                TYM["owners"][username] = {"pass_hash": _hash_pass(password), "venue": vid}
                 save_state()
             return self._send(200, {"ok": True, "vid": vid, "name": name})
 
@@ -1781,9 +1868,24 @@ def load_state():
         return
     try:
         if "tym" in d:
-            for k in ("socials", "tym_logo", "subscribers", "owners", "events", "accounts"):
+            for k in ("socials", "tym_logo", "subscribers", "events", "accounts"):
                 if k in d["tym"]:
                     TYM[k] = d["tym"][k]
+            # Carga owners guardados (nuevas cuentas creadas con create_venue)
+            for uname, odata in d["tym"].get("owners", {}).items():
+                if uname not in TYM["owners"]:
+                    od = dict(odata)
+                    # Migra contraseñas en texto plano de versiones antiguas
+                    if "pass" in od and "pass_hash" not in od:
+                        od["pass_hash"] = _hash_pass(od.pop("pass"))
+                    od.pop("pass", None)
+                    TYM["owners"][uname] = od
+            # Las env vars siempre tienen prioridad sobre lo guardado
+            for uname in TYM["owners"]:
+                env_key = f"TYM_OWNER_{uname.upper()}_PASS"
+                p = os.environ.get(env_key, "")
+                if p:
+                    TYM["owners"][uname]["pass_hash"] = _hash_pass(p)
         for vid, snap in d.get("venues", {}).items():
             tvid = "bardemo" if vid == "default" else vid          # migra venue v2 "default"
             if tvid not in VENUES:

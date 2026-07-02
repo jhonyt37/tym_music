@@ -343,6 +343,13 @@
       <button class="btn ghost block sm" onclick="resetVibe()">↺ Reiniciar encuesta</button>
     </div>
 
+    <!-- Dedicatorias -->
+    <div class="card">
+      <p class="sec">💌 Dedicatorias</p>
+      <div class="small" style="color:var(--mut);margin-bottom:10px">Mensajes enviados entre mesas. Puedes eliminar los inapropiados.</div>
+      <div id="dedicaAdminList"><div class="empty">Sin dedicatorias aún.</div></div>
+    </div>
+
   </div>
 </div>
 
@@ -855,6 +862,23 @@ function renderSocialAdmin(s){
     vbox.appendChild(row);
   });
   if(!totalV2)vbox.innerHTML='<div class="empty">Aún sin votos de vibe.</div>';
+
+  // Dedicatorias
+  const dbox=$('dedicaAdminList');if(!dbox)return;
+  const deds=s.all_dedicas||[];
+  if(!deds.length){dbox.innerHTML='<div class="empty">Sin dedicatorias aún.</div>';return;}
+  dbox.innerHTML='';
+  deds.forEach(dd=>{
+    const d=document.createElement('div');d.className='row';
+    const ts=new Date(dd.ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit'});
+    d.innerHTML=`<div class="info" style="flex:1"><div class="t" style="font-size:13px">"${dd.message}"</div><div class="a">${dd.from_table} → ${dd.to_table} · ${ts}${dd.shown_tv?' · ✓ TV':''}</div></div><button class="btn sm red" onclick="deleteDedica(${dd.id})">✕</button>`;
+    dbox.appendChild(d);
+  });
+}
+
+async function deleteDedica(id){
+  await post('/api/admin/dedica/delete',{id});
+  tick();
 }
 
 async function doLogin(){

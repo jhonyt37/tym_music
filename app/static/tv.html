@@ -86,6 +86,10 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #vibeIndicator{position:fixed;bottom:90px;right:26px;z-index:21;background:rgba(10,14,22,.80);
   border:1px solid #2a3550;border-radius:12px;padding:8px 16px;font-size:15px;font-weight:700;
   color:#fff;display:none;backdrop-filter:blur(6px)}
+/* Indicador de skip votes */
+#skipVoteBar{position:fixed;top:18px;right:22px;z-index:21;background:rgba(10,14,22,.85);
+  border:1px solid rgba(239,68,68,.4);border-radius:12px;padding:8px 14px;font-size:14px;
+  font-weight:700;color:#fca5a5;display:none;backdrop-filter:blur(6px);gap:8px;align-items:center}
 
 /* Botones de control (aparecen con movimiento del mouse) */
 .ctrl{position:fixed;bottom:24px;z-index:25;background:rgba(10,14,22,.85);color:#fff;
@@ -208,6 +212,11 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 
 <!-- Indicador de vibe dominante -->
 <div id="vibeIndicator" id="vibeIndicator"></div>
+
+<!-- Indicador de skip votes -->
+<div id="skipVoteBar" style="display:none;position:fixed;top:18px;right:22px;z-index:21;background:rgba(10,14,22,.85);border:1px solid rgba(239,68,68,.4);border-radius:12px;padding:8px 14px;font-size:14px;font-weight:700;color:#fca5a5;backdrop-filter:blur(6px);display:none;align-items:center;gap:8px">
+  <span>⏭</span><span id="skipVoteText"></span>
+</div>
 
 <script src="https://www.youtube.com/iframe_api"></script>
 <script>
@@ -586,6 +595,12 @@ setInterval(async()=>{
 
     // Vibe indicator
     renderVibeTV(s.vibe);
+
+    // Skip votes
+    {const cnt=s.skip_votes_count||0,thr=s.skip_threshold||2,el=$('skipVoteBar');
+     if(cnt>0&&s.settings&&s.settings.allow_skip_vote&&s.now_playing&&!s.now_playing.fallback){
+       el.style.display='flex';$('skipVoteText').textContent=`${cnt}/${thr} quieren saltar`;
+     }else{el.style.display='none';}}
 
     fetch('/api/tv_ping',{method:'POST'}).catch(()=>{});
   }catch(e){}
