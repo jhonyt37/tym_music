@@ -498,7 +498,8 @@ function renderChips(){
 }
 function renderReco(){
   const list=(reco&&reco[recoTab])||[];
-  renderResults(list.length?list:CAT);
+  // "Del local" muestra toda la lista sin límite de 12
+  renderResults(list.length?list:CAT, recoTab==='del_local'?999:12);
 }
 
 // ---------- Busqueda ----------
@@ -525,10 +526,10 @@ function onSearch(term){
     }catch(e){$('results').innerHTML='<div class="empty">No se pudo buscar. Intenta de nuevo.</div>';}
   },350);
 }
-function renderResults(list){
+function renderResults(list, max=12){
   const res=$('results');res.innerHTML='';
   if(!list||!list.length){res.innerHTML='<div class="empty">Sin resultados. Prueba otro nombre o pega un link de YouTube.</div>';return;}
-  list.slice(0,12).forEach(s=>{
+  list.slice(0,max).forEach(s=>{
     const r=document.createElement('div');r.className='row tappable';
     if(s._link){
       r.innerHTML=`<div style="font-size:26px;flex-shrink:0">🔗</div><div class="info" style="flex:1"><div class="t">Canción desde link</div><div class="a" style="word-break:break-all;font-size:11px">${s._link.slice(0,60)}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;

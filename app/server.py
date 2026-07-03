@@ -1295,7 +1295,7 @@ class H(BaseHTTPRequestHandler):
         ADMIN_PATHS = ("/api/advance", "/api/progress", "/api/admin/approve", "/api/admin/reject",
                        "/api/admin/remove", "/api/admin/settings", "/api/admin/tables",
                        "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset",
-                       "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move",
+                       "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move", "/api/admin/reorder",
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
                        "/api/admin/duelo", "/api/admin/duelo/close",
                        "/api/admin/announcement",
@@ -1834,6 +1834,23 @@ class H(BaseHTTPRequestHandler):
                     q[idx]["ts"], q[idx - 1]["ts"] = q[idx - 1]["ts"], q[idx]["ts"]
                 elif direction == "down" and idx < len(q) - 1:
                     q[idx]["ts"], q[idx + 1]["ts"] = q[idx + 1]["ts"], q[idx]["ts"]
+                return self._send(200, {"ok": True})
+
+            if path == "/api/admin/reorder":
+                new_order = d.get("order", [])
+                q = queue_view()
+                if new_order and len(q) > 1:
+                    def _tier(it): return 0 if it.get("super") else (1 if it.get("priority") else 2)
+                    id_pos = {nid: i for i, nid in enumerate(new_order)}
+                    for t in (0, 1, 2):
+                        tier_items = [it for it in q if _tier(it) == t]
+                        if len(tier_items) < 2: continue
+                        ordered = sorted(tier_items, key=lambda it: id_pos.get(it["id"], 999999))
+                        ts_vals = sorted(it["ts"] for it in tier_items)
+                        for i, it in enumerate(ordered):
+                            if i < len(ts_vals):
+                                it["ts"] = ts_vals[i]
+                    save_state()
                 return self._send(200, {"ok": True})
 
             if path == "/api/admin/close_table":
