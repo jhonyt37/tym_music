@@ -1291,8 +1291,8 @@ async function poll(){
       if(!still){assistActive=false;assistId=null;updateAssistBtn();toast('✓ Alguien está en camino 👋','ok');}
     }
 
-    // Sugerencias basadas en lo que suena
-    if(np&&np.artist&&!np.fallback&&np.id!==_simLoadedForId){
+    // Sugerencias basadas en lo que suena (fallback también, si tiene artista)
+    if(np&&np.artist&&np.id!==_simLoadedForId){
       _simLoadedForId=np.id;_nowYt=np.yt;
       const simArtists=[np.artist,(s.history[0]||{}).artist,(s.history[1]||{}).artist];
       loadSimilar(simArtists);
