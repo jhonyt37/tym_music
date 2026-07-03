@@ -377,11 +377,10 @@ function renderAnnouncementsTV(anns){
   if(!anns||!anns.length){el.style.display='none';clearTimeout(_annTimer);return;}
   const show=()=>{
     const a=anns[_annIdx%anns.length];
-    el.style.display='';el.style.background=a.color||'#f59e0b';el.textContent='📢 '+a.text;
+    el.style.display='block';el.style.background=a.color||'#f59e0b';el.textContent='📢 '+a.text;
     clearTimeout(_annTimer);_annTimer=setTimeout(()=>{_annIdx++;show();},8000);
   };
-  if(el.style.display==='none'||!_annTimer)show();
-  else if(!anns.some(a=>el.textContent.includes(a.text)))show();
+  if(!_annTimer||el.style.display==='none'||el.style.display==='')show();
 }
 
 let _tvPollEndsAt=null,_tvPollDur=120,_tvPollRaf=null;
