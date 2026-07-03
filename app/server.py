@@ -20,7 +20,7 @@ except ImportError:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
-VERSION = "0.0.7-demo"
+VERSION = "0.0.8-demo"
 PORT = int(os.environ.get("PORT", 8000))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 # Upstash Redis (backup remoto: evita perder datos en Render/hosts con disco efímero)
@@ -36,6 +36,26 @@ BIS_THRESHOLD = 3
 BOGOTA_TZ = datetime.timezone(datetime.timedelta(hours=-5))
 def _bogota_hour(ts):
     return datetime.datetime.fromtimestamp(ts, tz=BOGOTA_TZ).hour
+
+def _scheduled_genre():
+    """Devuelve el género activo según el horario programado del venue actual (hora Bogotá)."""
+    s = STATE["settings"]
+    schedule = s.get("schedule", [])
+    if not schedule:
+        return s.get("genre", "reggaeton")
+    now = datetime.datetime.now(tz=BOGOTA_TZ)
+    cur = now.hour * 60 + now.minute
+    for slot in schedule:
+        try:
+            fh, fm = map(int, slot["from"].split(":"))
+            th, tm = map(int, slot["to"].split(":"))
+            lo, hi = fh * 60 + fm, th * 60 + tm
+            hit = (cur >= lo and cur < hi) if hi > lo else (cur >= lo or cur < hi)
+            if hit:
+                return slot.get("genre") or s.get("genre", "reggaeton")
+        except Exception:
+            pass
+    return s.get("genre", "reggaeton")
 
 LOCK = threading.Lock()
 _id = [0]
@@ -195,6 +215,7 @@ def make_venue(name):
             "allow_skip_vote": False,      # permite que las mesas voten para saltar la canción
             "poll_duration_secs": 120,     # duración del timer de la votación (segundos)
             "duelo_duration_secs": 60,     # duración del timer del duelo (segundos)
+            "schedule": [],                # [{from:"HH:MM", to:"HH:MM", genre:str, label:str}]
         },
         "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4} for i in range(1, 6)],  # PINs 1111..5555
         "sessions": {},
@@ -219,6 +240,7 @@ def make_venue(name):
         "poll": None,              # {options, votes, active, created_at, ends_at, triggered_by_np_id, auto}
         "poll_launched_for_id": None,  # np.id para el que se lanzó/cerró el último poll
         "duelo": None,             # {teams:[{yt,title,artist,label},...], votes:{yt:set()}, active, ends_at, created_at}
+        "announcements": [],       # [{id, text, color, created_at, active}]
         "vibe_votes": {},          # {emoji: set(tokens)} — votos de vibe
         "skip_votes": set(),       # set de tokens que votaron para saltar la canción actual
         "_id": 0, "_fb": 0,
@@ -856,7 +878,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
             threading.Thread(
                 target=_auto_create_poll_bg,
                 args=(_vid, np["id"], np["yt"], np.get("artist", ""), _hist_artists,
-                      s.get("genre", "reggaeton"), _played),
+                      _scheduled_genre(), _played),
                 daemon=True
             ).start()
 
@@ -909,6 +931,10 @@ def public_state(token=None, admin=False, mark_dedica=None):
     vibe_state = {v: len(vibe_votes_state.get(v, set())) for v in VIBES}
     vibe_state["my_vote"] = my_vibe
 
+    _active_genre = _scheduled_genre()
+    _active_slot = next((sl for sl in s.get("schedule", []) if sl.get("genre") == _active_genre
+                         and s.get("schedule")), None)
+
     out = {
         "settings": dict({k: s.get(k) for k in ("venue_name", "price_priority", "style", "auto_approve",
                                        "genre", "credit_packages", "time_pass",
@@ -916,8 +942,12 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "free_per_window", "free_window_min", "jump_multiplier",
                                        "venue_logo", "max_priority_queue_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
-                                       "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs")},
+                                       "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
+                                       "schedule")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
+        "active_genre": _active_genre,
+        "active_slot": _active_slot,
+        "announcements": [a for a in STATE.get("announcements", []) if a.get("active")],
         "tables": [t["name"] for t in STATE["tables"]],
         "now_playing": np_pub,
         "jump_available": bool(np) and STATE.get("jump_used_for") != np["id"],
@@ -981,6 +1011,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                            "artist": h.get("artist", "")} for h in STATE["history"][:10]]
         out["repeat_exceptions"] = list(STATE.get("repeat_exceptions", set()))
         out["all_dedicas"] = list(reversed(STATE.get("dedicas", [])))[:30]
+        out["all_announcements"] = list(reversed(STATE.get("announcements", [])))
     return out
 
 def _pad(lst, n=6, genre=None):
@@ -1267,6 +1298,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move",
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
                        "/api/admin/duelo", "/api/admin/duelo/close",
+                       "/api/admin/announcement",
                        "/api/admin/dedica/delete", "/api/admin/change_password")
         vid = self.resolve_vid(d)
         if path in ADMIN_PATHS:
@@ -1693,7 +1725,44 @@ class H(BaseHTTPRequestHandler):
                                           "price": max(0, int(d["time_pass"]["price"]))}
                     except Exception:
                         pass
+                # Horario: se guarda directo en settings si viene en el payload
+                if "schedule" in d and isinstance(d["schedule"], list):
+                    slots = []
+                    for sl in d["schedule"][:12]:
+                        try:
+                            # Validar HH:MM
+                            datetime.datetime.strptime(sl["from"], "%H:%M")
+                            datetime.datetime.strptime(sl["to"], "%H:%M")
+                            slots.append({"from": sl["from"], "to": sl["to"],
+                                          "genre": str(sl.get("genre", ""))[:40],
+                                          "label": str(sl.get("label", ""))[:40]})
+                        except Exception:
+                            pass
+                    s["schedule"] = slots
                 return self._send(200, {"ok": True, "settings": s})
+
+            # ---- Admin: anuncios para TV ----
+            if path == "/api/admin/announcement":
+                act = d.get("action", "create")
+                if act == "create":
+                    text = str(d.get("text", "")).strip()[:200]
+                    if not text:
+                        return self._send(400, {"error": "Texto requerido"})
+                    ann = {"id": nid(), "text": text,
+                           "color": str(d.get("color", "#f59e0b"))[:20],
+                           "created_at": time.time(), "active": True}
+                    STATE.setdefault("announcements", []).append(ann)
+                elif act == "toggle":
+                    aid = d.get("id")
+                    for a in STATE.get("announcements", []):
+                        if a["id"] == aid:
+                            a["active"] = not a.get("active", True)
+                elif act == "delete":
+                    aid = d.get("id")
+                    STATE["announcements"] = [a for a in STATE.get("announcements", [])
+                                              if a["id"] != aid]
+                return self._send(200, {"ok": True,
+                                        "announcements": STATE.get("announcements", [])})
 
             if path == "/api/admin/tables":
                 act = d.get("action")
@@ -1800,6 +1869,7 @@ class H(BaseHTTPRequestHandler):
                 STATE["bis_votes"] = {}
                 STATE["poll"] = None
                 STATE["duelo"] = None
+                STATE["announcements"] = []
                 STATE["vibe_votes"] = {}
                 STATE["skip_votes"] = set()
                 _id[0] = 0

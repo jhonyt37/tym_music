@@ -112,6 +112,12 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   border:1px solid rgba(239,68,68,.4);border-radius:12px;padding:8px 14px;font-size:14px;
   font-weight:700;color:#fca5a5;display:none;backdrop-filter:blur(6px);gap:8px;align-items:center}
 
+/* Banner de anuncios TV */
+#annBanner{position:fixed;top:0;left:0;right:0;z-index:35;padding:14px 28px;
+  font-size:18px;font-weight:800;text-align:center;color:#000;
+  display:none;letter-spacing:.3px;animation:bannerIn .5s ease}
+@keyframes bannerIn{from{transform:translateY(-100%)}to{transform:translateY(0)}}
+
 /* Botones de control (aparecen con movimiento del mouse) */
 .ctrl{position:fixed;bottom:24px;z-index:25;background:rgba(10,14,22,.85);color:#fff;
   border:1px solid #2a3550;border-radius:12px;padding:12px 16px;font-size:16px;font-weight:700;
@@ -246,6 +252,9 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 <!-- Indicador de vibe dominante -->
 <div id="vibeIndicator" id="vibeIndicator"></div>
 
+<!-- Banner de anuncios del local -->
+<div id="annBanner"></div>
+
 <!-- Indicador de skip votes -->
 <div id="skipVoteBar" style="display:none;position:fixed;top:18px;right:22px;z-index:21;background:rgba(10,14,22,.85);border:1px solid rgba(239,68,68,.4);border-radius:12px;padding:8px 14px;font-size:14px;font-weight:700;color:#fca5a5;backdrop-filter:blur(6px);display:none;align-items:center;gap:8px">
   <span>⏭</span><span id="skipVoteText"></span>
@@ -361,6 +370,20 @@ function showSongMessage(msg,dur){
 }
 
 // ---- Poll panel ----
+// ---- Anuncios del local ----
+let _annIdx=0,_annTimer=null;
+function renderAnnouncementsTV(anns){
+  const el=$('annBanner');if(!el)return;
+  if(!anns||!anns.length){el.style.display='none';clearTimeout(_annTimer);return;}
+  const show=()=>{
+    const a=anns[_annIdx%anns.length];
+    el.style.display='';el.style.background=a.color||'#f59e0b';el.textContent='📢 '+a.text;
+    clearTimeout(_annTimer);_annTimer=setTimeout(()=>{_annIdx++;show();},8000);
+  };
+  if(el.style.display==='none'||!_annTimer)show();
+  else if(!anns.some(a=>el.textContent.includes(a.text)))show();
+}
+
 let _tvPollEndsAt=null,_tvPollDur=120,_tvPollRaf=null;
 function _tvPollTick(){
   if(!_tvPollEndsAt)return;
@@ -669,6 +692,7 @@ setInterval(async()=>{
     _tvDueloDur=s.settings&&s.settings.duelo_duration_secs||60;
     renderPollTV(s.poll);
     renderDueloTV(s.duelo);
+    renderAnnouncementsTV(s.announcements||[]);
 
     // Vibe indicator
     renderVibeTV(s.vibe);
