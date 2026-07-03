@@ -105,6 +105,12 @@ body{padding-bottom:80px}
 .vibe-count{font-size:11px;font-weight:600;opacity:.7}
 
 /* ---- Poll ---- */
+.duelo-team{display:flex;align-items:center;gap:10px;background:var(--bg2);border:2px solid var(--line);
+  border-radius:16px;padding:10px 14px;cursor:pointer;transition:border-color .2s,background .2s;flex-wrap:wrap}
+.duelo-team.on{border-color:#f59e0b;background:rgba(245,158,11,.13)}
+.duelo-team .duelo-bar{height:6px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden;flex-basis:100%}
+.duelo-team .duelo-bar-fill{height:100%;background:#f59e0b;border-radius:3px;transition:width .5s}
+.duelo-team .duelo-lbl{font-size:11px;font-weight:800;color:#f59e0b;letter-spacing:.5px}
 .poll-opt{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);
   border-radius:12px;padding:10px 12px;margin-top:8px;cursor:pointer;touch-action:manipulation}
 .poll-opt.on{border-color:var(--pri);background:rgba(59,130,246,.15)}
@@ -220,6 +226,17 @@ body{padding-bottom:80px}
       </div>
       <div class="prog" style="margin-top:0;margin-bottom:12px"><div class="prog-fill" id="pollTimerBar" style="background:var(--pri)"></div></div>
       <div id="pollOptions"></div>
+    </div>
+
+    <!-- Duelo de mesas -->
+    <div class="card" id="dueloCard" style="display:none;border-color:#f59e0b;box-shadow:0 0 0 1px rgba(245,158,11,.2),0 6px 24px rgba(245,158,11,.08)">
+      <h2>⚔️ ¡Duelo de canciones!</h2>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="small" style="color:var(--mut)">Vota por tu favorita — gana la que más votos tenga</div>
+        <div id="dueloTimer" style="font-size:13px;font-weight:800;color:#f59e0b;letter-spacing:.5px"></div>
+      </div>
+      <div class="prog" style="margin-top:0;margin-bottom:12px"><div class="prog-fill" id="dueloTimerBar" style="background:#f59e0b"></div></div>
+      <div id="dueloOptions" style="display:flex;flex-direction:column;gap:10px"></div>
     </div>
 
     <!-- Vibe de la noche -->
@@ -846,6 +863,44 @@ async function votePoll(yt){
   if(j.ok)poll();else toast(j.error||'Error','err');
 }
 
+// ---------- Duelo ----------
+let _dueloEndsAt=null,_dueloDur=60,_dueloRaf=null;
+function _dueloTick(){
+  if(!_dueloEndsAt)return;
+  const rem=Math.max(0,Math.round(_dueloEndsAt-Date.now()/1000));
+  const m=Math.floor(rem/60),s=String(rem%60).padStart(2,'0');
+  const el=$('dueloTimer');const bar=$('dueloTimerBar');
+  if(el)el.textContent=rem>0?`⏱ ${m}:${s}`:'⌛ Cerrando…';
+  if(bar)bar.style.width=Math.round(100*rem/_dueloDur)+'%';
+  if(rem>0)_dueloRaf=setTimeout(_dueloTick,500);
+}
+function renderDuelo(duelo){
+  const card=$('dueloCard');if(!card)return;
+  if(!duelo||!duelo.active){
+    card.style.display='none';_dueloEndsAt=null;clearTimeout(_dueloRaf);
+    return;
+  }
+  card.style.display='';
+  _dueloEndsAt=duelo.ends_at||null;_dueloDur=duelo.duration||60;
+  clearTimeout(_dueloRaf);_dueloTick();
+  const box=$('dueloOptions');box.innerHTML='';
+  const teams=duelo.teams||[];const votes=duelo.votes||{};const myVote=duelo.my_vote;
+  const total=Object.values(votes).reduce((s,n)=>s+n,0)||1;
+  teams.forEach((team,idx)=>{
+    const count=votes[team.yt]||0;const pct=Math.round(100*count/total);const on=myVote===team.yt;
+    const div=document.createElement('div');div.className='duelo-team'+(on?' on':'');
+    div.innerHTML=`<div class="duelo-lbl">${idx===0?'⚔️ A':'⚔️ B'}</div><img class="mini" src="${img(team.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${team.title}</div><div class="a">${team.artist||''}</div></div><div style="font-size:11px;color:var(--mut);font-weight:700;white-space:nowrap">${count} voto${count!==1?'s':''}</div><div class="duelo-bar"><div class="duelo-bar-fill" style="width:0%"></div></div>`;
+    div.onclick=()=>voteDuelo(team.yt);
+    box.appendChild(div);
+  });
+  setTimeout(()=>{box.querySelectorAll('.duelo-bar-fill').forEach((el,i)=>{const count=votes[(teams[i]||{}).yt]||0;const pct=Math.round(100*count/total);el.style.width=pct+'%';});},50);
+}
+async function voteDuelo(yt){
+  if(!token){toast('Ingresa el código de tu mesa','err');return;}
+  const j=await (await fetch('/api/duelo/vote',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,yt})})).json();
+  if(j.ok)poll();else toast(j.error||'Error','err');
+}
+
 // ---------- Top mesas ----------
 function renderTopTables(tables){
   const box=$('topMesasList');if(!box)return;
@@ -1280,7 +1335,9 @@ async function poll(){
     renderMyLikes(s.my_liked||[]);
     renderTopTables(s.top_tables||[]);
     _pollDuration=s.settings.poll_duration_secs||120;
+    _dueloDur=s.settings.duelo_duration_secs||60;
     renderPoll(s.poll);
+    renderDuelo(s.duelo);
     const _pollNowActive=!!(s.poll&&s.poll.active);
     if(_pollNowActive&&!_lastPollActive){
       toast('🗳️ ¡Nueva votación! Ve a Social para votar','ok');

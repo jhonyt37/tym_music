@@ -20,7 +20,7 @@ except ImportError:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
-VERSION = "0.0.6-demo"
+VERSION = "0.0.7-demo"
 PORT = int(os.environ.get("PORT", 8000))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 # Upstash Redis (backup remoto: evita perder datos en Render/hosts con disco efímero)
@@ -194,6 +194,7 @@ def make_venue(name):
             "allowed_keywords": [],        # si hay entradas, la canción DEBE tener al menos una
             "allow_skip_vote": False,      # permite que las mesas voten para saltar la canción
             "poll_duration_secs": 120,     # duración del timer de la votación (segundos)
+            "duelo_duration_secs": 60,     # duración del timer del duelo (segundos)
         },
         "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4} for i in range(1, 6)],  # PINs 1111..5555
         "sessions": {},
@@ -217,6 +218,7 @@ def make_venue(name):
         "bis_votes": {},           # {yt: set(tokens)} — votos de bis por canción
         "poll": None,              # {options, votes, active, created_at, ends_at, triggered_by_np_id, auto}
         "poll_launched_for_id": None,  # np.id para el que se lanzó/cerró el último poll
+        "duelo": None,             # {teams:[{yt,title,artist,label},...], votes:{yt:set()}, active, ends_at, created_at}
         "vibe_votes": {},          # {emoji: set(tokens)} — votos de vibe
         "skip_votes": set(),       # set de tokens que votaron para saltar la canción actual
         "_id": 0, "_fb": 0,
@@ -327,10 +329,35 @@ def venue_analytics(vid):
     top_songs = sorted(songs.values(), key=lambda x: -x["count"])[:10]
     recent_accts = sorted([a for a in TYM["accounts"].values() if a.get("venue") == vid],
                           key=lambda a: -(a.get("opened_at") or 0))[:20]
+
+    # ---- Dashboard transaccional: resumen de HOY (medianoche Bogotá) ----
+    now_bogota = datetime.datetime.now(tz=BOGOTA_TZ)
+    midnight_bogota = now_bogota.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    v = VENUES.get(vid, {})
+    ledger = v.get("ledger", [])
+    tonight_entries = [l for l in ledger if l.get("ts", 0) >= midnight_bogota]
+    tonight_total = sum(l.get("amount", 0) for l in tonight_entries)
+    tonight_songs_priority = sum(1 for l in tonight_entries if l.get("kind") not in ("pase", ""))
+    tonight_songs_free = sum(1 for e in TYM["events"]
+                             if e.get("venue") == vid and e["ev"] == "order"
+                             and not e.get("premium") and e.get("ts", 0) >= midnight_bogota)
+    # Por mesa: total y canciones
+    per_table: dict = {}
+    for l in tonight_entries:
+        tbl = l.get("table", "?")
+        rec = per_table.setdefault(tbl, {"table": tbl, "total": 0, "songs": 0})
+        rec["total"] += l.get("amount", 0)
+        rec["songs"] += 1
+    tonight_per_table = sorted(per_table.values(), key=lambda x: -x["total"])
+
     return {"facturacion_total": total, "facturacion_semana": week_total,
             "orders_free": free, "orders_premium": prem,
             "hora_pico_ingresos": hour_rev, "hora_pico_pedidos": hour_ord,
-            "canciones_top": top_songs, "cuentas_recientes": recent_accts}
+            "canciones_top": top_songs, "cuentas_recientes": recent_accts,
+            "tonight_total": tonight_total,
+            "tonight_songs_priority": tonight_songs_priority,
+            "tonight_songs_free": tonight_songs_free,
+            "tonight_per_table": tonight_per_table}
 
 # =================== Utilidades ===================
 def _parse_len(t):
@@ -594,6 +621,33 @@ def _close_poll_winner(p, vid=None):
     if STATE.get("now_playing") is None:
         promote_next()
 
+def _close_duelo_winner(d):
+    """Cierra el duelo y encola el ganador. Llamar bajo LOCK."""
+    d["active"] = False
+    votes = d.get("votes", {})
+    if not votes:
+        return
+    max_v = max(len(v) for v in votes.values())
+    if max_v == 0:
+        return
+    winners = [yt for yt, v in votes.items() if len(v) == max_v]
+    winner_yt = random.choice(winners)
+    winner_team = next((t for t in d.get("teams", []) if t["yt"] == winner_yt), None)
+    if not winner_team:
+        return
+    d["winner_yt"] = winner_yt
+    item = {"id": nid(), "title": winner_team["title"],
+            "artist": winner_team.get("artist", ""), "yt": winner_yt,
+            "token": None, "table": f"⚔️ Duelo · {winner_team.get('label','Ganador')}",
+            "priority": False, "super": False, "mode": "normal", "duration": DEFAULT_DUR,
+            "status": "approved", "play_status": "pending", "played_enough": False,
+            "requeue_count": 0, "ts": time.time(), "charge_on_play": 0,
+            "charged": False, "charge_kind": "", "repeat_exception": True, "message": ""}
+    STATE["items"].append(item)
+    STATE.setdefault("repeat_exceptions", set()).add(winner_yt)
+    if STATE.get("now_playing") is None:
+        promote_next()
+
 def _auto_create_poll_bg(vid, np_id, np_yt, np_artist, history_artists, genre, played_yts):
     """Corre en hilo background: busca candidatos y crea el poll bajo LOCK."""
     candidates = []
@@ -778,6 +832,11 @@ def public_state(token=None, admin=False, mark_dedica=None):
             if token in voters:
                 my_bis_votes.append(yt)
 
+    # ---- Duelo: auto-cerrar si expiró ----
+    _d = STATE.get("duelo")
+    if _d and _d.get("active") and _d.get("ends_at") and time.time() >= _d["ends_at"]:
+        _close_duelo_winner(_d)
+
     # ---- Poll: auto-cerrar si expiró ----
     _p = STATE.get("poll")
     if _p and _p.get("active") and _p.get("ends_at") and time.time() >= _p["ends_at"]:
@@ -820,6 +879,25 @@ def public_state(token=None, admin=False, mark_dedica=None):
             "auto": _p.get("auto", False),
         }
 
+    # ---- Duelo (estado público) ----
+    _d = STATE.get("duelo")
+    duelo_state = None
+    if _d:
+        my_duelo_vote = None
+        if token:
+            for _dyt, _dv in _d.get("votes", {}).items():
+                if token in _dv:
+                    my_duelo_vote = _dyt
+                    break
+        duelo_state = {
+            "teams": _d.get("teams", []),
+            "votes": {_yt: len(_v) for _yt, _v in _d.get("votes", {}).items()},
+            "active": _d.get("active", False),
+            "ends_at": _d.get("ends_at"),
+            "winner_yt": _d.get("winner_yt"),
+            "my_vote": my_duelo_vote,
+        }
+
     # ---- Vibe votes ----
     vibe_votes_state = STATE.get("vibe_votes", {})
     my_vibe = None
@@ -838,7 +916,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "free_per_window", "free_window_min", "jump_multiplier",
                                        "venue_logo", "max_priority_queue_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
-                                       "allow_skip_vote", "poll_duration_secs")},
+                                       "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "tables": [t["name"] for t in STATE["tables"]],
         "now_playing": np_pub,
@@ -865,6 +943,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         "my_bis_votes": my_bis_votes,
         "bis_threshold": BIS_THRESHOLD,
         "poll": poll_state,
+        "duelo": duelo_state,
         "vibe": vibe_state,
         "skip_votes_count": len(STATE.get("skip_votes", set())),
         "skip_threshold": max(2, -(-len({se["table"] for se in STATE.get("sessions", {}).values()
@@ -1187,6 +1266,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset",
                        "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move",
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
+                       "/api/admin/duelo", "/api/admin/duelo/close",
                        "/api/admin/dedica/delete", "/api/admin/change_password")
         vid = self.resolve_vid(d)
         if path in ADMIN_PATHS:
@@ -1581,7 +1661,7 @@ class H(BaseHTTPRequestHandler):
                     s["auto_approve"] = bool(d["auto_approve"])
                 for k in ("repeat_block_min", "repeat_block_songs", "trim_end_secs",
                           "free_per_window", "free_window_min", "jump_multiplier",
-                          "max_priority_queue_min"):
+                          "max_priority_queue_min", "poll_duration_secs", "duelo_duration_secs"):
                     if k in d:
                         try: s[k] = max(0, int(d[k]))
                         except Exception: pass
@@ -1719,6 +1799,7 @@ class H(BaseHTTPRequestHandler):
                 STATE["dedicas"] = []
                 STATE["bis_votes"] = {}
                 STATE["poll"] = None
+                STATE["duelo"] = None
                 STATE["vibe_votes"] = {}
                 STATE["skip_votes"] = set()
                 _id[0] = 0
@@ -1812,6 +1893,29 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "votes": {k: len(v) for k, v in votes.items()},
                                         "my_vote": my_vote})
 
+            # ---- Duelo: votar ----
+            if path == "/api/duelo/vote":
+                sess = get_session(d.get("token"))
+                if not sess:
+                    return self._send(400, {"error": "Ingresa el código de tu mesa primero."})
+                _d = STATE.get("duelo")
+                if not _d or not _d.get("active"):
+                    return self._send(400, {"error": "No hay duelo activo."})
+                yt = (d.get("yt") or "").strip()
+                valid_yts = [t["yt"] for t in _d.get("teams", [])]
+                if yt not in valid_yts:
+                    return self._send(400, {"error": "Opción inválida."})
+                tok = d.get("token")
+                votes = _d.setdefault("votes", {})
+                already = next((v_yt for v_yt, v_set in votes.items() if tok in v_set), None)
+                if already == yt:
+                    votes[yt].discard(tok); my_vote = None
+                else:
+                    if already: votes[already].discard(tok)
+                    votes.setdefault(yt, set()).add(tok); my_vote = yt
+                return self._send(200, {"ok": True, "votes": {k: len(v) for k, v in votes.items()},
+                                        "my_vote": my_vote})
+
             # ---- Vibe ----
             if path == "/api/skip_vote":
                 if not _rate_ok(self.client_address[0], "social"):
@@ -1894,6 +1998,33 @@ class H(BaseHTTPRequestHandler):
                 _close_poll_winner(_p)
                 return self._send(200, {"ok": True})
 
+            # ---- Admin: crear duelo ----
+            if path == "/api/admin/duelo":
+                teams = d.get("teams", [])
+                if len(teams) != 2 or not all(t.get("yt") and t.get("title") for t in teams):
+                    return self._send(400, {"error": "Se necesitan exactamente 2 equipos con yt y título."})
+                duration = int(STATE["settings"].get("duelo_duration_secs", 60))
+                now = time.time()
+                STATE["duelo"] = {
+                    "teams": [{"yt": t["yt"], "title": t["title"],
+                               "artist": t.get("artist", ""), "label": t.get("label", f"Equipo {i+1}")}
+                              for i, t in enumerate(teams)],
+                    "votes": {t["yt"]: set() for t in teams},
+                    "active": True,
+                    "created_at": now,
+                    "ends_at": now + duration,
+                    "winner_yt": None,
+                }
+                return self._send(200, {"ok": True})
+
+            # ---- Admin: cerrar duelo ----
+            if path == "/api/admin/duelo/close":
+                _d = STATE.get("duelo")
+                if not _d or not _d.get("active"):
+                    return self._send(400, {"error": "No hay duelo activo."})
+                _close_duelo_winner(_d)
+                return self._send(200, {"ok": True})
+
             # ---- Admin: reiniciar vibe ----
             if path == "/api/admin/vibe/reset":
                 STATE["vibe_votes"] = {}
@@ -1969,6 +2100,13 @@ def venue_snapshot(v):
         snap["poll"] = _pc
     else:
         snap["poll"] = None
+    _duelo = v.get("duelo")
+    if _duelo:
+        _dc = dict(_duelo)
+        _dc["votes"] = {yt: list(tokens) for yt, tokens in _dc.get("votes", {}).items()}
+        snap["duelo"] = _dc
+    else:
+        snap["duelo"] = None
     return snap
 
 def _redis_strip_logos(data):
@@ -2051,6 +2189,13 @@ def _load_into(v, snap):
         v["poll"] = _pc
     else:
         v["poll"] = None
+    _ds = snap.get("duelo")
+    if _ds:
+        _dc = dict(_ds)
+        _dc["votes"] = {yt: set(tokens) for yt, tokens in _dc.get("votes", {}).items()}
+        v["duelo"] = _dc
+    else:
+        v["duelo"] = None
 
 def load_state():
     d = None

@@ -190,6 +190,10 @@
       <div class="small" style="color:var(--mut);margin-bottom:6px">La votación se cierra automáticamente después de este tiempo. Default: 120 (2 min).</div>
       <input class="field" id="pollDurationSecs" type="number" min="30" max="600" step="10" placeholder="120" style="max-width:140px">
 
+      <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">⚔️ Duración del duelo (segundos)</label>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">Tiempo para votar en un duelo de canciones. Default: 60 (1 min).</div>
+      <input class="field" id="dueloDurationSecs" type="number" min="20" max="300" step="10" placeholder="60" style="max-width:140px">
+
       <p class="sec" style="margin-top:22px">Filtro de contenido 🚫</p>
       <div class="small" style="margin-bottom:10px">Controla qué canciones pueden pedir los clientes según el título o artista.</div>
 
@@ -298,6 +302,16 @@
 <div id="tab-reports" class="tabpanel">
   <div class="wrap wide">
 
+    <!-- Dashboard transaccional de hoy -->
+    <div class="card" style="margin-bottom:14px;border-color:var(--pri);box-shadow:0 0 0 1px rgba(59,130,246,.15),0 4px 20px rgba(59,130,246,.08)">
+      <p class="sec">💰 Ingresos de hoy</p>
+      <div id="tonightKpis" class="kpis" style="margin-bottom:14px"></div>
+      <div>
+        <h3 style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--mut)">Por mesa (canciones prioritarias)</h3>
+        <div class="list" id="tonightPerTable"><div class="empty">Sin ingresos registrados hoy.</div></div>
+      </div>
+    </div>
+
     <div class="card" style="margin-bottom:14px">
       <p class="sec">Resumen del local 📊</p>
       <div class="kpis" id="analKpis" style="margin-bottom:18px"></div>
@@ -344,6 +358,23 @@
         <button class="btn block" style="margin-top:10px" onclick="createPoll()">🗳️ Crear votación</button>
       </div>
       <button class="btn ghost block sm" id="closePollBtn" style="margin-top:10px;display:none" onclick="closePoll()">✕ Cerrar votación (encola ganador)</button>
+    </div>
+
+    <!-- Duelo de canciones -->
+    <div class="card" style="margin-bottom:14px">
+      <p class="sec">⚔️ Duelo de canciones</p>
+      <div class="small" style="color:var(--mut);margin-bottom:10px">Enfrenta 2 canciones — la que más votos tenga en el tiempo asignado se encola automáticamente.</div>
+      <div id="dueloAdminStatus" style="margin-bottom:10px"></div>
+      <div id="dueloAdminForm">
+        <input class="field" id="dueloSearchA" placeholder="🔴 Buscar canción A…" oninput="dueloSearch('A')">
+        <div class="list" id="dueloResultsA" style="margin-top:4px;max-height:140px;overflow:auto;margin-bottom:10px"></div>
+        <input class="field" id="dueloSearchB" placeholder="🔵 Buscar canción B…" oninput="dueloSearch('B')">
+        <div class="list" id="dueloResultsB" style="margin-top:4px;max-height:140px;overflow:auto;margin-bottom:10px"></div>
+        <div id="dueloSelectedA" style="margin-bottom:6px"></div>
+        <div id="dueloSelectedB" style="margin-bottom:10px"></div>
+        <button class="btn block" onclick="createDuelo()">⚔️ ¡Iniciar duelo!</button>
+      </div>
+      <button class="btn ghost block sm" id="closeDueloBtn" style="margin-top:8px;display:none" onclick="closeDuelo()">✕ Cerrar duelo (encola ganador)</button>
     </div>
 
     <!-- Vibe -->
@@ -515,7 +546,8 @@ async function save(){
     credit_packages:readPackages(),
     time_pass:{minutes:parseInt($('passMin').value||30),price:parseInt($('passPrice').value||0)},
     allow_skip_vote:$('allowSkipVote').checked,
-    poll_duration_secs:parseInt($('pollDurationSecs').value||120)};
+    poll_duration_secs:parseInt($('pollDurationSecs').value||120),
+    duelo_duration_secs:parseInt($('dueloDurationSecs').value||60)};
   if(tymLogoData)payload.tym_logo=tymLogoData;
   if(venueLogoData)payload.venue_logo=venueLogoData;
   await post('/api/admin/settings',payload);
@@ -591,6 +623,7 @@ async function tick(){
       $('fbShuffle').checked=s.settings.fallback_shuffle!==false;
       if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;
       if($('pollDurationSecs'))$('pollDurationSecs').value=s.settings.poll_duration_secs||120;
+      if($('dueloDurationSecs'))$('dueloDurationSecs').value=s.settings.duelo_duration_secs||60;
       _kwBlocked=Array.isArray(s.settings.blocked_keywords)?[...s.settings.blocked_keywords]:[];
       _kwAllowed=Array.isArray(s.settings.allowed_keywords)?[...s.settings.allowed_keywords]:[];
       renderTags('blocked');renderTags('allowed');
@@ -745,6 +778,32 @@ async function loadAnalytics(){
       r.innerHTML=`<div class="info"><div class="t">${a.table}</div><div class="a">Abrió ${hm2(a.opened_at)} · Cerró ${hm2(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop2(a.total)}</div>`;
       abox.appendChild(r);
     });
+    // ---- Dashboard transaccional de hoy ----
+    const tbox=$('tonightKpis');if(tbox){
+      tbox.innerHTML='';
+      const tonight=d.tonight_total||0;
+      const prio=d.tonight_songs_priority||0;
+      const free2=d.tonight_songs_free||0;
+      const ratio=prio+free2>0?Math.round(100*prio/(prio+free2)):0;
+      [{n:cop2(tonight),l:'Ingresos esta noche',gold:true},
+       {n:prio,l:'Canciones prioritarias'},
+       {n:free2,l:'Canciones gratis'},
+       {n:ratio+'%',l:'Ratio de conversión'}].forEach(k=>{
+        const b=document.createElement('div');b.className='kpibox';
+        b.innerHTML=`<div class="n${k.gold?' gold':''}">${k.n}</div><div class="small">${k.l}</div>`;
+        tbox.appendChild(b);
+      });
+    }
+    const tpbox=$('tonightPerTable');if(tpbox){
+      const tables=d.tonight_per_table||[];
+      if(!tables.length){tpbox.innerHTML='<div class="empty">Sin ingresos registrados hoy.</div>';}
+      else{tpbox.innerHTML='';tables.forEach((t,i)=>{
+        const r=document.createElement('div');r.className='row';
+        const medals=['🥇','🥈','🥉'];
+        r.innerHTML=`<div class="pos">${medals[i]||i+1}</div><div class="info"><div class="t">${t.table}</div><div class="a">${t.songs} canción${t.songs!==1?'es':''} prioritaria${t.songs!==1?'s':''}</div></div><div class="chip pri">${cop2(t.total)}</div>`;
+        tpbox.appendChild(r);
+      });}
+    }
   }catch(e){}
 }
 
@@ -841,6 +900,51 @@ async function resetVibe(){
   if(j.ok){toast('Encuesta de vibe reiniciada');tick();}else toast(j.error||'Error','err');
 }
 
+// ---------- Duelo ----------
+let _dueloA=null,_dueloB=null,_dueloTimerA=null,_dueloTimerB=null;
+function dueloSearch(side){
+  const field=$('dueloSearch'+side);const results=$('dueloResults'+side);
+  const q=(field&&field.value||'').trim();
+  if(!q){results.innerHTML='';return;}
+  clearTimeout(side==='A'?_dueloTimerA:_dueloTimerB);
+  const t=setTimeout(async()=>{
+    try{
+      const d=await(await fetch('/api/search?q='+encodeURIComponent(q)+'&v='+encodeURIComponent(VENUE))).json();
+      results.innerHTML='';
+      (d.results||[]).slice(0,4).forEach(s=>{
+        const r=document.createElement('div');r.className='row';r.style.cursor='pointer';
+        r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${s.yt}/mqdefault.jpg" onerror="this.onerror=null;this.removeAttribute('src')"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div>`;
+        r.onclick=()=>{
+          if(side==='A')_dueloA={yt:s.yt,title:s.title,artist:s.artist||'',label:'Equipo A'};
+          else _dueloB={yt:s.yt,title:s.title,artist:s.artist||'',label:'Equipo B'};
+          field.value='';results.innerHTML='';renderDueloSelected();
+        };
+        results.appendChild(r);
+      });
+    }catch(e){}
+  },350);
+  if(side==='A')_dueloTimerA=t;else _dueloTimerB=t;
+}
+function renderDueloSelected(){
+  const mkCard=(team,side)=>{
+    if(!team)return `<div class="small" style="color:var(--mut)">Sin selección</div>`;
+    return `<div class="row" style="background:var(--bg2);border-radius:10px;padding:8px 12px"><img class="mini" src="https://i.ytimg.com/vi/${team.yt}/mqdefault.jpg" onerror="this.onerror=null;this.removeAttribute('src')"><div class="info"><div class="t">${team.title}</div><div class="a">${team.artist}</div></div><button class="btn ghost sm" onclick="${side==='A'?'_dueloA=null':'_dueloB=null'};renderDueloSelected()" style="margin-left:auto">✕</button></div>`;
+  };
+  $('dueloSelectedA').innerHTML='<div class="small" style="color:#f87171;font-weight:700;margin-bottom:4px">⚔️ Equipo A</div>'+mkCard(_dueloA,'A');
+  $('dueloSelectedB').innerHTML='<div class="small" style="color:#60a5fa;font-weight:700;margin-bottom:4px">⚔️ Equipo B</div>'+mkCard(_dueloB,'B');
+}
+async function createDuelo(){
+  if(!_dueloA||!_dueloB){toast('Selecciona una canción para cada equipo','err');return;}
+  const j=await post('/api/admin/duelo',{teams:[_dueloA,_dueloB]});
+  if(j.ok){toast('¡Duelo iniciado! 🔥','ok');_dueloA=null;_dueloB=null;renderDueloSelected();tick();}
+  else toast(j.error||'Error','err');
+}
+async function closeDuelo(){
+  const j=await post('/api/admin/duelo/close',{});
+  if(j.ok){toast('Duelo cerrado — ganador encolado','ok');tick();}
+  else toast(j.error||'Error','err');
+}
+
 function renderSocialAdmin(s){
   // Poll status
   const p=s.poll;
@@ -866,6 +970,34 @@ function renderSocialAdmin(s){
     if(p&&!p.active){statusBox.innerHTML='<div class="small" style="color:var(--mut)">Votación cerrada.</div>';}
     else statusBox.innerHTML='';
   }
+  // Duelo status
+  const dd=s.duelo;
+  const dueloStatusBox=$('dueloAdminStatus');
+  const dueloFormBox=$('dueloAdminForm');
+  const dueloCloseBtn=$('closeDueloBtn');
+  if(dueloStatusBox&&dueloFormBox&&dueloCloseBtn){
+    if(dd&&dd.active){
+      dueloFormBox.style.display='none';dueloCloseBtn.style.display='';
+      const totalDV=Object.values(dd.votes||{}).reduce((a,n)=>a+n,0)||0;
+      const rem2=dd.ends_at?Math.max(0,Math.round(dd.ends_at-Date.now()/1000)):null;
+      const dur2=s.settings&&s.settings.duelo_duration_secs||60;
+      let dhtml=rem2!==null?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:13px;font-weight:800;color:#f59e0b">⏱ ${Math.floor(rem2/60)}:${String(rem2%60).padStart(2,'0')}</span><div style="flex:1;height:5px;background:var(--line);border-radius:3px;overflow:hidden"><div style="height:100%;width:${Math.round(100*rem2/dur2)}%;background:#f59e0b;border-radius:3px"></div></div></div>`:'';
+      dhtml+=`<div class="small" style="color:var(--mut);margin-bottom:6px">Duelo activo — ${totalDV} voto${totalDV!==1?'s':''}</div>`;
+      (dd.teams||[]).forEach((team,idx)=>{
+        const count=(dd.votes&&dd.votes[team.yt])||0;const pct=totalDV>0?Math.round(100*count/totalDV):0;
+        dhtml+=`<div class="row" style="flex-wrap:wrap;margin-bottom:4px"><div class="info" style="flex:1"><div class="t">${['🔴','🔵'][idx]||''} ${team.title}</div></div><span class="chip">${count} votos (${pct}%)</span><div style="flex-basis:100%;height:5px;background:var(--line);border-radius:3px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:#f59e0b;border-radius:3px;transition:width .4s"></div></div></div>`;
+      });
+      dueloStatusBox.innerHTML=dhtml;
+    }else{
+      dueloFormBox.style.display='';dueloCloseBtn.style.display='none';
+      if(!_dueloA&&!_dueloB)renderDueloSelected();
+      if(dd&&!dd.active&&dd.winner_yt){
+        const winner=(dd.teams||[]).find(t=>t.yt===dd.winner_yt);
+        dueloStatusBox.innerHTML=`<div class="small" style="color:var(--mut)">Duelo cerrado — Ganó: <b>${winner?winner.title:'?'}</b> 🏆</div>`;
+      }else dueloStatusBox.innerHTML='';
+    }
+  }
+
   // Vibe results
   const vibeVotes=s.vibe||{};
   const vbox=$('vibeAdminResults');vbox.innerHTML='';
