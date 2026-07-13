@@ -185,21 +185,21 @@ class TestQueue(TYMTestCase):
 
     def test_queue_priority_order(self):
         # Fill now_playing first so subsequent requests stay in queue (not auto-promoted)
-        self._request_song(self.token, yt="fillerSong00", title="Filler")
+        self._request_song(self.token, yt="fillerSong0", title="Filler")
         # Admin-add two normal songs (admin add never triggers auto-promote)
         self._post("/api/admin/add",
-            {"yt": "normalSong11", "title": "Normal 1", "length": "3:00"}, self.admin_cookie)
+            {"yt": "normalSong1", "title": "Normal 1", "length": "3:00"}, self.admin_cookie)
         self._post("/api/admin/add",
-            {"yt": "normalSong22", "title": "Normal 2", "length": "3:00"}, self.admin_cookie)
+            {"yt": "normalSong2", "title": "Normal 2", "length": "3:00"}, self.admin_cookie)
         # Client priority request — now_playing is occupied so it stays in queue
         t2 = self._make_session("Mesa 2", "2222")
-        self._request_song(t2, yt="priorSong333", title="Priority", priority=True)
+        self._request_song(t2, yt="priorSong33", title="Priority", priority=True)
         s = self._state()
         q = s["queue"]
         positions = {it["yt"]: i for i, it in enumerate(q)}
-        self.assertIn("priorSong333", positions, "Priority song must be in queue")
-        self.assertIn("normalSong11", positions, "Normal song must be in queue")
-        self.assertLess(positions["priorSong333"], positions["normalSong11"],
+        self.assertIn("priorSong33", positions, "Priority song must be in queue")
+        self.assertIn("normalSong1", positions, "Normal song must be in queue")
+        self.assertLess(positions["priorSong33"], positions["normalSong1"],
                         "Priority song should come before normal song")
 
     def test_repeat_block_active(self):
@@ -241,64 +241,64 @@ class TestAdmin(TYMTestCase):
 
     def test_admin_add_song_to_queue(self):
         d, status = self._post("/api/admin/add",
-            {"yt": "adminYT00000", "title": "Admin Song", "artist": "Admin", "length": "3:00"},
+            {"yt": "adminYT0000", "title": "Admin Song", "artist": "Admin", "length": "3:00"},
             self.admin_cookie)
         self.assertEqual(status, 200)
         s = self._state(admin=True)
         yts = [it["yt"] for it in s["queue"]]
-        self.assertIn("adminYT00000", yts)
+        self.assertIn("adminYT0000", yts)
 
     def test_admin_add_at_position_one(self):
-        self._request_song(self.token, yt="firstSong000", title="First Normal")
+        self._request_song(self.token, yt="firstSong00", title="First Normal")
         self._post("/api/admin/add",
-            {"yt": "insertedFirst", "title": "Admin Inserted", "length": "3:00", "position": 1},
+            {"yt": "insertedFir", "title": "Admin Inserted", "length": "3:00", "position": 1},
             self.admin_cookie)
         s = self._state()
-        self.assertEqual(s["queue"][0]["yt"], "insertedFirst",
+        self.assertEqual(s["queue"][0]["yt"], "insertedFir",
                          "Position 1 should be first in queue")
 
     def test_admin_remove_song(self):
         # Use admin add so song stays in queue (client request would auto-promote to now_playing)
         self._post("/api/admin/add",
-            {"yt": "removeMe0000", "title": "To Remove", "length": "3:00"}, self.admin_cookie)
+            {"yt": "removeMe000", "title": "To Remove", "length": "3:00"}, self.admin_cookie)
         s = self._state()
-        item_id = next(it["id"] for it in s["queue"] if it["yt"] == "removeMe0000")
+        item_id = next(it["id"] for it in s["queue"] if it["yt"] == "removeMe000")
         self._post("/api/admin/remove", {"id": item_id}, self.admin_cookie)
         s2 = self._state()
         yts = [it["yt"] for it in s2["queue"]]
-        self.assertNotIn("removeMe0000", yts)
+        self.assertNotIn("removeMe000", yts)
 
     def test_admin_move_up(self):
         # Use admin add so both songs stay in queue
-        self._post("/api/admin/add", {"yt": "song1aaaaaaa", "title": "Song 1", "length": "3:00"}, self.admin_cookie)
-        self._post("/api/admin/add", {"yt": "song2bbbbbbb", "title": "Song 2", "length": "3:00"}, self.admin_cookie)
+        self._post("/api/admin/add", {"yt": "song1aaaaaa", "title": "Song 1", "length": "3:00"}, self.admin_cookie)
+        self._post("/api/admin/add", {"yt": "song2bbbbbb", "title": "Song 2", "length": "3:00"}, self.admin_cookie)
         s = self._state()
-        id_song2 = next(it["id"] for it in s["queue"] if it["yt"] == "song2bbbbbbb")
+        id_song2 = next(it["id"] for it in s["queue"] if it["yt"] == "song2bbbbbb")
         self._post("/api/admin/move", {"id": id_song2, "dir": "up"}, self.admin_cookie)
         s2 = self._state()
-        self.assertEqual(s2["queue"][0]["yt"], "song2bbbbbbb",
+        self.assertEqual(s2["queue"][0]["yt"], "song2bbbbbb",
                          "Song 2 should move to first position after moving up")
 
     def test_admin_move_down(self):
         # Use admin add so both songs stay in queue
-        self._post("/api/admin/add", {"yt": "song1aaaaaaa", "title": "Song 1", "length": "3:00"}, self.admin_cookie)
-        self._post("/api/admin/add", {"yt": "song2bbbbbbb", "title": "Song 2", "length": "3:00"}, self.admin_cookie)
+        self._post("/api/admin/add", {"yt": "song1aaaaaa", "title": "Song 1", "length": "3:00"}, self.admin_cookie)
+        self._post("/api/admin/add", {"yt": "song2bbbbbb", "title": "Song 2", "length": "3:00"}, self.admin_cookie)
         s = self._state()
-        id_song1 = next(it["id"] for it in s["queue"] if it["yt"] == "song1aaaaaaa")
+        id_song1 = next(it["id"] for it in s["queue"] if it["yt"] == "song1aaaaaa")
         self._post("/api/admin/move", {"id": id_song1, "dir": "down"}, self.admin_cookie)
         s2 = self._state()
-        self.assertEqual(s2["queue"][1]["yt"], "song1aaaaaaa",
+        self.assertEqual(s2["queue"][1]["yt"], "song1aaaaaa",
                          "Song 1 should be at position 2 after moving down")
 
     def test_admin_skip_advances_queue(self):
-        self._request_song(self.token, yt="song1aaaaaaa", title="Song 1")
+        self._request_song(self.token, yt="song1aaaaaa", title="Song 1")
         self._post("/api/advance", {}, self.admin_cookie)
         s = self._state()
         # After advance, song should be now_playing or in history
         np = s.get("now_playing")
         hist = [h["yt"] for h in s.get("history", [])]
         self.assertTrue(
-            (np and np["yt"] == "song1aaaaaaa") or "song1aaaaaaa" in hist,
+            (np and np["yt"] == "song1aaaaaa") or "song1aaaaaa" in hist,
             "Advanced song should be now_playing or in history"
         )
 
@@ -319,20 +319,20 @@ class TestRepeatBlock(TYMTestCase):
         self._post("/api/advance", {"manual": True}, self.admin_cookie)
 
     def test_song_in_history_is_blocked(self):
-        self._put_in_history("blockedYT000")
-        d, status = self._request_song(self.token, yt="blockedYT000")
+        self._put_in_history("blockedYT00")
+        d, status = self._request_song(self.token, yt="blockedYT00")
         self.assertEqual(status, 400)
 
     def test_allow_repeat_removes_block(self):
-        self._put_in_history("repeatYT0000")
+        self._put_in_history("repeatYT000")
         # Block is active
-        _, status_blocked = self._request_song(self.token, yt="repeatYT0000")
+        _, status_blocked = self._request_song(self.token, yt="repeatYT000")
         self.assertEqual(status_blocked, 400)
         # Admin allows repeat
-        d, _ = self._post("/api/admin/allow_repeat", {"yt": "repeatYT0000"}, self.admin_cookie)
+        d, _ = self._post("/api/admin/allow_repeat", {"yt": "repeatYT000"}, self.admin_cookie)
         self.assertTrue(d.get("allowed"))
         # Now request should succeed
-        d2, status2 = self._request_song(self.token, yt="repeatYT0000", title="Repeat Song")
+        d2, status2 = self._request_song(self.token, yt="repeatYT000", title="Repeat Song")
         self.assertEqual(status2, 200, f"Song with repeat exception should be requestable: {d2}")
 
     def test_allow_repeat_toggle(self):
@@ -341,9 +341,9 @@ class TestRepeatBlock(TYMTestCase):
         self.assertFalse(d.get("allowed"), "Second toggle should remove the exception")
 
     def test_repeat_exceptions_shown_in_admin_state(self):
-        self._post("/api/admin/allow_repeat", {"yt": "excYT0000000"}, self.admin_cookie)
+        self._post("/api/admin/allow_repeat", {"yt": "excYT000000"}, self.admin_cookie)
         s = self._state(admin=True)
-        self.assertIn("excYT0000000", s.get("repeat_exceptions", []))
+        self.assertIn("excYT000000", s.get("repeat_exceptions", []))
 
 
 # ===========================================================================
@@ -355,7 +355,7 @@ class TestReactions(TYMTestCase):
         self._reset()
         self.token = self._make_session()
         # Add a song and advance it to now_playing
-        self._request_song(self.token, yt="reactSong000", title="React Song")
+        self._request_song(self.token, yt="reactSong00", title="React Song")
         self._post("/api/advance", {}, self.admin_cookie)
 
     def _react(self, emoji="❤️", public=True):
@@ -425,9 +425,9 @@ class TestRaceCondition(TYMTestCase):
     def test_race_condition_detection(self):
         t1 = self._make_session("Mesa 1", "1111")
         t2 = self._make_session("Mesa 2", "2222")
-        d1, s1 = self._request_song(t1, yt="raceTestYT00", title="Race Song")
+        d1, s1 = self._request_song(t1, yt="raceTestYT0", title="Race Song")
         self.assertEqual(s1, 200, "First request should succeed")
-        d2, s2 = self._request_song(t2, yt="raceTestYT00", title="Race Song")
+        d2, s2 = self._request_song(t2, yt="raceTestYT0", title="Race Song")
         self.assertEqual(s2, 400, "Second request for same song should fail")
         # Should be either race or duplicate error (duplicate if >10s passed — unlikely)
         self.assertIn("error", d2)
@@ -436,7 +436,7 @@ class TestRaceCondition(TYMTestCase):
         results = []
         def do_req(pin, table):
             tok = self._make_session(table, pin)
-            d, s = self._request_song(tok, yt="raceSong2222", title="Race2")
+            d, s = self._request_song(tok, yt="raceSong222", title="Race2")
             results.append((s, d))
         threads = [
             threading.Thread(target=do_req, args=("1111", "Mesa 1")),
@@ -535,7 +535,7 @@ class TestStateStructure(TYMTestCase):
     def test_now_playing_has_recent_reacts_when_playing(self):
         self._reset()
         tok = self._make_session()
-        self._request_song(tok, yt="recentTest00", title="Recent Reacts Test")
+        self._request_song(tok, yt="recentTest0", title="Recent Reacts Test")
         self._post("/api/advance", {}, self.admin_cookie)
         s = self._state()
         np = s.get("now_playing")
@@ -548,6 +548,115 @@ class TestStateStructure(TYMTestCase):
         for key in ["venue_name", "price_priority", "auto_approve",
                     "repeat_block_songs", "repeat_block_min"]:
             self.assertIn(key, s["settings"], f"Settings missing key: {key}")
+
+
+# ===========================================================================
+# Tests: seguridad (rate limit, cookie, validación de yt)
+# ===========================================================================
+class TestSecurity(TYMTestCase):
+
+    def test_login_sets_httponly_cookie(self):
+        body = json.dumps({"user": "bardemo", "pass": "tym1234"}).encode()
+        req = urllib.request.Request(
+            f"http://localhost:{PORT}/api/login", body,
+            {"Content-Type": "application/json"}, method="POST")
+        resp = urllib.request.urlopen(req, timeout=5)
+        cookie = resp.getheader("Set-Cookie") or ""
+        self.assertIn("HttpOnly", cookie)
+
+    def test_admin_endpoint_requires_auth(self):
+        d, status = self._post("/api/admin/settings", {"venue_name": "x"}, auth=None)
+        self.assertEqual(status, 401)
+
+    def test_rejects_malformed_yt_xss_payload(self):
+        tok = self._make_session()
+        d, status = self._post("/api/request", {
+            "token": tok, "yt": 'x" onerror=alert(1)', "title": "x", "priority": False})
+        self.assertEqual(status, 400)
+
+    def test_rejects_short_yt(self):
+        tok = self._make_session()
+        d, status = self._post("/api/request", {"token": tok, "yt": "short", "title": "x"})
+        self.assertEqual(status, 400)
+
+    def test_accepts_valid_yt_id(self):
+        tok = self._make_session()
+        d, status = self._post("/api/request", {
+            "token": tok, "yt": "aaaaaaaaaaa", "title": "Valid", "priority": False})
+        self.assertEqual(status, 200)
+
+
+# ===========================================================================
+# Tests: billetera prepago (registro por celular, saldo, reembolsos)
+# ===========================================================================
+class TestWallet(TYMTestCase):
+
+    def setUp(self):
+        self._reset()
+        self._post("/api/admin/settings", {"prepaid_mode": True, "min_direct_pay": 700},
+                   self.admin_cookie)
+
+    def tearDown(self):
+        self._post("/api/admin/settings", {"prepaid_mode": False}, self.admin_cookie)
+
+    def _register(self, phone="3001112222", name="Cliente Test"):
+        d, status = self._post("/api/register", {"name": name, "phone": phone, "email": "t@t.com"})
+        return d, status
+
+    def test_register_new_customer_has_zero_balance(self):
+        d, status = self._register(phone="3001110001")
+        self.assertEqual(status, 200)
+        self.assertFalse(d["recovered"])
+        self.assertEqual(d["balance"], 0)
+
+    def test_topup_increases_balance(self):
+        d, _ = self._register(phone="3001110002")
+        tok = d["token"]
+        j, status = self._post("/api/wallet/topup", {"token": tok, "amount": 5000})
+        self.assertEqual(status, 200)
+        self.assertEqual(j["balance"], 5000)
+
+    def test_same_phone_recovers_balance_from_new_device(self):
+        d, _ = self._register(phone="3001110003")
+        tok1 = d["token"]
+        self._post("/api/wallet/topup", {"token": tok1, "amount": 3000})
+        d2, status = self._register(phone="3001110003")
+        self.assertEqual(status, 200)
+        self.assertTrue(d2["recovered"])
+        self.assertEqual(d2["balance"], 3000)
+
+    def test_insufficient_balance_blocks_priority_purchase(self):
+        d, _ = self._register(phone="3001110004")
+        tok = d["token"]
+        j, status = self._post("/api/request", {
+            "token": tok, "yt": "bbbbbbbbbbb", "title": "Prio Test", "priority": True})
+        self.assertEqual(status, 400)
+        self.assertTrue(j.get("insufficient_balance"))
+
+    def test_wallet_refund_on_admin_reject(self):
+        d, _ = self._register(phone="3001110005")
+        tok = d["token"]
+        self._post("/api/wallet/topup", {"token": tok, "amount": 5000})
+        # Pedido de relleno para que el siguiente quede en cola (el primero se auto-reproduce)
+        self._request_song(tok, yt="fillersong0", title="Filler")
+        j, status = self._post("/api/request", {
+            "token": tok, "yt": "ccccccccccc", "title": "Refund Test", "priority": True})
+        self.assertEqual(status, 200)
+        j_after_charge, _ = self._get(f"/api/state?v=bardemo&token={tok}")
+        self.assertEqual(j_after_charge["wallet_balance"], 4000)  # 5000 - 1000 de prioridad
+        s = self._state(admin=True)
+        item = next(i for i in s["pending"] + s["queue"] if i["yt"] == "ccccccccccc")
+        self._post("/api/admin/reject", {"id": item["id"]}, self.admin_cookie)
+        j_after_refund, _ = self._get(f"/api/state?v=bardemo&token={tok}")
+        self.assertEqual(j_after_refund["wallet_balance"], 5000)  # reembolsado
+
+    def test_items_are_isolated_between_venues(self):
+        d, _ = self._register(phone="3001110006")
+        tok = d["token"]
+        s_bardemo = self._state(admin=False)
+        j, _ = self._get(f"/api/state?v=lazona")
+        self.assertNotEqual(s_bardemo.get("settings", {}).get("venue_name"),
+                            j.get("settings", {}).get("venue_name"))
 
 
 # ===========================================================================

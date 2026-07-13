@@ -1,0 +1,4 @@
+-r requirements.txt
+# Solo para tests E2E de UI (tests/test_ui.py) — NO se instala en producción/deploy.
+# Instalar: pip install -r requirements-dev.txt && playwright install chromium
+playwright
