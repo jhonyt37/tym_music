@@ -276,7 +276,7 @@ keepAwake();
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')keepAwake();});
 
 // ---- Estado principal ----
-let player,ready=false,curYt=null,curId=null,wantAudio=false;
+let player,ready=false,curYt=null,curId=null,wantAudio=false,manualPause=false;
 let topLoved=[],lastReactTotal=0,lastReactId=null,_lastReactTs=0,authok=false;
 let isPrimary=true,advancingId=undefined;
 let _lastDedicaId=null,_dedicaToMark=null,_dedicaTimeout=null;
@@ -477,7 +477,13 @@ function onYouTubeIframeAPIReady(){
     playerVars:{autoplay:1,playsinline:1,rel:0,controls:0,modestbranding:1,enablejsapi:1,origin:location.origin},
     events:{
       onReady:()=>{ready=true;if(authok)tick();},
-      onStateChange:e=>{if(e.data===YT.PlayerState.ENDED)advance();},
+      onStateChange:e=>{
+        if(e.data===YT.PlayerState.ENDED)advance();
+        // Pausa manual (clic/space del operador en el propio player) — nunca la del
+        // tv_takeover, que pausa una pestaña secundaria a propósito (isPrimary ya false).
+        if(e.data===YT.PlayerState.PAUSED&&isPrimary)manualPause=true;
+        if(e.data===YT.PlayerState.PLAYING)manualPause=false;
+      },
       onError:()=>{if(!isRawIP||isLocal)setTimeout(()=>advance(),1200);}
     }
   });
@@ -508,6 +514,7 @@ function load(np){
     if(ready){
       // Solo fijar curYt cuando el player carga el video
       curYt=np.yt;
+      manualPause=false; // canción nueva: cualquier pausa manual de la anterior ya no aplica
       player.loadVideoById(np.yt);
       // NO llamar unMute() aquí — solo el gesto del usuario en #audioOverlay puede hacerlo
     }
@@ -635,9 +642,10 @@ setInterval(async()=>{
     if(s.now_playing&&ready&&s.now_playing.yt!==curYt){load(s.now_playing);}
 
     // Recuperar player detenido/pausado/cued después de carga exitosa
+    // (ps===2/PAUSED se respeta si fue una pausa manual del operador — ver onStateChange)
     if(s.now_playing&&ready&&player&&player.getPlayerState&&curYt===s.now_playing.yt){
       try{const ps=player.getPlayerState();
-        if(ps===2||ps===-1||ps===5){
+        if(ps===-1||ps===5||(ps===2&&!manualPause)){
           player.playVideo();
           if(wantAudio){try{player.unMute();player.setVolume(100);}catch(e){}}
         }
