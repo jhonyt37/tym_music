@@ -25,7 +25,17 @@ dispositivo (la limitación de “solo localhost” era únicamente por servir d
 
 ## Persistencia en deploy
 El estado se guarda en `app/data.json`. En hosts con disco **efímero** (como Render free) ese archivo
-se reinicia en cada redeploy/reinicio — está bien para demo. Para conservarlo:
+se reinicia en cada redeploy/reinicio — está bien para demo, pero **no** para locales en modo saldo
+prepago (perderían el saldo real de sus clientes en cada redeploy).
+
+**Ya soportado sin código nuevo — backup automático a Upstash Redis (gratis):**
+1. Crea una DB gratuita en https://upstash.com (Redis).
+2. Copia el **REST URL** y el **REST Token**.
+3. En Render → Settings → Environment, agrega `UPSTASH_REDIS_REST_URL` y `UPSTASH_REDIS_REST_TOKEN`.
+4. Redeploy. Cada cobro fuerza un backup (máx. cada ~60s); al arrancar, si no hay `data.json` local
+   (redeploy en disco efímero), el servidor recupera el último estado desde Redis automáticamente.
+
+Otras opciones si se quiere disco persistente real:
 - Fly.io con **volumen**, o
 - Migrar `data.json` a una base de datos (Postgres free de Render/Railway/Supabase). La estructura
   `{version, venues:{...}}` ya está pensada para ese salto y para **multi-bar**.
