@@ -95,6 +95,7 @@
 const $=id=>document.getElementById(id);
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const hm=ts=>{if(!ts)return '—';const d=new Date(ts*1000);return d.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'});};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let VENMAP={};
 async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';}
 async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
@@ -116,11 +117,11 @@ async function loadTymLog(){
     all.slice(0,300).forEach(e=>{
       const r=document.createElement('div');r.className='row';
       const badge=MODE_LABEL[e.mode]||e.mode;
-      const vname=e.venue_name?`<span style="color:var(--pri);font-weight:700">${e.venue_name}</span> · `:'';
+      const vname=e.venue_name?`<span style="color:var(--pri);font-weight:700">${esc(e.venue_name)}</span> · `:'';
       r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${e.yt}/mqdefault.jpg" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none">
-        <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${e.title}</div>
-        <div style="color:var(--mut);font-size:12px">${vname}${e.table||'—'} · ${hm2(e.ts)}</div></div>
-        <span style="font-size:12px;padding:3px 8px;border-radius:999px;background:var(--bg2);border:1px solid var(--line);white-space:nowrap">${badge}</span>
+        <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.title)}</div>
+        <div style="color:var(--mut);font-size:12px">${vname}${esc(e.table||'—')} · ${hm2(e.ts)}</div></div>
+        <span style="font-size:12px;padding:3px 8px;border-radius:999px;background:var(--bg2);border:1px solid var(--line);white-space:nowrap">${esc(badge)}</span>
         ${e.charge>0?`<span style="font-size:12px;font-weight:800;color:var(--gold)">${cop(e.charge)}</span>`:''}`;
       box.appendChild(r);
     });
@@ -141,7 +142,7 @@ async function load(){
   const ent=Object.entries(d.facturacion_por_local||{});
   if(!ent.length)fl.innerHTML='<div class="empty">Sin facturación aún.</div>';
   ent.sort((a,b)=>b[1]-a[1]).forEach(([v,amt])=>{const e=document.createElement('div');e.className='grp';
-    e.innerHTML=`<span>${VENMAP[v]||v}</span><span class="gold" style="font-weight:800">${cop(amt)}</span>`;fl.appendChild(e);});
+    e.innerHTML=`<span>${esc(VENMAP[v]||v)}</span><span class="gold" style="font-weight:800">${cop(amt)}</span>`;fl.appendChild(e);});
   // horas pico
   const hv=d.hora_pico_ingresos||{};const max=Math.max(1,...Object.values(hv));
   const h=$('hours');h.innerHTML='';
@@ -152,7 +153,7 @@ async function load(){
   const ac=$('accts');const list=d.cuentas||[];ac.innerHTML='';
   if(!list.length)ac.innerHTML='<div class="empty">Sin cuentas aún.</div>';
   list.forEach(a=>{const row=document.createElement('div');row.className='row';
-    row.innerHTML=`<div class="info"><div class="t">${VENMAP[a.venue]||a.venue} · ${a.table}</div><div class="a">Abrió ${hm(a.opened_at)} · Cerró ${hm(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop(a.total)}</div>`;
+    row.innerHTML=`<div class="info"><div class="t">${esc(VENMAP[a.venue]||a.venue)} · ${esc(a.table)}</div><div class="a">Abrió ${hm(a.opened_at)} · Cerró ${hm(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop(a.total)}</div>`;
     ac.appendChild(row);});
   // locales registrados
   const vl=$('venueList');vl.innerHTML='';const venues=Object.entries(vmap);
@@ -162,7 +163,7 @@ async function load(){
   venues.forEach(([vid,info])=>{
     const own=owners.find(o=>o.venue===vid);
     const row=document.createElement('div');row.className='row';
-    row.innerHTML=`<div class="info"><div class="t">${info.name||info} <span class="tag" style="font-size:11px;background:rgba(59,130,246,.2);border-radius:4px;padding:2px 6px">${vid}</span></div><div class="a">👤 ${own?own.username:'—'} · ${info.tables||0} mesas · <a href="/?v=${vid}" target="_blank" class="small">Ver app</a></div></div>`;
+    row.innerHTML=`<div class="info"><div class="t">${esc(info.name||info)} <span class="tag" style="font-size:11px;background:rgba(59,130,246,.2);border-radius:4px;padding:2px 6px">${esc(vid)}</span></div><div class="a">👤 ${esc(own?own.username:'—')} · ${info.tables||0} mesas · <a href="/?v=${encodeURIComponent(vid)}" target="_blank" class="small">Ver app</a></div></div>`;
     vl.appendChild(row);
   });
   // Popula selector de local en historial

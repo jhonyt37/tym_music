@@ -219,6 +219,13 @@
         <input type="checkbox" id="fbShuffle" style="width:22px;height:22px">
       </label>
 
+      <p class="sec" style="margin-top:22px">Cobro (modo de pago)</p>
+      <label class="opt" style="margin-top:10px">
+        <div><b>Modo saldo prepago</b><div class="small">Para locales sin cuenta abierta (gimnasios, cafés de mostrador, barberías): cada cliente recarga saldo en vez de abrir cuenta de mesa.</div></div>
+        <input type="checkbox" id="prepaid" style="width:22px;height:22px">
+      </label>
+      <div class="pkgrow"><span class="small" style="flex:1">Monto mínimo para "pagar directo" (COP)</span><input class="field" id="minDirectPay" type="number" step="100"></div>
+
       <p class="sec" style="margin-top:22px">Límites y premium</p>
       <div class="pkgrow"><span class="small" style="flex:1">Canciones gratis por mesa</span><input class="field" id="freeN" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">...cada (minutos)</span><input class="field" id="freeWin" type="number"></div>
@@ -291,6 +298,17 @@
       <div class="small" style="margin-bottom:12px">Imprime y pega el código en cada mesa.</div>
       <div class="list" id="tables"></div>
       <button class="btn ghost block sm" style="margin-top:12px" onclick="addTable()">+ Agregar mesa</button>
+    </div>
+    <div class="card">
+      <p class="sec">Estaciones (opcional)</p>
+      <div class="small" style="margin-bottom:12px">Para locales con varios puestos/sillas/cajas en modo prepago (déjalo vacío si no aplica).</div>
+      <div class="list" id="stations"></div>
+      <div class="pkgrow"><input class="field" id="newStation" placeholder="Nombre de la estación" style="flex:1">
+        <button class="btn ghost sm" onclick="addStation()">+ Agregar</button></div>
+    </div>
+    <div class="card">
+      <p class="sec">Clientes con saldo (<span id="custCount">0</span>)</p>
+      <div class="list" id="custList"><div class="empty">Aún no hay clientes registrados.</div></div>
     </div>
   </div>
 </div>
@@ -467,6 +485,7 @@
 const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let editing=false, formLoaded=false, curTimer=null, packages=[], pass_obj={minutes:30,price:5000}, curTheme='azul';
 
 function showTab(id){
@@ -503,8 +522,8 @@ function readImg(f,cb){if(!f)return;const r=new FileReader();r.onload=()=>cb(r.r
 function renderLogoPrev(){
   const p=$('logoPrev');if(!p)return;p.innerHTML='';
   const t=tymLogoData||curSettings.tym_logo,v=venueLogoData||curSettings.venue_logo;
-  if(t)p.innerHTML+='<img src="'+t+'" style="height:34px">';
-  if(v)p.innerHTML+='<img src="'+v+'" style="height:38px;border-radius:6px">';
+  if(t){const im=document.createElement('img');im.src=t;im.style.height='34px';p.appendChild(im);}
+  if(v){const im=document.createElement('img');im.src=v;im.style.height='38px';im.style.borderRadius='6px';p.appendChild(im);}
 }
 document.addEventListener('focusin',e=>{if(e.target.matches('.field, input'))editing=true;});
 document.addEventListener('focusout',()=>setTimeout(()=>editing=false,500));
@@ -540,7 +559,7 @@ function adminSearch(){
       res.slice(0,8).forEach(s=>{
         const sub=[s.artist,s.length].filter(Boolean).join(' · ');
         const row=document.createElement('div');row.className='row';row.draggable=true;row.title='Arrastra a la cola para insertar en esa posición';
-        row.innerHTML=`<span class="drag-handle" style="opacity:.6">⠿</span><img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div>`;
+        row.innerHTML=`<span class="drag-handle" style="opacity:.6">⠿</span><img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc(sub)}</div></div>`;
         const addBtn=document.createElement('button');addBtn.className='btn green sm';addBtn.textContent='+ Cola';
         addBtn.onclick=()=>adminAddSong(s.yt,s.title,s.artist,s.length,null);
         row.appendChild(addBtn);
@@ -576,7 +595,7 @@ function renderTags(type){
   const box=$(type+'Tags');box.innerHTML='';
   list.forEach((w,i)=>{
     const t=document.createElement('span');t.className='kwtag '+type;
-    t.innerHTML=`${w}<button onclick="_kwRemove('${type}',${i})" title="Eliminar">×</button>`;
+    t.innerHTML=`${esc(w)}<button onclick="_kwRemove('${type}',${i})" title="Eliminar">×</button>`;
     box.appendChild(t);
   });
 }
@@ -599,6 +618,7 @@ async function save(){
     jump_multiplier:parseInt($('jumpMult').value||0),
     max_priority_queue_min:parseInt($('maxPrioMin').value||0),
     fallback_shuffle:$('fbShuffle').checked,
+    prepaid_mode:$('prepaid').checked, min_direct_pay:parseInt($('minDirectPay').value||0),
     theme:curTheme,
     blocked_keywords:[..._kwBlocked],
     allowed_keywords:[..._kwAllowed],
@@ -631,7 +651,7 @@ async function loadTables(){
   const box=$('tables');box.innerHTML='';
   t.forEach(m=>{
     const r=document.createElement('div');r.className='pinrow';
-    r.innerHTML=`<div class="name">${m.name}</div><div class="pin">${m.pin}</div>`;
+    r.innerHTML=`<div class="name">${esc(m.name)}</div><div class="pin">${esc(m.pin)}</div>`;
     const rg=document.createElement('button');rg.className='btn ghost sm';rg.textContent='↻';rg.title='Nuevo PIN';
     rg.onclick=async()=>{await post('/api/admin/tables',{action:'regen',name:m.name});loadTables();};
     const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';
@@ -650,7 +670,7 @@ $('curq').addEventListener('input',e=>{
     const box=$('curResults');box.innerHTML='';
     list.slice(0,8).forEach(s=>{
       const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<img class="mini" src="${img(s.yt)}"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div>`;
+      r.innerHTML=`<img class="mini" src="${img(s.yt)}"><div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist||'')}</div></div>`;
       const a=document.createElement('button');a.className='btn green sm';a.textContent='+ Añadir';
       a.onclick=async()=>{await post('/api/admin/curated',{action:'add',yt:s.yt,title:s.title,artist:s.artist,length:s.length});toast('Añadida');renderCurated(window._cur||[]);tick();};
       r.appendChild(a);box.appendChild(r);
@@ -662,10 +682,39 @@ function renderCurated(list){
   if(!list.length){box.innerHTML='<div class="empty">Aún no has añadido recomendadas.</div>';return;}
   list.forEach(c=>{
     const r=document.createElement('div');r.className='row';
-    r.innerHTML=`<img class="mini" src="${img(c.yt)}"><div class="info"><div class="t">${c.title}</div><div class="a">${c.artist||''}</div></div>`;
+    r.innerHTML=`<img class="mini" src="${img(c.yt)}"><div class="info"><div class="t">${esc(c.title)}</div><div class="a">${esc(c.artist||'')}</div></div>`;
     const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';
     x.onclick=async()=>{await post('/api/admin/curated',{action:'remove',yt:c.yt});tick();};
     r.appendChild(x);box.appendChild(r);
+  });
+}
+
+// Estaciones
+function renderStations(list){
+  const box=$('stations');box.innerHTML='';
+  if(!list.length){box.innerHTML='<div class="empty">Sin estaciones — el cliente no elige ninguna al registrarse.</div>';return;}
+  list.forEach(name=>{
+    const r=document.createElement('div');r.className='pinrow';
+    r.innerHTML=`<div class="name">${esc(name)}</div>`;
+    const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';
+    x.onclick=async()=>{await post('/api/admin/stations',{action:'remove',name});tick();};
+    r.appendChild(x);box.appendChild(r);
+  });
+}
+async function addStation(){
+  const n=$('newStation').value.trim();if(!n)return;
+  await post('/api/admin/stations',{action:'add',name:n});$('newStation').value='';tick();
+}
+// Clientes con saldo (modo prepago)
+function renderCustomers(list){
+  $('custCount').textContent=list.length;
+  const box=$('custList');box.innerHTML='';
+  if(!list.length){box.innerHTML='<div class="empty">Aún no hay clientes registrados.</div>';return;}
+  list.forEach(c=>{
+    const r=document.createElement('div');r.className='row';
+    const masked=(c.phone||'').slice(-4).padStart((c.phone||'').length,'*');
+    r.innerHTML=`<div class="info"><div class="t">${esc(c.name||'?')}</div><div class="a">${esc(masked)}</div></div><div class="chip pri">${cop(c.balance||0)}</div>`;
+    box.appendChild(r);
   });
 }
 
@@ -682,6 +731,8 @@ async function tick(){
       $('jumpMult').value=s.settings.jump_multiplier;
       $('maxPrioMin').value=s.settings.max_priority_queue_min||0;
       $('fbShuffle').checked=s.settings.fallback_shuffle!==false;
+      $('prepaid').checked=s.settings.prepaid_mode||false;
+      $('minDirectPay').value=s.settings.min_direct_pay||700;
       if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;
       if($('pollDurationSecs'))$('pollDurationSecs').value=s.settings.poll_duration_secs||120;
       if($('dueloDurationSecs'))$('dueloDurationSecs').value=s.settings.duelo_duration_secs||60;
@@ -716,9 +767,11 @@ async function tick(){
     const sl=$('subList');
     if(!subs.length)sl.innerHTML='<div class="empty">Aún no hay correos.</div>';
     else{sl.innerHTML='';subs.forEach(x=>{const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<div class="info"><div class="t">${x.email}</div><div class="a">${x.table||''}</div></div>`;sl.appendChild(r);});}
+      r.innerHTML=`<div class="info"><div class="t">${esc(x.email)}</div><div class="a">${esc(x.table||'')}</div></div>`;sl.appendChild(r);});}
 
     renderCurated(s.curated||[]);
+    renderStations(s.stations||[]);
+    renderCustomers(s.customers||[]);
 
     // Asistencia
     const assists=s.assists||[];$('acount').textContent=assists.length;
@@ -728,34 +781,41 @@ async function tick(){
       assists.forEach(a=>{
         const r=document.createElement('div');r.className='row';r.style.borderLeft='4px solid #dc2626';r.style.paddingLeft='10px';
         const ts=new Date(a.ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/Bogota'});
-        r.innerHTML=`<div class="info"><div class="t">${a.table}</div><div class="a">${ts}</div></div>`;
+        r.innerHTML=`<div class="info"><div class="t">${esc(a.table)}</div><div class="a">${esc(ts)}</div></div>`;
         const b=document.createElement('button');b.className='btn green sm';b.textContent='✓ Resolver';b.onclick=()=>resolveAssist(a.id);
         r.appendChild(b);al.appendChild(r);
       });
     }else{ac.style.display='none';}
 
     // Ledger / cobros
-    $('total').textContent=cop(s.ledger_total);
-    const byT={};(s.ledger||[]).forEach(l=>{byT[l.table]=(byT[l.table]||0)+l.amount;});
-    const bt=$('byTable');bt.innerHTML='';
-    Object.entries(byT).forEach(([t,v])=>{
-      const d=document.createElement('div');d.className='grp';
-      d.innerHTML=`<span style="flex:1">${t}</span><span class="price" style="color:var(--gold)">${cop(v)}</span>`;
-      const b=document.createElement('button');b.className='btn red sm';b.textContent='Cerrar cuenta';b.style.marginLeft='10px';
-      b.onclick=()=>closeTable(t,v);d.appendChild(b);bt.appendChild(d);
-    });
-    const L=$('ledger');const lg=s.ledger||[];
-    if(!lg.length)L.innerHTML='<div class="empty">Sin cobros aún.</div>';
-    else{L.innerHTML='';lg.forEach(x=>{const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<div class="info"><div class="t">${x.table} · <span class="small">${x.kind}</span></div><div class="a">${x.title}</div></div><div class="chip pri">${cop(x.amount)}</div>`;
-      L.appendChild(r);});}
+    const bt=$('byTable'),L=$('ledger');
+    if(s.settings.prepaid_mode){
+      $('total').textContent=cop(0);
+      bt.innerHTML='<div class="empty">Este local usa saldo prepago — revisa "Informes del local" para ver ingresos.</div>';
+      L.innerHTML='<div class="empty">Este local usa saldo prepago — revisa "Informes del local" para ver ingresos.</div>';
+    }else{
+      $('total').textContent=cop(s.ledger_total);
+      const byT={};(s.ledger||[]).forEach(l=>{byT[l.table]=(byT[l.table]||0)+l.amount;});
+      bt.innerHTML='';
+      Object.entries(byT).forEach(([t,v])=>{
+        const d=document.createElement('div');d.className='grp';
+        d.innerHTML=`<span style="flex:1">${esc(t)}</span><span class="price" style="color:var(--gold)">${cop(v)}</span>`;
+        const b=document.createElement('button');b.className='btn red sm';b.textContent='Cerrar cuenta';b.style.marginLeft='10px';
+        b.onclick=()=>closeTable(t,v);d.appendChild(b);bt.appendChild(d);
+      });
+      const lg=s.ledger||[];
+      if(!lg.length)L.innerHTML='<div class="empty">Sin cobros aún.</div>';
+      else{L.innerHTML='';lg.forEach(x=>{const r=document.createElement('div');r.className='row';
+        r.innerHTML=`<div class="info"><div class="t">${esc(x.table)} · <span class="small">${esc(x.kind)}</span></div><div class="a">${esc(x.title)}</div></div><div class="chip pri">${cop(x.amount)}</div>`;
+        L.appendChild(r);});}
+    }
 
     // Pendientes de aprobación
     const P=$('pending');const pend=s.pending||[];$('pcount').textContent=pend.length;
     if(!pend.length)P.innerHTML='<div class="empty">No hay pedidos pendientes.</div>';
     else{P.innerHTML='';pend.forEach(it=>{
       const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title} ${it.priority?'<span class="chip pri">⚡</span>':''}</div><div class="a">${it.table}</div></div>`;
+      r.innerHTML=`<img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${esc(it.title)} ${it.priority?'<span class="chip pri">⚡</span>':''}</div><div class="a">${esc(it.table)}</div></div>`;
       const ok=document.createElement('button');ok.className='btn green sm';ok.textContent='Aprobar';ok.onclick=()=>approve(it.id);
       const no=document.createElement('button');no.className='btn red sm';no.textContent='✕';no.onclick=()=>reject(it.id);
       r.appendChild(ok);r.appendChild(no);P.appendChild(r);
@@ -773,7 +833,7 @@ async function tick(){
     Q.innerHTML='';const np=s.now_playing;
     if(np){
       const r=document.createElement('div');r.className='row';r.style.borderColor='var(--pri)';
-      r.innerHTML=`<span class="pulse"></span><img class="mini" src="${img(np.yt)}"><div class="info"><div class="t">${np.title}</div><div class="a">${np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+np.table)}</div></div>`;
+      r.innerHTML=`<span class="pulse"></span><img class="mini" src="${img(np.yt)}"><div class="info"><div class="t">${esc(np.title)}</div><div class="a">${np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table))}</div></div>`;
       const sk=document.createElement('button');sk.className='btn ghost sm';sk.textContent='⏭';sk.onclick=skip;r.appendChild(sk);Q.appendChild(r);
     }
     const q=s.queue||[];
@@ -781,7 +841,7 @@ async function tick(){
     if(!q.length&&!np)Q.innerHTML='<div class="empty">Nada en cola.</div>';
     q.forEach((it,i)=>{
       const r=document.createElement('div');r.className='row';r.draggable=true;
-      r.innerHTML=`<span class="drag-handle" title="Arrastra para reordenar">⠿</span><div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}</div><div class="a">${it.table}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
+      r.innerHTML=`<span class="drag-handle" title="Arrastra para reordenar">⠿</span><div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.table)}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
       const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';rm.onclick=()=>remove(it.id);r.appendChild(rm);
       // Drag events para reorder
       r.addEventListener('dragstart',e=>{
@@ -819,14 +879,14 @@ async function tick(){
         anCard.style.display='';anList.innerHTML='';
         if(np&&!np.fallback){
           const d=document.createElement('div');d.className='grp';
-          d.innerHTML=`<span style="font-size:13px">🎵 Sonando ahora</span><span style="font-weight:700;color:var(--pri)">${np.table}</span>`;
+          d.innerHTML=`<span style="font-size:13px">🎵 Sonando ahora</span><span style="font-weight:700;color:var(--pri)">${esc(np.table)}</span>`;
           anList.appendChild(d);
         }
         activeTbls.forEach(t=>{
           const qc=q.filter(x=>x.table===t).length,pc=(s.pending||[]).filter(x=>x.table===t).length;
           const d=document.createElement('div');d.className='grp';
           const parts=[];if(qc)parts.push(qc+' en cola');if(pc)parts.push(pc+' pendiente'+(pc>1?'s':''));
-          d.innerHTML=`<span style="flex:1;font-weight:600">${t}</span><span class="small" style="color:var(--mut)">${parts.join(' · ')}</span>`;
+          d.innerHTML=`<span style="flex:1;font-weight:600">${esc(t)}</span><span class="small" style="color:var(--mut)">${parts.join(' · ')}</span>`;
           anList.appendChild(d);
         });
         if(s.poll&&s.poll.active){const d=document.createElement('div');d.className='grp';d.innerHTML=`<span>🗳️ Votación activa</span><span class="small" style="color:var(--pri)">${Object.values(s.poll.votes||{}).reduce((a,n)=>a+n,0)} votos</span>`;anList.appendChild(d);}
@@ -841,7 +901,7 @@ async function tick(){
       hist.forEach(h=>{
         const r=document.createElement('div');r.className='row';
         const exc=reptExc.has(h.yt);
-        r.innerHTML=`<img class="mini" src="${img(h.yt)}"><div class="info"><div class="t">${h.title}</div><div class="a small">${h.artist||''}</div></div>`;
+        r.innerHTML=`<img class="mini" src="${img(h.yt)}"><div class="info"><div class="t">${esc(h.title)}</div><div class="a small">${esc(h.artist||'')}</div></div>`;
         const rb=document.createElement('button');rb.className='btn sm';rb.style.background=exc?'var(--green)':'var(--bg2)';rb.style.border='1px solid var(--line)';rb.style.color=exc?'#fff':'var(--mut)';rb.textContent=exc?'🔁 Repetir OK':'🔁 Bloquear';rb.title='Permitir/bloquear repetición';
         rb.onclick=async()=>{const j=await post('/api/admin/allow_repeat',{yt:h.yt});toast(j.allowed?'Repetición permitida':'Repetición bloqueada');tick();};
         r.appendChild(rb);HL.appendChild(r);
@@ -898,7 +958,7 @@ async function loadAnalytics(){
     if(!songs.length)sbox.innerHTML='<div class="empty">Sin pedidos aún.</div>';
     songs.forEach((s,i)=>{
       const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<div class="pos">${i+1}</div><div class="info"><div class="t">${s.title}</div></div><div class="chip">${s.count} pedido${s.count!==1?'s':''}</div>`;
+      r.innerHTML=`<div class="pos">${i+1}</div><div class="info"><div class="t">${esc(s.title)}</div></div><div class="chip">${s.count} pedido${s.count!==1?'s':''}</div>`;
       sbox.appendChild(r);
     });
     // Cuentas recientes
@@ -907,7 +967,7 @@ async function loadAnalytics(){
     if(!accts.length)abox.innerHTML='<div class="empty">Sin cuentas aún.</div>';
     accts.forEach(a=>{
       const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<div class="info"><div class="t">${a.table}</div><div class="a">Abrió ${hm2(a.opened_at)} · Cerró ${hm2(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop2(a.total)}</div>`;
+      r.innerHTML=`<div class="info"><div class="t">${esc(a.table)}</div><div class="a">Abrió ${hm2(a.opened_at)} · Cerró ${hm2(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop2(a.total)}</div>`;
       abox.appendChild(r);
     });
     // ---- Dashboard transaccional de hoy ----
@@ -932,7 +992,7 @@ async function loadAnalytics(){
       else{tpbox.innerHTML='';tables.forEach((t,i)=>{
         const r=document.createElement('div');r.className='row';
         const medals=['🥇','🥈','🥉'];
-        r.innerHTML=`<div class="pos">${medals[i]||i+1}</div><div class="info"><div class="t">${t.table}</div><div class="a">${t.songs} canción${t.songs!==1?'es':''} prioritaria${t.songs!==1?'s':''}</div></div><div class="chip pri">${cop2(t.total)}</div>`;
+        r.innerHTML=`<div class="pos">${medals[i]||i+1}</div><div class="info"><div class="t">${esc(t.table)}</div><div class="a">${t.songs} canción${t.songs!==1?'es':''} prioritaria${t.songs!==1?'s':''}</div></div><div class="chip pri">${cop2(t.total)}</div>`;
         tpbox.appendChild(r);
       });}
     }
@@ -972,10 +1032,10 @@ async function loadHistory(days){
       const price=e.charge>0?`<span class="chip pri" style="margin-left:4px">${cop(e.charge)}</span>`:'';
       r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${e.yt}/mqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${e.yt}/hqdefault.jpg';this.onerror=null">
         <div class="info">
-          <div class="t">${e.title}</div>
-          <div class="a">${e.artist?e.artist+' · ':''}<b>${e.table||'—'}</b> · ${hm3(e.ts)}</div>
+          <div class="t">${esc(e.title)}</div>
+          <div class="a">${e.artist?esc(e.artist)+' · ':''}<b>${esc(e.table||'—')}</b> · ${hm3(e.ts)}</div>
         </div>
-        <span class="chip" style="white-space:nowrap">${badge}</span>${price}`;
+        <span class="chip" style="white-space:nowrap">${esc(badge)}</span>${price}`;
       box.appendChild(r);
     });
   }catch(err){$('histList').innerHTML='<div class="empty">Error cargando historial.</div>';}
@@ -1001,7 +1061,7 @@ function pollAdminSearch(){
       if(!res||!res.length){box.innerHTML='<div class="empty">Sin resultados.</div>';return;}
       res.slice(0,6).forEach(s=>{
         const r=document.createElement('div');r.className='row';
-        r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${s.yt}/mqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div>`;
+        r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${s.yt}/mqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist||'')}</div></div>`;
         const addBtn=document.createElement('button');addBtn.className='btn green sm';addBtn.textContent='+ Agregar';
         addBtn.onclick=()=>{
           if(_pollSongs.length>=3){toast('Máximo 3 opciones');return;}
@@ -1021,7 +1081,7 @@ function renderPollSelected(){
   if(!_pollSongs.length){box.innerHTML='<div class="small" style="color:var(--mut)">Sin canciones seleccionadas aún.</div>';return;}
   _pollSongs.forEach((s,i)=>{
     const r=document.createElement('div');r.className='row';
-    r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${s.yt}/mqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist}</div></div>`;
+    r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${s.yt}/mqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist)}</div></div>`;
     const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';
     rm.onclick=()=>{_pollSongs.splice(i,1);renderPollSelected();};
     r.appendChild(rm);box.appendChild(r);
@@ -1059,7 +1119,7 @@ function dueloSearch(side){
       results.innerHTML='';
       (d.results||[]).slice(0,4).forEach(s=>{
         const r=document.createElement('div');r.className='row';r.style.cursor='pointer';
-        r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${s.yt}/mqdefault.jpg" onerror="this.onerror=null;this.removeAttribute('src')"><div class="info"><div class="t">${s.title}</div><div class="a">${s.artist||''}</div></div>`;
+        r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${s.yt}/mqdefault.jpg" onerror="this.onerror=null;this.removeAttribute('src')"><div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist||'')}</div></div>`;
         r.onclick=()=>{
           if(side==='A')_dueloA={yt:s.yt,title:s.title,artist:s.artist||'',label:'Equipo A'};
           else _dueloB={yt:s.yt,title:s.title,artist:s.artist||'',label:'Equipo B'};
@@ -1074,7 +1134,7 @@ function dueloSearch(side){
 function renderDueloSelected(){
   const mkCard=(team,side)=>{
     if(!team)return `<div class="small" style="color:var(--mut)">Sin selección</div>`;
-    return `<div class="row" style="background:var(--bg2);border-radius:10px;padding:8px 12px"><img class="mini" src="https://i.ytimg.com/vi/${team.yt}/mqdefault.jpg" onerror="this.onerror=null;this.removeAttribute('src')"><div class="info"><div class="t">${team.title}</div><div class="a">${team.artist}</div></div><button class="btn ghost sm" onclick="${side==='A'?'_dueloA=null':'_dueloB=null'};renderDueloSelected()" style="margin-left:auto">✕</button></div>`;
+    return `<div class="row" style="background:var(--bg2);border-radius:10px;padding:8px 12px"><img class="mini" src="https://i.ytimg.com/vi/${team.yt}/mqdefault.jpg" onerror="this.onerror=null;this.removeAttribute('src')"><div class="info"><div class="t">${esc(team.title)}</div><div class="a">${esc(team.artist)}</div></div><button class="btn ghost sm" onclick="${side==='A'?'_dueloA=null':'_dueloB=null'};renderDueloSelected()" style="margin-left:auto">✕</button></div>`;
   };
   $('dueloSelectedA').innerHTML='<div class="small" style="color:#f87171;font-weight:700;margin-bottom:4px">⚔️ Equipo A</div>'+mkCard(_dueloA,'A');
   $('dueloSelectedB').innerHTML='<div class="small" style="color:#60a5fa;font-weight:700;margin-bottom:4px">⚔️ Equipo B</div>'+mkCard(_dueloB,'B');
@@ -1108,7 +1168,7 @@ function renderSocialAdmin(s){
     (p.options||[]).forEach(opt=>{
       const count=(p.votes&&p.votes[opt.yt])||0;
       const pct=totalV>0?Math.round(100*count/totalV):0;
-      html+=`<div class="row" style="flex-wrap:wrap;margin-bottom:4px"><div class="info" style="flex:1"><div class="t">${opt.title}</div></div><span class="chip">${count} votos (${pct}%)</span><div style="flex-basis:100%;height:5px;background:var(--line);border-radius:3px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--pri);border-radius:3px;transition:width .4s"></div></div></div>`;
+      html+=`<div class="row" style="flex-wrap:wrap;margin-bottom:4px"><div class="info" style="flex:1"><div class="t">${esc(opt.title)}</div></div><span class="chip">${count} votos (${pct}%)</span><div style="flex-basis:100%;height:5px;background:var(--line);border-radius:3px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--pri);border-radius:3px;transition:width .4s"></div></div></div>`;
     });
     statusBox.innerHTML=html;
   }else{
@@ -1131,7 +1191,7 @@ function renderSocialAdmin(s){
       dhtml+=`<div class="small" style="color:var(--mut);margin-bottom:6px">Duelo activo — ${totalDV} voto${totalDV!==1?'s':''}</div>`;
       (dd.teams||[]).forEach((team,idx)=>{
         const count=(dd.votes&&dd.votes[team.yt])||0;const pct=totalDV>0?Math.round(100*count/totalDV):0;
-        dhtml+=`<div class="row" style="flex-wrap:wrap;margin-bottom:4px"><div class="info" style="flex:1"><div class="t">${['🔴','🔵'][idx]||''} ${team.title}</div></div><span class="chip">${count} votos (${pct}%)</span><div style="flex-basis:100%;height:5px;background:var(--line);border-radius:3px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:#f59e0b;border-radius:3px;transition:width .4s"></div></div></div>`;
+        dhtml+=`<div class="row" style="flex-wrap:wrap;margin-bottom:4px"><div class="info" style="flex:1"><div class="t">${['🔴','🔵'][idx]||''} ${esc(team.title)}</div></div><span class="chip">${count} votos (${pct}%)</span><div style="flex-basis:100%;height:5px;background:var(--line);border-radius:3px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:#f59e0b;border-radius:3px;transition:width .4s"></div></div></div>`;
       });
       dueloStatusBox.innerHTML=dhtml;
     }else{
@@ -1139,7 +1199,7 @@ function renderSocialAdmin(s){
       if(!_dueloA&&!_dueloB)renderDueloSelected();
       if(dd&&!dd.active&&dd.winner_yt){
         const winner=(dd.teams||[]).find(t=>t.yt===dd.winner_yt);
-        dueloStatusBox.innerHTML=`<div class="small" style="color:var(--mut)">Duelo cerrado — Ganó: <b>${winner?winner.title:'?'}</b> 🏆</div>`;
+        dueloStatusBox.innerHTML=`<div class="small" style="color:var(--mut)">Duelo cerrado — Ganó: <b>${esc(winner?winner.title:'?')}</b> 🏆</div>`;
       }else dueloStatusBox.innerHTML='';
     }
   }
@@ -1165,7 +1225,7 @@ function renderSocialAdmin(s){
   deds.forEach(dd=>{
     const d=document.createElement('div');d.className='row';
     const ts=new Date(dd.ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:'America/Bogota'});
-    d.innerHTML=`<div class="info" style="flex:1"><div class="t" style="font-size:13px">"${dd.message}"</div><div class="a">${dd.from_table} → ${dd.to_table} · ${ts}${dd.shown_tv?' · ✓ TV':''}</div></div><button class="btn sm red" onclick="deleteDedica(${dd.id})">✕</button>`;
+    d.innerHTML=`<div class="info" style="flex:1"><div class="t" style="font-size:13px">"${esc(dd.message)}"</div><div class="a">${esc(dd.from_table)} → ${esc(dd.to_table)} · ${ts}${dd.shown_tv?' · ✓ TV':''}</div></div><button class="btn sm red" onclick="deleteDedica(${dd.id})">✕</button>`;
     dbox.appendChild(d);
   });
 }
@@ -1185,11 +1245,11 @@ function renderScheduleSlots(){
     const row=document.createElement('div');
     row.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap';
     const genOpts=GENRES_LIST.map(g=>`<option value="${g}"${sl.genre===g?' selected':''}>${g}</option>`).join('');
-    row.innerHTML=`<input type="time" class="field" style="margin:0;width:110px;padding:6px 8px" value="${sl.from||''}" onchange="_schedule[${i}].from=this.value">
+    row.innerHTML=`<input type="time" class="field" style="margin:0;width:110px;padding:6px 8px" value="${esc(sl.from||'')}" onchange="_schedule[${i}].from=this.value">
       <span style="color:var(--mut);font-size:12px">→</span>
-      <input type="time" class="field" style="margin:0;width:110px;padding:6px 8px" value="${sl.to||''}" onchange="_schedule[${i}].to=this.value">
+      <input type="time" class="field" style="margin:0;width:110px;padding:6px 8px" value="${esc(sl.to||'')}" onchange="_schedule[${i}].to=this.value">
       <select class="field" style="margin:0;flex:1;min-width:120px;padding:6px 8px" onchange="_schedule[${i}].genre=this.value">${genOpts}</select>
-      <input class="field" style="margin:0;width:110px;padding:6px 8px" placeholder="Ej: Happy hour" value="${sl.label||''}" onchange="_schedule[${i}].label=this.value">
+      <input class="field" style="margin:0;width:110px;padding:6px 8px" placeholder="Ej: Happy hour" value="${esc(sl.label||'')}" onchange="_schedule[${i}].label=this.value">
       <button class="btn red sm" onclick="_schedule.splice(${i},1);renderScheduleSlots()">✕</button>`;
     box.appendChild(row);
   });
@@ -1224,8 +1284,8 @@ function renderAnnouncements(list){
   list.forEach(a=>{
     const r=document.createElement('div');
     r.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:8px 10px;border-radius:10px;background:var(--bg2);border:1px solid var(--line)';
-    r.innerHTML=`<div style="width:10px;height:10px;border-radius:50%;background:${a.color};flex-shrink:0"></div>
-      <div style="flex:1;font-size:13px;font-weight:600">${a.text}</div>
+    r.innerHTML=`<div style="width:10px;height:10px;border-radius:50%;background:${esc(a.color)};flex-shrink:0"></div>
+      <div style="flex:1;font-size:13px;font-weight:600">${esc(a.text)}</div>
       <button class="btn sm" style="background:${a.active?'var(--pri)':'var(--bg2)'};color:${a.active?'#fff':'var(--mut)'}" onclick="toggleAnnouncement(${a.id})">${a.active?'● Activo':'○ Pausado'}</button>
       <button class="btn red sm" onclick="deleteAnnouncement(${a.id})">✕</button>`;
     box.appendChild(r);

@@ -20,7 +20,7 @@ except ImportError:
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
-VERSION = "0.0.8-demo"
+VERSION = "0.0.9-demo"
 PORT = int(os.environ.get("PORT", 8000))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 # Upstash Redis (backup remoto: evita perder datos en Render/hosts con disco efímero)
@@ -216,8 +216,12 @@ def make_venue(name):
             "poll_duration_secs": 120,     # duración del timer de la votación (segundos)
             "duelo_duration_secs": 60,     # duración del timer del duelo (segundos)
             "schedule": [],                # [{from:"HH:MM", to:"HH:MM", genre:str, label:str}]
+            "prepaid_mode": False,     # ON: saldo prepago por cliente en vez de cuenta de mesa
+            "min_direct_pay": 700,     # piso para pago directo sin wallet (evita que la pasarela se coma el monto)
         },
         "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4} for i in range(1, 6)],  # PINs 1111..5555
+        "stations": [],   # ["Caja 1","Silla 2",...] — opcional, sin PIN; vacío = no aplica (modo prepago)
+        "customers": {},  # celular normalizado -> {name, email, phone, balance, wallet_history}
         "sessions": {},
         "now_playing": None,
         "items": [],
@@ -294,6 +298,45 @@ def log_charge(table, token, amount, kind, title):
         a["total"] += amount
     # Cualquier cobro fuerza un backup a Redis en el próximo autosave (~3s): nunca se pierde dinero
     _redis_last_save[0] = 0
+
+def log_wallet_revenue(customer, sess, amount, kind, title, event_type):
+    """Dinero real que ENTRA en modo prepago (recarga o pago directo). No toca STATE['ledger']
+    (no es deuda de mesa) — pero sí TYM['events'], de donde sale toda la analítica de facturación.
+    Vive en el registro DURABLE del cliente (por celular), no en la sesión anónima del navegador."""
+    TYM["events"].append({"venue": CUR_VID, "table": sess["table"], "account": customer["phone"], "ts": time.time(),
+                          "ev": "charge", "amount": amount, "kind": kind, "title": title, "via": event_type})
+    hist = customer.setdefault("wallet_history", [])
+    hist.insert(0, {"title": title, "amount": amount, "kind": kind, "ts": time.time(), "type": event_type})
+    customer["wallet_history"] = hist[:20]
+    _redis_last_save[0] = 0
+
+def wallet_spend(customer, amount, kind, title):
+    """Descuenta saldo ya recargado. No es ingreso nuevo (ya se contó al recargar)."""
+    customer["balance"] = customer.get("balance", 0) - amount
+    hist = customer.setdefault("wallet_history", [])
+    hist.insert(0, {"title": title, "amount": -amount, "kind": kind, "ts": time.time(), "type": "spend"})
+    customer["wallet_history"] = hist[:20]
+
+def try_charge_prepaid(sess, amount, kind, title, pay_method, min_direct_pay):
+    """Unico punto de gateo para buy/request/boost/jump en modo prepago.
+    Devuelve (ok, via, error_dict); no muta nada si ok=False."""
+    if amount <= 0:
+        return True, None, None
+    customer = get_customer(sess)
+    if not customer:
+        return False, None, {"error": "Este local cambió a modo prepago. Regístrate para continuar.",
+                              "needs_registration": True}
+    if pay_method == "direct":
+        if amount < min_direct_pay:
+            return False, None, {"error": f"Pago directo solo desde ${min_direct_pay}. Recarga tu saldo para este monto."}
+        log_wallet_revenue(customer, sess, amount, kind, title, "direct")
+        return True, "direct", None
+    bal = customer.get("balance", 0)
+    if bal < amount:
+        return False, None, {"error": "Saldo insuficiente", "insufficient_balance": True,
+                              "need": amount, "balance": bal, "min_direct_pay": min_direct_pay}
+    wallet_spend(customer, amount, kind, title)
+    return True, "wallet", None
 
 def close_accounts(vid, table):
     total = 0
@@ -392,6 +435,8 @@ def _parse_len(t):
         return s
     except Exception:
         return 0
+
+YT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 def yt_id(text):
     text = (text or "").strip()
@@ -501,6 +546,13 @@ def yt_search(q, limit=12):
 
 def get_session(token):
     return STATE["sessions"].get(token) if token else None
+
+def get_customer(sess):
+    phone = sess and sess.get("phone")
+    return STATE["customers"].get(phone) if phone else None
+
+def customer_label(name, station):
+    return f"{name} · {station}" if station else name
 
 def find_table_by_pin(pin):
     pin = (pin or "").strip()
@@ -943,12 +995,13 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "venue_logo", "max_priority_queue_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
-                                       "schedule")},
+                                       "schedule", "prepaid_mode", "min_direct_pay")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
         "announcements": [a for a in STATE.get("announcements", []) if a.get("active")],
         "tables": [t["name"] for t in STATE["tables"]],
+        "stations": STATE.get("stations", []),
         "now_playing": np_pub,
         "jump_available": bool(np) and STATE.get("jump_used_for") != np["id"],
         "jump_price": s["price_priority"] * s.get("jump_multiplier", 3),
@@ -987,6 +1040,10 @@ def public_state(token=None, admin=False, mark_dedica=None):
         mine = [l for l in STATE["ledger"] if l["table"] == tbl]
         out["my_tab"] = list(reversed(mine))[:20]
         out["my_tab_total"] = sum(l["amount"] for l in mine)
+        if STATE["settings"].get("prepaid_mode"):
+            customer = get_customer(sess)
+            out["wallet_balance"] = customer.get("balance", 0) if customer else 0
+            out["wallet_history"] = customer.get("wallet_history", [])[:20] if customer else []
         # total de reacciones a las canciones que pidió esta sesión (para avisar al autor)
         likes = 0
         for it in (([np] if np else []) + STATE["items"] + STATE["history"]):
@@ -1012,6 +1069,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         out["repeat_exceptions"] = list(STATE.get("repeat_exceptions", set()))
         out["all_dedicas"] = list(reversed(STATE.get("dedicas", [])))[:30]
         out["all_announcements"] = list(reversed(STATE.get("announcements", [])))
+        out["customers"] = sorted(STATE["customers"].values(), key=lambda c: -c.get("balance", 0))[:100]
     return out
 
 def _pad(lst, n=6, genre=None):
@@ -1026,7 +1084,10 @@ def _pad(lst, n=6, genre=None):
             lst.append({"yt": c["yt"], "title": c["title"], "artist": c["artist"]})
     return lst
 
-def recommendations():
+def recommendations_snapshot():
+    """Bajo LOCK: solo lee STATE, sin I/O de red (rápido) — el resto sigue en
+    recommendations_finish(), que corre FUERA del lock global para no congelar
+    a los demás locales mientras se espera la respuesta de YouTube."""
     s = STATE["settings"]
     counts = sorted(STATE["req_counts"].values(), key=lambda x: -x["count"])[:10]
     mas = [{"yt": c["yt"], "title": c["title"], "artist": c["artist"]} for c in counts]
@@ -1040,9 +1101,13 @@ def recommendations():
         if not h.get("fallback") and h.get("yt") and h["yt"] not in seen:
             seen.add(h["yt"])
             populares.append({"yt": h["yt"], "title": h["title"], "artist": h.get("artist", "")})
+    top_artists = list({c["artist"] for c in counts if c.get("artist")})[:2]
+    return mas, local, populares, seen, top_artists, s["genre"]
+
+def recommendations_finish(mas, local, populares, seen, top_artists, genre):
+    """Fuera del LOCK: llamadas de red a YouTube (lentas)."""
     # Complementar con artistas más pedidos si hay pocas canciones en historial
     if len(populares) < 6:
-        top_artists = list({c["artist"] for c in counts if c.get("artist")})[:2]
         for art in top_artists:
             for r in yt_search(art, 5):
                 if r["yt"] not in seen:
@@ -1050,9 +1115,9 @@ def recommendations():
                     populares.append({"yt": r["yt"], "title": r["title"], "artist": r["artist"]})
     if not populares:
         populares = [{"yt": r["yt"], "title": r["title"], "artist": r["artist"]} for r in yt_search("musica popular colombia", 12)]
-    genero = [{"yt": r["yt"], "title": r["title"], "artist": r["artist"]} for r in yt_search(f"los mejores {s['genre']}", 12)]
+    genero = [{"yt": r["yt"], "title": r["title"], "artist": r["artist"]} for r in yt_search(f"los mejores {genre}", 12)]
     return {"mas_pedido": _pad(mas), "del_local": local,
-            "populares": _pad(populares), "genero": _pad(genero, genre=s["genre"])}
+            "populares": _pad(populares), "genero": _pad(genero, genre=genre)}
 
 # =================== HTTP ===================
 class H(BaseHTTPRequestHandler):
@@ -1162,7 +1227,8 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/recommendations":
             with LOCK:
                 self.set_venue(self.resolve_vid())
-                return self._send(200, recommendations())
+                snap = recommendations_snapshot()
+            return self._send(200, recommendations_finish(*snap))
         if path == "/api/state":
             admin = self._q("admin") == "1"
             with LOCK:
@@ -1282,9 +1348,10 @@ class H(BaseHTTPRequestHandler):
                 return self._send(401, {"error": "Usuario o contraseña incorrectos"})
             tk = gen_token(); AUTH[tk] = o["venue"]
             body = json.dumps({"ok": True, "venue": o["venue"]}).encode("utf-8")
+            secure_flag = "; Secure" if PUBLIC_URL.startswith("https://") else ""
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Set-Cookie", f"tymauth={tk}; Path=/; SameSite=Lax; Max-Age=86400")
+            self.send_header("Set-Cookie", f"tymauth={tk}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400{secure_flag}")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers(); self.wfile.write(body); return
         if path == "/api/logout":
@@ -1293,7 +1360,7 @@ class H(BaseHTTPRequestHandler):
 
         # ---- Endpoints que requieren dueño logueado ----
         ADMIN_PATHS = ("/api/advance", "/api/progress", "/api/admin/approve", "/api/admin/reject",
-                       "/api/admin/remove", "/api/admin/settings", "/api/admin/tables",
+                       "/api/admin/remove", "/api/admin/settings", "/api/admin/tables", "/api/admin/stations",
                        "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset",
                        "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move", "/api/admin/reorder",
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
@@ -1306,6 +1373,15 @@ class H(BaseHTTPRequestHandler):
             if not av or av not in VENUES:
                 return self._send(401, {"error": "Inicia sesión"})
             vid = av
+        # Resolver el link de YouTube (llamada de red bloqueante) ANTES de tomar el LOCK
+        # global: si no, un oembed lento congela TODOS los locales mientras dura la
+        # petición. Requiere un token de sesión ya conocido (igual que antes) para no
+        # regalar la llamada de red a quien mande peticiones sin sesión válida.
+        if path == "/api/request" and not d.get("yt") and d.get("link") and d.get("token") in TOKENS:
+            pre_yt = yt_id(d["link"])
+            if pre_yt:
+                pre_title, pre_artist = yt_title(pre_yt)
+                d = dict(d); d["yt"] = pre_yt; d["title"] = pre_title; d["artist"] = pre_artist or ""
         with LOCK:
             self.set_venue(vid)
             # ---- Sesion de mesa ----
@@ -1316,7 +1392,8 @@ class H(BaseHTTPRequestHandler):
                 if not table:
                     return self._send(400, {"error": "Código de mesa incorrecto"})
                 token = gen_token()
-                STATE["sessions"][token] = {"table": table, "credits": 0, "pass_until": 0, "created": time.time()}
+                STATE["sessions"][token] = {"table": table, "credits": 0, "pass_until": 0,
+                                            "created": time.time(), "phone": None}
                 TOKENS[token] = CUR_VID
                 open_account(token, CUR_VID, table)   # nueva cuenta de mesa (analítica)
                 # Cuenta existente de la mesa (cobros pendientes de sesiones anteriores no cerradas)
@@ -1329,6 +1406,61 @@ class H(BaseHTTPRequestHandler):
                                         "existing_tab": existing_tab,
                                         "session": {"table": table, "credits": 0, "pass_until": 0}})
 
+            # ---- Registro por celular (reemplaza el PIN en modo prepago) ----
+            if path == "/api/register":
+                if not _rate_ok(self.client_address[0], "session"):
+                    return self._send(429, {"error": "Demasiados intentos. Espera un momento."})
+                if not STATE["settings"].get("prepaid_mode"):
+                    return self._send(400, {"error": "Este local no usa registro por celular."})
+                phone = re.sub(r"\D", "", d.get("phone") or "")
+                name = str(d.get("name") or "").strip()[:40]
+                email = str(d.get("email") or "").strip()[:120]
+                station = str(d.get("station") or "").strip()[:40]
+                if len(phone) < 7 or not name:
+                    return self._send(400, {"error": "Ingresa tu nombre y un celular válido."})
+                stations = STATE.get("stations", [])
+                if stations and station not in stations:
+                    return self._send(400, {"error": "Selecciona una estación válida."})
+                existing = STATE["customers"].get(phone)
+                recovered = bool(existing)
+                if not existing:
+                    STATE["customers"][phone] = {"name": name, "email": email, "phone": phone,
+                                                  "balance": 0, "wallet_history": []}
+                customer = STATE["customers"][phone]
+                token = gen_token()
+                label = customer_label(name, station)
+                STATE["sessions"][token] = {"table": label, "credits": 0, "pass_until": 0,
+                                            "created": time.time(), "phone": phone}
+                TOKENS[token] = CUR_VID
+                open_account(token, CUR_VID, label)
+                return self._send(200, {"ok": True, "token": token, "recovered": recovered,
+                                        "balance": customer["balance"],
+                                        "wallet_history": customer["wallet_history"][:20],
+                                        "session": {"table": label, "credits": 0, "pass_until": 0}})
+
+            # ---- Recargar saldo (modo prepago; simulado esta fase) ----
+            if path == "/api/wallet/topup":
+                sess = get_session(d.get("token"))
+                if not sess:
+                    return self._send(400, {"error": "Sesión no válida. Regístrate para continuar."})
+                if not STATE["settings"].get("prepaid_mode"):
+                    return self._send(400, {"error": "Esta función no está disponible en este local."})
+                customer = get_customer(sess)
+                if not customer:
+                    return self._send(400, {"error": "Este local cambió a modo prepago. Regístrate para continuar.",
+                                            "needs_registration": True})
+                try:
+                    amount = int(d.get("amount") or 0)
+                except Exception:
+                    amount = 0
+                if amount < 100 or amount > 500000:
+                    return self._send(400, {"error": "Monto inválido"})
+                customer["balance"] = customer.get("balance", 0) + amount
+                log_wallet_revenue(customer, sess, amount, "recarga",
+                                    "Recarga de saldo (simulado · Wompi)", "topup")
+                return self._send(200, {"ok": True, "balance": customer["balance"],
+                                        "wallet_history": customer["wallet_history"][:20]})
+
             # ---- Comprar paquete / pase ----
             if path == "/api/buy":
                 sess = get_session(d.get("token"))
@@ -1340,16 +1472,23 @@ class H(BaseHTTPRequestHandler):
                         pkg = s["credit_packages"][int(d.get("index"))]
                     except Exception:
                         return self._send(400, {"error": "Paquete inválido"})
-                    sess["credits"] += pkg["qty"]
-                    log_charge(sess["table"], d.get("token"), pkg["price"], "paquete",
-                               f"Paquete {pkg['qty']} prioridad(es)")
+                    price, kind, title = pkg["price"], "paquete", f"Paquete {pkg['qty']} prioridad(es)"
                 elif d.get("kind") == "pass":
                     tp = s["time_pass"]
-                    base = max(time.time(), sess["pass_until"])
-                    sess["pass_until"] = base + tp["minutes"] * 60
-                    log_charge(sess["table"], d.get("token"), tp["price"], "pase", f"Pase {tp['minutes']} min")
+                    price, kind, title = tp["price"], "pase", f"Pase {tp['minutes']} min"
                 else:
                     return self._send(400, {"error": "Tipo inválido"})
+                if s.get("prepaid_mode"):
+                    ok, via, err = try_charge_prepaid(sess, price, kind, title,
+                                                       d.get("pay_method", "wallet"), s.get("min_direct_pay", 700))
+                    if not ok:
+                        return self._send(400, err)
+                else:
+                    log_charge(sess["table"], d.get("token"), price, kind, title)
+                if d.get("kind") == "credits":
+                    sess["credits"] += pkg["qty"]
+                else:
+                    sess["pass_until"] = max(time.time(), sess["pass_until"]) + tp["minutes"] * 60
                 return self._send(200, {"ok": True, "session": {
                     "table": sess["table"], "credits": sess["credits"], "pass_until": sess["pass_until"]}})
 
@@ -1363,16 +1502,14 @@ class H(BaseHTTPRequestHandler):
                 table = sess["table"]
                 sup = bool(d.get("super"))
                 priority = bool(d.get("priority")) or sup
-                yt = title = artist = None
                 dur = _parse_len(d.get("length")) or int(d.get("duration") or 0) or DEFAULT_DUR
-                if d.get("yt"):
-                    yt = d["yt"]; title = d.get("title", "Canción"); artist = d.get("artist", "")
-                elif d.get("link"):
-                    yt = yt_id(d["link"])
-                    if yt:
-                        title, artist = yt_title(yt)
-                if not yt:
+                # yt/title/artist ya vienen resueltos si el pedido fue por link (se resolvió
+                # antes de tomar el LOCK — ver do_POST, para no bloquear el servidor con I/O de red)
+                yt = d.get("yt")
+                if not yt or not YT_ID_RE.match(yt):
                     return self._send(400, {"error": "No pude leer el link de YouTube"})
+                title = str(d.get("title") or "Canción")[:200]
+                artist = str(d.get("artist") or "")[:120]
                 now = time.time()
                 # Filtro de contenido: palabras bloqueadas / permitidas
                 _haystack = (title + " " + (artist or "")).lower()
@@ -1422,13 +1559,22 @@ class H(BaseHTTPRequestHandler):
                         sess["credits"] -= 1; mode = "credito"
                     else:
                         mode = "single"; charge = STATE["settings"]["price_priority"]
+                charge_via, paid_amount = None, 0
+                if charge > 0 and STATE["settings"].get("prepaid_mode"):
+                    ok, via, err = try_charge_prepaid(sess, charge, ckind, title,
+                                                       d.get("pay_method", "wallet"),
+                                                       STATE["settings"].get("min_direct_pay", 700))
+                    if not ok:
+                        return self._send(400, err)
+                    charge_via, paid_amount, charge = via, charge, 0
                 req_msg = (d.get("message") or "").strip()[:80]
                 item = {"id": nid(), "title": title, "artist": artist, "yt": yt,
                         "token": d.get("token"), "table": table, "priority": priority,
                         "super": sup, "mode": mode, "duration": dur,
                         "status": "approved" if STATE["settings"]["auto_approve"] else "pending",
                         "play_status": "pending", "played_enough": False, "requeue_count": 0,
-                        "ts": time.time(), "charge_on_play": charge, "charged": False, "charge_kind": ckind,
+                        "ts": time.time(), "charge_on_play": charge, "charged": bool(charge_via),
+                        "charge_kind": ckind, "charge_via": charge_via, "paid_amount": paid_amount,
                         "message": req_msg}
                 STATE["items"].append(item)
                 bump_count(yt, title, artist)
@@ -1503,16 +1649,27 @@ class H(BaseHTTPRequestHandler):
                                             "session": {"table": sess["table"], "credits": sess["credits"],
                                                         "pass_until": sess["pass_until"]}})
                 now = time.time()
+                free = sess["pass_until"] > now or sess["credits"] > 0
+                price = 0 if free else STATE["settings"]["price_priority"]
+                charge_via, paid_amount = None, 0
+                if price > 0 and STATE["settings"].get("prepaid_mode"):
+                    ok, via, err = try_charge_prepaid(sess, price, "impulso", target["title"],
+                                                       d.get("pay_method", "wallet"),
+                                                       STATE["settings"].get("min_direct_pay", 700))
+                    if not ok:
+                        return self._send(400, err)
+                    charge_via, paid_amount = via, price
                 target["priority"] = True
                 target["charge_table"] = sess["table"]
                 target["charge_kind"] = "impulso"
-                if sess["pass_until"] > now:
-                    target["charge_on_play"] = 0
-                elif sess["credits"] > 0:
-                    sess["credits"] -= 1
+                target["charge_via"] = charge_via
+                target["paid_amount"] = paid_amount
+                if free:
+                    if sess["pass_until"] <= now:
+                        sess["credits"] -= 1
                     target["charge_on_play"] = 0
                 else:
-                    target["charge_on_play"] = STATE["settings"]["price_priority"]
+                    target["charge_on_play"] = 0 if charge_via else price
                 return self._send(200, {"ok": True, "session": {"table": sess["table"], "credits": sess["credits"],
                                                                 "pass_until": sess["pass_until"]}})
 
@@ -1533,11 +1690,21 @@ class H(BaseHTTPRequestHandler):
                 if not target:
                     return self._send(400, {"error": "Esa canción ya no está en la cola"})
                 price = STATE["settings"]["price_priority"] * STATE["settings"].get("jump_multiplier", 3)
+                charge_via, paid_amount = None, 0
+                if STATE["settings"].get("prepaid_mode"):
+                    ok, via, err = try_charge_prepaid(sess, price, "salto al #1", target["title"],
+                                                       d.get("pay_method", "wallet"),
+                                                       STATE["settings"].get("min_direct_pay", 700))
+                    if not ok:
+                        return self._send(400, err)
+                    charge_via, paid_amount = via, price
                 target["super"] = True
                 target["priority"] = True
                 target["charge_table"] = sess["table"]
                 target["charge_kind"] = "salto al #1"
-                target["charge_on_play"] = price
+                target["charge_on_play"] = 0 if charge_via else price
+                target["charge_via"] = charge_via
+                target["paid_amount"] = paid_amount
                 STATE["jump_used_for"] = np["id"]
                 return self._send(200, {"ok": True, "price": price})
 
@@ -1674,10 +1841,20 @@ class H(BaseHTTPRequestHandler):
 
             if path in ("/api/admin/reject", "/api/admin/remove"):
                 for i in STATE["items"]:
-                    if i["id"] == d.get("id") and i.get("mode") == "credito":
-                        sess = get_session(i.get("token"))
-                        if sess:
-                            sess["credits"] += 1  # reembolsa credito reservado
+                    if i["id"] == d.get("id"):
+                        if i.get("mode") == "credito":
+                            sess = get_session(i.get("token"))
+                            if sess:
+                                sess["credits"] += 1  # reembolsa credito reservado
+                        elif i.get("charge_via") in ("wallet", "direct") and i.get("paid_amount"):
+                            sess = get_session(i.get("token"))
+                            customer = get_customer(sess)
+                            if customer:
+                                customer["balance"] = customer.get("balance", 0) + i["paid_amount"]
+                                hist = customer.setdefault("wallet_history", [])
+                                hist.insert(0, {"title": i["title"], "amount": i["paid_amount"],
+                                                "kind": "reembolso", "ts": time.time(), "type": "refund"})
+                                customer["wallet_history"] = hist[:20]
                 STATE["items"] = [i for i in STATE["items"] if i["id"] != d.get("id")]
                 return self._send(200, {"ok": True})
 
@@ -1697,9 +1874,12 @@ class H(BaseHTTPRequestHandler):
                     if k in d:
                         try: s[k] = max(0, int(d[k]))
                         except Exception: pass
-                for k in ("fallback_shuffle",):
+                for k in ("fallback_shuffle", "prepaid_mode"):
                     if k in d:
                         s[k] = bool(d[k])
+                if "min_direct_pay" in d:
+                    try: s["min_direct_pay"] = max(0, int(d["min_direct_pay"]))
+                    except Exception: pass
                 if "theme" in d and d["theme"] in ("azul", "purpura", "verde"):
                     s["theme"] = d["theme"]
                 for k in ("blocked_keywords", "allowed_keywords"):
@@ -1777,12 +1957,22 @@ class H(BaseHTTPRequestHandler):
                             t["pin"] = gen_pin()
                 return self._send(200, {"ok": True, "tables": STATE["tables"]})
 
+            if path == "/api/admin/stations":
+                act = d.get("action")
+                if act == "add" and d.get("name"):
+                    name = str(d["name"]).strip()[:40]
+                    if name and name not in STATE["stations"]:
+                        STATE["stations"].append(name)
+                elif act == "remove":
+                    STATE["stations"] = [s for s in STATE["stations"] if s != d.get("name")]
+                return self._send(200, {"ok": True, "stations": STATE["stations"]})
+
             if path == "/api/admin/curated":
                 act = d.get("action")
-                if act == "add" and d.get("yt"):
+                if act == "add" and d.get("yt") and YT_ID_RE.match(d["yt"]):
                     if not any(c["yt"] == d["yt"] for c in STATE["curated"]):
-                        STATE["curated"].append({"yt": d["yt"], "title": d.get("title", "Canción"),
-                                                 "artist": d.get("artist", ""),
+                        STATE["curated"].append({"yt": d["yt"], "title": str(d.get("title") or "Canción")[:200],
+                                                 "artist": str(d.get("artist") or "")[:120],
                                                  "duration": _parse_len(d.get("length")) or DEFAULT_DUR})
                 elif act == "remove":
                     STATE["curated"] = [c for c in STATE["curated"] if c["yt"] != d.get("yt")]
@@ -2166,7 +2356,7 @@ class H(BaseHTTPRequestHandler):
 
 # =================== Persistencia (archivo JSON; fácil de migrar a DB/multi-bar) ===================
 DATA_FILE = os.path.join(HERE, "data.json")
-PERSIST_KEYS = ("settings", "tables", "sessions", "now_playing", "items", "ledger",
+PERSIST_KEYS = ("settings", "tables", "stations", "customers", "sessions", "now_playing", "items", "ledger",
                 "history", "curated", "req_counts", "jump_used_for", "learned_end", "assists",
                 "request_log", "dedicas", "poll_launched_for_id")
 

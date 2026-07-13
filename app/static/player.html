@@ -51,6 +51,7 @@
 <script>
 const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let player,ready=false,curId=null,curYt=null,wantAudio=false,authok=false;
 async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';}
 (async()=>{const me=await fetch('/api/me');if(!me.ok){$('loginGate').style.display='flex';return;}authok=true;if(ready)tick();})();
@@ -89,7 +90,7 @@ function load(np){
   if(!np){curId=null;curYt=null;$('bigT').textContent='Esperando canciones…';$('bigA').textContent='';$('bigW').textContent='';
     if(ready&&player&&player.stopVideo)player.stopVideo();return;}
   $('bigT').textContent=np.title;$('bigA').textContent=np.artist||'';
-  $('bigW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+(np.table||''));
+  $('bigW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table||''));
   if(np.yt!==curYt){curYt=np.yt;curId=np.id;
     if(ready){player.loadVideoById(np.yt);if(wantAudio){player.unMute();player.playVideo();}}}
   curId=np.id;
@@ -109,7 +110,7 @@ function paintUp(s){
   if(!q.length){up.innerHTML='<div class="empty">Cola vacía — sonará la lista del local.</div>';return;}
   up.innerHTML='';q.slice(0,8).forEach((it,i)=>{
     const r=document.createElement('div');r.className='row';
-    r.innerHTML=`<div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${it.title}</div><div class="a">${it.table||''}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
+    r.innerHTML=`<div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.table||'')}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
     up.appendChild(r);});
 }
 

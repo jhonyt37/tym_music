@@ -151,7 +151,7 @@ body{padding-bottom:80px}
 
 <!-- Gate de mesa -->
 <div class="gate" id="gate">
-  <div class="box">
+  <div class="box" id="gatePin">
     <div class="logo" style="font-size:26px">TY<b>M</b> Music</div>
     <div id="gateName" style="font-size:18px;font-weight:700;color:var(--pri);margin:4px 0 2px;min-height:24px"></div>
     <h2>¿En qué mesa estás?</h2>
@@ -159,6 +159,17 @@ body{padding-bottom:80px}
     <input class="pin" id="pinInput" inputmode="numeric" maxlength="4" placeholder="••••">
     <button class="btn block" onclick="enterPin()">Entrar</button>
     <div class="small" id="pinErr" style="color:var(--red);margin-top:10px;min-height:16px"></div>
+  </div>
+  <div class="box" id="gateRegister" style="display:none">
+    <div class="logo" style="font-size:26px">TY<b>M</b> Music</div>
+    <h2>Regístrate para pedir</h2>
+    <div class="muted">Tu saldo queda guardado a tu celular</div>
+    <input class="field" id="regName" placeholder="Tu nombre" style="margin-top:14px">
+    <input class="field" id="regPhone" inputmode="tel" placeholder="Celular" style="margin-top:8px">
+    <input class="field" id="regEmail" type="email" placeholder="Correo" style="margin-top:8px">
+    <select class="field" id="regStation" style="margin-top:8px;display:none"></select>
+    <button class="btn block" style="margin-top:12px" onclick="enterRegister()">Entrar</button>
+    <div class="small" id="regErr" style="color:var(--red);margin-top:10px;min-height:16px"></div>
   </div>
 </div>
 
@@ -322,13 +333,20 @@ body{padding-bottom:80px}
         <div class="b"><div class="n" id="passN">—</div><div class="small">pase</div></div>
       </div>
       <div id="pkgList"></div>
-      <div class="small" style="margin-top:8px">Las prioridades se suman a la cuenta de tu mesa.</div>
+      <div class="small" style="margin-top:8px" id="pkgHint">Las prioridades se suman a la cuenta de tu mesa.</div>
     </div>
-    <div class="card">
+    <div class="card" id="tabCard">
       <h2>Tu cuenta de la mesa 🧾</h2>
       <div class="kpi gold" id="tabTotal">$0</div>
       <div class="small">Esto se suma a tu cuenta del bar (coincide con lo que ve el local)</div>
       <div class="list" id="tabList" style="margin-top:10px"><div class="empty">Sin cargos todavía.</div></div>
+    </div>
+    <div class="card" id="walletCard" style="display:none">
+      <h2>Tu saldo 💳</h2>
+      <div class="kpi gold" id="walletBal">$0</div>
+      <div class="small">Saldo prepago, válido solo en este local (no reembolsable en efectivo)</div>
+      <button class="btn gold block" style="margin-top:10px" onclick="openTopup()">🔋 Recargar saldo</button>
+      <div class="list" id="walletHistList" style="margin-top:10px"><div class="empty">Sin movimientos todavía.</div></div>
     </div>
   </section>
 </div>
@@ -411,6 +429,33 @@ body{padding-bottom:80px}
   </div>
 </div>
 
+<!-- Sheet recargar saldo -->
+<div class="sheet-bg" id="topupSheet">
+  <div class="sheet">
+    <h3>Recargar saldo</h3>
+    <div class="pkgrow" style="display:flex;gap:10px">
+      <button class="btn sm" onclick="pickTopup(500)">$500</button>
+      <button class="btn sm" onclick="pickTopup(3000)">$3.000</button>
+      <button class="btn sm" onclick="pickTopup(5000)">$5.000</button>
+    </div>
+    <input class="field" id="topupCustom" type="number" placeholder="Otro monto" style="margin-top:10px">
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn ghost" style="flex:1" onclick="closeTopup()">Cancelar</button>
+      <button class="btn gold" style="flex:2" onclick="confirmTopup()">Recargar</button>
+    </div>
+  </div>
+</div>
+<!-- Sheet saldo insuficiente -->
+<div class="sheet-bg" id="insufBg">
+  <div class="sheet">
+    <h3>Saldo insuficiente</h3>
+    <div class="muted" id="insufMsg"></div>
+    <button class="btn gold block" style="margin-top:14px" onclick="fromInsufTopup()">🔋 Recargar saldo</button>
+    <button class="btn block" id="insufDirectBtn" style="margin-top:8px" onclick="fromInsufDirect()">⚡ Pagar directo</button>
+    <button class="btn ghost block" style="margin-top:8px" onclick="closeInsuf()">Cancelar</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 <div id="fx"></div>
 
@@ -428,6 +473,7 @@ function applyTheme(t){
   document.querySelector('meta[name="theme-color"]').content=th.bg;
 }
 let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0;
+let prepaidMode=false, walletBalance=0, insufRetry=null, insufNeed=0, pendingRetry=null;
 const VENUE=new URLSearchParams(location.search).get('v')||'';
 let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], pass_obj={minutes:30,price:5000};
 let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='';
@@ -439,6 +485,7 @@ const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const mm=s=>{s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
 // Carga nombre del bar y tema antes de login
 (async()=>{
@@ -455,6 +502,7 @@ async function boot(){
   CAT=await (await fetch('/api/catalog')).json();
   $('q').addEventListener('input',e=>onSearch(e.target.value));
   $('pinInput').addEventListener('keydown',e=>{if(e.key==='Enter')enterPin();});
+  ['regName','regPhone','regEmail'].forEach(id=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')enterRegister();}));
   document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
   initBellDrag();
   loadReco();
@@ -481,6 +529,21 @@ async function enterPin(){
         {noLabel:'Llamar asistencia',noCb:()=>{doAssist();$('gate').style.display='none';poll();},yesLabel:'Soy yo, continuar'});
     }else{$('gate').style.display='none';poll();}
   }else{$('pinErr').textContent=j.error||'Código incorrecto';}
+}
+
+async function enterRegister(){
+  const name=$('regName').value.trim(), phone=$('regPhone').value.trim(), email=$('regEmail').value.trim();
+  const station=$('regStation').style.display!=='none'?$('regStation').value:'';
+  if(!name||phone.length<7){$('regErr').textContent='Ingresa tu nombre y un celular válido';return;}
+  const r=await fetch('/api/register',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({v:VENUE,name,phone,email,station})});
+  const j=await r.json();
+  if(j.ok){
+    token=j.token;localStorage.setItem('tym_token_'+VENUE,token);sess=j.session;
+    $('gate').style.display='none';
+    toast(j.recovered?'¡Bienvenido de nuevo! Saldo: '+cop(j.balance):'¡Bienvenido! Ya puedes pedir tu música 🎶','ok');
+    poll();
+    if(pendingRetry){const r2=pendingRetry;pendingRetry=null;r2();}
+  }else{$('regErr').textContent=j.error||'No se pudo registrar';}
 }
 
 // ---------- Recomendadas ----------
@@ -532,12 +595,12 @@ function renderResults(list, max=12){
   list.slice(0,max).forEach(s=>{
     const r=document.createElement('div');r.className='row tappable';
     if(s._link){
-      r.innerHTML=`<div style="font-size:26px;flex-shrink:0">🔗</div><div class="info" style="flex:1"><div class="t">Canción desde link</div><div class="a" style="word-break:break-all;font-size:11px">${s._link.slice(0,60)}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
+      r.innerHTML=`<div style="font-size:26px;flex-shrink:0">🔗</div><div class="info" style="flex:1"><div class="t">Canción desde link</div><div class="a" style="word-break:break-all;font-size:11px">${esc(s._link.slice(0,60))}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
       r.onclick=()=>openSheetLink(s._link);
     }else{
       const sub=[s.artist,s.length].filter(Boolean).join(' · ');
       const inQ=_queueYts.has(s.yt);
-      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${sub}</div></div>${inQ?'<span class="chip-queue">En cola</span>':'<div class="btn sm" style="pointer-events:none">Pedir</div>'}`;
+      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc(sub)}</div></div>${inQ?'<span class="chip-queue">En cola</span>':'<div class="btn sm" style="pointer-events:none">Pedir</div>'}`;
       r.onclick=()=>openSheet(s);
     }
     res.appendChild(r);
@@ -582,7 +645,7 @@ async function loadSimilar(artists){
     if(!merged.length){$('simBox').style.display='none';return;}
     merged.forEach(s=>{
       const r=document.createElement('div');r.className='row tappable';
-      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${s.title}</div><div class="a">${[s.artist,s.length].filter(Boolean).join(' · ')}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
+      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc([s.artist,s.length].filter(Boolean).join(' · '))}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
       r.onclick=()=>openSheet(s);
       box.appendChild(r);
     });
@@ -638,24 +701,25 @@ function closeSheet(){$('sheet').classList.remove('open');document.body.style.ov
 function confirmReq(){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   if(mode==='super'){
-    confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> y suena de primera. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+'. Solo <b>una vez por canción</b>.',doReq);
+    confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> y suena de primera. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'. Solo <b>una vez por canción</b>.',doReq);
   } else if(mode==='pri'){
     const now=Date.now()/1000;let msg;
     if(sess&&sess.pass_until>now) msg='Tu <b>pase activo</b> cubre esta prioridad (sin cargo extra).';
     else if(sess&&sess.credits>0) msg='Usarás <b>1 crédito</b> de prioridad (te quedan '+(sess.credits-1)+').';
-    else msg='Se cobrará <b>'+cop(price)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+'.';
+    else msg='Se cobrará <b>'+cop(price)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'.';
     if(price_queue_min>5) msg+='<br><span style="color:#9aa7c2;font-size:13px">⏱ Cola de prioridades: ~'+price_queue_min+' min de espera antes de la tuya</span>';
     confirmModal('Pedir con prioridad ⚡',msg,doReq);
   } else doReq();
 }
 let _reqInFlight=false;
-async function doReq(){
+async function doReq(payMethod){
   if(_reqInFlight)return;
   _reqInFlight=true;
   closeSheet();
   try{
     const sheetMsg=($('sheetDedicaMsg').value||'').trim().slice(0,80);
     const body=Object.assign({},chosen,{priority:mode==='pri',super:mode==='super',token,message:sheetMsg||undefined});
+    if(payMethod)body.pay_method=payMethod;
     const r=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const j=await r.json();
     if(j.ok){if(j.session)sess=j.session;
@@ -663,6 +727,8 @@ async function doReq(){
       $('q').value='';$('recoChips').style.display='flex';
       placeSimBox(false); // sugerencias arriba, catálogo del local abajo
       renderReco();refreshBal();}
+    else if(j.needs_registration){showNeedsRegistration(()=>doReq());}
+    else if(j.insufficient_balance){showInsufficient(j,()=>doReq('direct'));}
     else toast(j.error||'Error',j.race?'warn':'err');
   }finally{_reqInFlight=false;}
 }
@@ -755,7 +821,7 @@ async function sendBuzz(){
 function toggleAssist(){
   if(!token){toast('Ingresa el código de tu mesa primero','err');return;}
   if(assistActive){sendBuzz();}
-  else{confirmModal('Llamar asistencia 🔔','El personal de '+((sess&&sess.table)||'tu mesa')+' será avisado que necesitas atención.',doAssist);}
+  else{confirmModal('Llamar asistencia 🔔','El personal de '+esc((sess&&sess.table)||'tu mesa')+' será avisado que necesitas atención.',doAssist);}
 }
 function updateAssistBtn(){
   const btn=$('floatBell');if(!btn)return;
@@ -852,7 +918,7 @@ function renderPoll(poll){
   opts.forEach(opt=>{
     const count=votes[opt.yt]||0;const pct=Math.round(100*count/totalVotes);const on=myVote===opt.yt;
     const div=document.createElement('div');div.className='poll-opt'+(on?' on':'');div.style.flexWrap='wrap';
-    div.innerHTML=`<img class="mini" src="${img(opt.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${opt.title}</div><div class="a">${opt.artist||''}</div></div><div class="poll-vote-n">${count} voto${count!==1?'s':''}</div><div class="poll-bar" style="flex-basis:100%"><div class="poll-bar-fill" style="width:${on?pct:0}%"></div></div>`;
+    div.innerHTML=`<img class="mini" src="${img(opt.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${esc(opt.title)}</div><div class="a">${esc(opt.artist||'')}</div></div><div class="poll-vote-n">${count} voto${count!==1?'s':''}</div><div class="poll-bar" style="flex-basis:100%"><div class="poll-bar-fill" style="width:${on?pct:0}%"></div></div>`;
     div.onclick=()=>votePoll(opt.yt);
     box.appendChild(div);
   });
@@ -890,7 +956,7 @@ function renderDuelo(duelo){
   teams.forEach((team,idx)=>{
     const count=votes[team.yt]||0;const pct=Math.round(100*count/total);const on=myVote===team.yt;
     const div=document.createElement('div');div.className='duelo-team'+(on?' on':'');
-    div.innerHTML=`<div class="duelo-lbl">${idx===0?'⚔️ A':'⚔️ B'}</div><img class="mini" src="${img(team.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${team.title}</div><div class="a">${team.artist||''}</div></div><div style="font-size:11px;color:var(--mut);font-weight:700;white-space:nowrap">${count} voto${count!==1?'s':''}</div><div class="duelo-bar"><div class="duelo-bar-fill" style="width:0%"></div></div>`;
+    div.innerHTML=`<div class="duelo-lbl">${idx===0?'⚔️ A':'⚔️ B'}</div><img class="mini" src="${img(team.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${esc(team.title)}</div><div class="a">${esc(team.artist||'')}</div></div><div style="font-size:11px;color:var(--mut);font-weight:700;white-space:nowrap">${count} voto${count!==1?'s':''}</div><div class="duelo-bar"><div class="duelo-bar-fill" style="width:0%"></div></div>`;
     div.onclick=()=>voteDuelo(team.yt);
     box.appendChild(div);
   });
@@ -910,7 +976,7 @@ function renderTopTables(tables){
   box.innerHTML='';
   tables.forEach((t,i)=>{
     const div=document.createElement('div');div.className='mesa-rank';
-    div.innerHTML=`<div class="pos">${medals[i]||('#'+(i+1))}</div><div class="info"><div class="t">${t.table}</div><div class="meta">🎵 ${t.songs_requested} canciones · ❤️ ${t.likes_received} likes</div></div>`;
+    div.innerHTML=`<div class="pos">${medals[i]||('#'+(i+1))}</div><div class="info"><div class="t">${esc(t.table)}</div><div class="meta">🎵 ${t.songs_requested} canciones · ❤️ ${t.likes_received} likes</div></div>`;
     box.appendChild(div);
   });
 }
@@ -921,7 +987,7 @@ function renderHistorialSocial(history,bisVotes,bisThreshold,myBisVotes){
   if(!history||!history.length){box.innerHTML='<div class="empty">Todavía no ha sonado nada.</div>';return;}
   history.forEach(it=>{
     const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
-    div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div>`;
+    div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.artist||'')}</div></div>`;
     const react_total=it.react_total||0;
     if(react_total>=5){
       const bisCount=(bisVotes&&bisVotes[it.yt])||0;
@@ -1039,8 +1105,9 @@ function updateHeaderTicker(tabTotal){
   if(!sess){wrap.style.display='none';return;}
   wrap.style.display='';
   const now=Date.now()/1000;
-  const parts=['📍 '+sess.table];
-  if((tabTotal||0)>0) parts.push('🧾 '+cop(tabTotal));
+  const parts=['📍 '+esc(sess.table)];
+  if(prepaidMode) parts.push('💳 '+cop(walletBalance));
+  else if((tabTotal||0)>0) parts.push('🧾 '+cop(tabTotal));
   if((sess.credits||0)>0) parts.push('⚡ '+sess.credits+' créd.');
   if(sess.pass_until>now) parts.push('⏱ pase activo');
   const text=parts.join(' · ');
@@ -1071,14 +1138,17 @@ function renderPackages(){
 function buy(kind,index){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   let msg;
-  if(kind==='pass') msg='Se cobrará <b>'+cop(pass_obj.price)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+' por el pase de '+pass_obj.minutes+' min (prioridad ilimitada).';
-  else{const p=packages[index];msg='Se cobrará <b>'+cop(p.price)+'</b> a tu cuenta'+(sess?' ('+sess.table+')':'')+' por '+p.qty+' canción'+(p.qty>1?'es':'')+' con prioridad.';}
+  if(kind==='pass') msg='Se cobrará <b>'+cop(pass_obj.price)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+' por el pase de '+pass_obj.minutes+' min (prioridad ilimitada).';
+  else{const p=packages[index];msg='Se cobrará <b>'+cop(p.price)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+' por '+p.qty+' canción'+(p.qty>1?'es':'')+' con prioridad.';}
   confirmModal('Confirmar compra',msg,()=>doBuy(kind,index));
 }
-async function doBuy(kind,index){
-  const r=await fetch('/api/buy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,kind,index})});
+async function doBuy(kind,index,payMethod){
+  const body={token,kind,index};if(payMethod)body.pay_method=payMethod;
+  const r=await fetch('/api/buy',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const j=await r.json();
   if(j.ok){sess=j.session;toast(kind==='pass'?'¡Pase activado!':'¡Paquete agregado a tu cuenta!','ok');refreshBal();}
+  else if(j.needs_registration){showNeedsRegistration(()=>doBuy(kind,index));}
+  else if(j.insufficient_balance){showInsufficient(j,()=>doBuy(kind,index,'direct'));}
   else toast(j.error||'Error','err');
 }
 function refreshBal(){
@@ -1146,7 +1216,7 @@ function boost(id, isMine){
   const now=Date.now()/1000;let msg;
   if(sess&&sess.pass_until>now) msg='Se impulsará con tu <b>pase activo</b> (sin cargo extra).';
   else if(sess&&sess.credits>0) msg='Usarás <b>1 crédito</b> (te quedan '+(sess.credits-1)+'). La prioridad se cobra a <b>tu</b> mesa.';
-  else msg='Esta prioridad se cobrará a <b>TU mesa</b>'+(sess?' ('+sess.table+')':'')+': <b>'+cop(price)+'</b>.';
+  else msg='Esta prioridad se cobrará a <b>TU mesa</b>'+(sess?' ('+esc(sess.table)+')':'')+': <b>'+cop(price)+'</b>.';
   if(!isMine){
     confirmModal('⚠ Impulsar canción ajena',
       '¿Seguro? Estás a punto de impulsar la canción de <b>otra mesa</b>. El costo se cargará a <b>tu cuenta</b>.',
@@ -1155,9 +1225,12 @@ function boost(id, isMine){
     confirmModal('Impulsar canción ⚡',msg,()=>doBoost(id));
   }
 }
-async function doBoost(id){
-  const j=await (await fetch('/api/boost',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id})})).json();
+async function doBoost(id,payMethod){
+  const body={token,id};if(payMethod)body.pay_method=payMethod;
+  const j=await (await fetch('/api/boost',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
   if(j.ok){if(j.session)sess=j.session;toast(j.already?'Ya tiene prioridad':'⚡ ¡Impulsada!','ok');refreshBal();poll();}
+  else if(j.needs_registration){showNeedsRegistration(()=>doBoost(id));}
+  else if(j.insufficient_balance){showInsufficient(j,()=>doBoost(id,'direct'));}
   else toast(j.error||'Error','err');
 }
 const PS_ICON={pending:'⏳',playing:'🎵',played:'✅',requeued:'↩️',skipped:'⏭️'};
@@ -1170,7 +1243,7 @@ function playStatusBadge(it){
 function songRow(it,opts){
   const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
   const tag=it.super?'⏫ ':(it.priority?'⚡ ':'');
-  div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+(it.table||it.artist||'')}</div></div>`;
+  div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+esc(it.table||it.artist||'')}</div></div>`;
   if(opts&&opts.boost){
     if(!it.priority){const b=document.createElement('button');b.className='btn sm gold';b.textContent='⚡ Impulsar';b.onclick=()=>boost(it.id,it.mine);div.appendChild(b);}
     if(jumpAvail&&!it.super){const jb=document.createElement('button');jb.className='btn sm';jb.style.background='#7c3aed';jb.textContent='⏫ #1';jb.title='Saltar al primer lugar';jb.onclick=()=>jump(it.id,it.mine);div.appendChild(jb);}
@@ -1181,7 +1254,7 @@ function songRow(it,opts){
 function jump(id, isMine){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   if(!jumpAvail){toast('El salto ya se usó esta canción. Disponible en la próxima 🎵','err');return;}
-  const msg='Esta canción pasará al <b>primer lugar</b> de la cola. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu mesa'+(sess?' ('+sess.table+')':'')+'. Solo se permite <b>una vez por canción</b>.';
+  const msg='Esta canción pasará al <b>primer lugar</b> de la cola. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu mesa'+(sess?' ('+esc(sess.table)+')':'')+'. Solo se permite <b>una vez por canción</b>.';
   if(!isMine){
     confirmModal('⚠ Saltar canción ajena ⏫',
       '¿Seguro? Vas a llevar al #1 la canción de <b>otra mesa</b>. El costo se cargará a <b>tu cuenta</b>.',
@@ -1190,9 +1263,42 @@ function jump(id, isMine){
     confirmModal('Saltar al #1 ⏫',msg,()=>doJump(id));
   }
 }
-async function doJump(id){
-  const j=await (await fetch('/api/jump',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id})})).json();
-  if(j.ok){toast('⏫ ¡Tu canción al frente!','ok');refreshBal();poll();} else toast(j.error||'Error','err');
+async function doJump(id,payMethod){
+  const body={token,id};if(payMethod)body.pay_method=payMethod;
+  const j=await (await fetch('/api/jump',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
+  if(j.ok){toast('⏫ ¡Tu canción al frente!','ok');refreshBal();poll();}
+  else if(j.needs_registration){showNeedsRegistration(()=>doJump(id));}
+  else if(j.insufficient_balance){showInsufficient(j,()=>doJump(id,'direct'));}
+  else toast(j.error||'Error','err');
+}
+
+// ---------- Saldo prepago ----------
+function openTopup(suggested){$('topupCustom').value=suggested||'';$('topupSheet').classList.add('open');}
+function closeTopup(){$('topupSheet').classList.remove('open');}
+function pickTopup(n){confirmModal('Confirmar recarga','Se agregarán <b>'+cop(n)+'</b> a tu saldo en este local (simulado, vía Wompi).',()=>doTopup(n));}
+function confirmTopup(){const n=parseInt($('topupCustom').value||0);if(n<100){toast('Monto inválido','err');return;}pickTopup(n);}
+async function doTopup(amount){
+  closeTopup();
+  const j=await (await fetch('/api/wallet/topup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,amount})})).json();
+  if(j.ok){toast('💳 Saldo recargado: '+cop(j.balance),'ok');poll();if(insufRetry){const r=insufRetry;insufRetry=null;r();}}
+  else if(j.needs_registration){showNeedsRegistration(()=>doTopup(amount));}
+  else toast(j.error||'Error','err');
+}
+function showInsufficient(j,retryWithDirect){
+  const need=j.need||0,bal=j.balance||0,minDp=j.min_direct_pay||0;
+  $('insufMsg').innerHTML='Te faltan <b>'+cop(need-bal)+'</b> (tienes '+cop(bal)+', necesitas '+cop(need)+').';
+  $('insufDirectBtn').style.display=need>=minDp?'':'none';
+  $('insufDirectBtn').textContent='⚡ Pagar directo '+cop(need)+' (simulado · Wompi)';
+  insufRetry=retryWithDirect;insufNeed=need;
+  $('insufBg').classList.add('open');
+}
+function closeInsuf(){$('insufBg').classList.remove('open');insufRetry=null;}
+function fromInsufTopup(){const need=insufNeed;closeInsuf();openTopup(need);}
+function fromInsufDirect(){const r=insufRetry;closeInsuf();r&&r();}
+function showNeedsRegistration(retryFn){
+  pendingRetry=retryFn;
+  $('gate').style.display='flex';$('gatePin').style.display='none';$('gateRegister').style.display='';
+  toast('Este local ahora usa saldo prepago — regístrate para continuar','err');
 }
 function renderSocials(soc){
   const box=$('socialLinks');if(!box)return;box.innerHTML='';
@@ -1223,7 +1329,7 @@ function renderTopRequested(items){
   if(!items||!items.length){box.innerHTML='<div class="empty">Aún sin pedidos registrados.</div>';return;}
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank tappable';
-    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div><div class="love" style="color:var(--pri)">🎵 ${it.count}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love" style="color:var(--pri)">🎵 ${it.count}</div>`;
     d.onclick=()=>openSheet(it);
     box.appendChild(d);
   });
@@ -1235,7 +1341,7 @@ function renderMyLikes(items){
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank';
     const emojis=(it.my_reacts||[]).join(' ');
-    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div></div><div class="love">${emojis}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love">${emojis}</div>`;
     box.appendChild(d);
   });
   tickify(box);
@@ -1246,7 +1352,7 @@ function renderLoved(items){
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank';
     const tables=it.tables&&it.tables.length?it.tables.slice(0,4).join(' · ')+(it.tables.length>4?' y '+(it.tables.length-4)+' más':''):'';
-    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${it.title}</div><div class="a">${it.artist||''}</div>${tables?`<div style="font-size:11px;color:var(--pri);margin-top:2px">🙌 ${tables}</div>`:''}</div><div class="love">❤️ ${it.total}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.artist||'')}</div>${tables?`<div style="font-size:11px;color:var(--pri);margin-top:2px">🙌 ${esc(tables)}</div>`:''}</div><div class="love">❤️ ${it.total}</div>`;
     box.appendChild(d);
   });
   tickify(box);
@@ -1259,6 +1365,7 @@ async function poll(){
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
     price=s.settings.price_priority;packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
     jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;price_queue_min=s.priority_queue_min||0;
+    prepaidMode=!!s.settings.prepaid_mode;walletBalance=s.wallet_balance||0;
     renderSocials(s.settings.socials);
     document.title='TYM · '+s.settings.venue_name;
     applyTheme(s.settings.theme);
@@ -1270,8 +1377,26 @@ async function poll(){
     updateAssistBtn();
 
     // Gate
-    if(!sess){$('gate').style.display='flex';}
+    if(!sess){
+      $('gate').style.display='flex';
+      $('gatePin').style.display=prepaidMode?'none':'';
+      $('gateRegister').style.display=prepaidMode?'':'none';
+      if(prepaidMode){
+        const stSel=$('regStation'),stations=s.stations||[];
+        if(stations.length){
+          stSel.style.display='';
+          if(stSel.dataset.count!=stations.length){
+            stSel.innerHTML=stations.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+            stSel.dataset.count=stations.length;
+          }
+        }else stSel.style.display='none';
+      }
+    }
     else{$('gate').style.display='none';}
+
+    $('tabCard').style.display=prepaidMode?'none':'';
+    $('walletCard').style.display=prepaidMode?'':'none';
+    $('pkgHint').textContent=prepaidMode?'Las prioridades se descuentan de tu saldo.':'Las prioridades se suman a la cuenta de tu mesa.';
 
     refreshBal();renderPackages();
 
@@ -1301,7 +1426,7 @@ async function poll(){
 
     // Now playing
     if(np){$('nowImg').src=img(np.yt);$('nowT').textContent=np.title;$('nowA').textContent=np.artist||'';
-      $('nowW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+np.table);
+      $('nowW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table));
       _npState={pos0:np.position||0,t0:Date.now()/1000,dur:np.duration||1};
     }else{_npState=null;$('nowT').textContent='—';$('nowA').textContent='Nadie ha puesto música aún';$('nowW').textContent='';
       $('nowImg').removeAttribute('src');$('progFill').style.width='0%';$('nowPos').textContent='0:00';$('nowRem').textContent='';}
@@ -1359,7 +1484,15 @@ async function poll(){
     const items=s.my_tab||[],tl=$('tabList');
     if(!items.length)tl.innerHTML='<div class="empty">Sin cargos todavía.</div>';
     else{tl.innerHTML='';items.forEach(x=>{const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<div class="info"><div class="t">${x.title}</div><div class="a">${x.kind}</div></div><div class="chip pri">${cop(x.amount)}</div>`;tl.appendChild(r);});tickify(tl);}
+      r.innerHTML=`<div class="info"><div class="t">${esc(x.title)}</div><div class="a">${esc(x.kind)}</div></div><div class="chip pri">${cop(x.amount)}</div>`;tl.appendChild(r);});tickify(tl);}
+
+    // Saldo prepago
+    $('walletBal').textContent=cop(walletBalance);
+    const wh=s.wallet_history||[],whl=$('walletHistList');
+    if(!wh.length)whl.innerHTML='<div class="empty">Sin movimientos todavía.</div>';
+    else{whl.innerHTML='';wh.forEach(x=>{const r=document.createElement('div');r.className='row';
+      const neg=x.amount<0;
+      r.innerHTML=`<div class="info"><div class="t">${esc(x.title)}</div><div class="a">${esc(x.kind)}</div></div><div class="chip${neg?'':' pri'}">${neg?'-':''}${cop(Math.abs(x.amount))}</div>`;whl.appendChild(r);});tickify(whl);}
 
     // Aviso al autor de likes
     if(typeof s.my_likes_total==='number'){
