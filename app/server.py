@@ -89,8 +89,32 @@ def gen_token():
     return secrets.token_hex(16)
 
 # ---- Seguridad: contraseñas ----
+PBKDF2_ITERS = 200_000
+
 def _hash_pass(p):
+    """SHA-256 sin salt — formato LEGACY, solo para verificar hashes viejos. No usar para crear nuevos."""
     return hashlib.sha256(p.encode("utf-8")).hexdigest()
+
+def hash_password(p):
+    salt = secrets.token_hex(16)
+    h = hashlib.pbkdf2_hmac("sha256", p.encode("utf-8"), bytes.fromhex(salt), PBKDF2_ITERS).hex()
+    return f"pbkdf2${salt}${h}"
+
+def verify_password(p, stored):
+    """Devuelve (ok, needs_rehash). needs_rehash=True si el hash es del formato legacy
+    (sha256 sin salt, de antes de esta migración) y debe re-guardarse en formato pbkdf2."""
+    if not stored:
+        return False, False
+    if stored.startswith("pbkdf2$"):
+        try:
+            _, salt, h = stored.split("$", 2)
+            calc = hashlib.pbkdf2_hmac("sha256", p.encode("utf-8"), bytes.fromhex(salt), PBKDF2_ITERS).hex()
+        except ValueError:
+            return False, False
+        return hmac.compare_digest(calc, h), False
+    return hmac.compare_digest(_hash_pass(p), stored), True
+
+_DUMMY_PASS_HASH = hash_password(secrets.token_hex(8))  # costo decoy para usuarios inexistentes (evita timing leak)
 
 def _ensure_owner_passwords():
     """Primer arranque sin data.json: asigna contraseñas iniciales.
@@ -106,7 +130,7 @@ def _ensure_owner_passwords():
             else:
                 pwd = secrets.token_urlsafe(12)
                 print(f"🔑 Contraseña inicial para '{uname}': {pwd}  ← guárdala y cámbiala desde el panel admin")
-            odata["pass_hash"] = _hash_pass(pwd)
+            odata["pass_hash"] = hash_password(pwd)
             changed = True
     if changed:
         save_state()
@@ -1367,9 +1391,13 @@ class H(BaseHTTPRequestHandler):
                 return self._send(429, {"error": "Demasiados intentos. Espera un momento."})
             u = (d.get("user") or "").strip()
             o = TYM["owners"].get(u)
-            input_hash = _hash_pass(d.get("pass") or "")
-            if not o or not hmac.compare_digest(input_hash, o.get("pass_hash", "")):
+            pwd = d.get("pass") or ""
+            ok, needs_rehash = verify_password(pwd, o.get("pass_hash") if o else _DUMMY_PASS_HASH)
+            if not o or not ok:
                 return self._send(401, {"error": "Usuario o contraseña incorrectos"})
+            if needs_rehash:
+                o["pass_hash"] = hash_password(pwd)
+                save_state()
             tk = gen_token(); AUTH[tk] = o["venue"]
             body = json.dumps({"ok": True, "venue": o["venue"]}).encode("utf-8")
             secure_flag = "; Secure" if PUBLIC_URL.startswith("https://") else ""
@@ -2368,7 +2396,7 @@ class H(BaseHTTPRequestHandler):
                 updated = False
                 for uname, odata in TYM["owners"].items():
                     if odata.get("venue") == av:
-                        odata["pass_hash"] = _hash_pass(new_pass)
+                        odata["pass_hash"] = hash_password(new_pass)
                         updated = True
                         break
                 if not updated:
@@ -2400,7 +2428,7 @@ class H(BaseHTTPRequestHandler):
                 if username in TYM["owners"]:
                     return self._send(400, {"error": f"El usuario '{username}' ya existe"})
                 VENUES[vid] = make_venue(name)
-                TYM["owners"][username] = {"pass_hash": _hash_pass(password), "venue": vid}
+                TYM["owners"][username] = {"pass_hash": hash_password(password), "venue": vid}
                 save_state()
             return self._send(200, {"ok": True, "vid": vid, "name": name})
 
@@ -2554,7 +2582,7 @@ def load_state():
                 od = dict(odata)
                 # Migra contraseñas en texto plano de versiones antiguas del código
                 if "pass" in od and "pass_hash" not in od:
-                    od["pass_hash"] = _hash_pass(od.pop("pass"))
+                    od["pass_hash"] = hash_password(od.pop("pass"))
                 od.pop("pass", None)
                 TYM["owners"][uname] = od
         for vid, snap in d.get("venues", {}).items():
