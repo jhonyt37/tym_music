@@ -9,6 +9,7 @@ reproduccion, recomendadas (mas pedido / del local / populares / genero).
 import json, os, re, socket, threading, time, random, datetime, struct, zlib
 import hashlib, hmac, secrets
 import urllib.request, urllib.parse
+from zoneinfo import ZoneInfo, available_timezones
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 try:
@@ -33,17 +34,33 @@ EMOJIS = ["❤️", "🔥", "👍"]  # reacciones positivas
 VIBES = ["🔥 Que todo el mundo cante", "💃 Más baile", "🎸 Más suave", "✨ Así está perfecto"]
 BIS_THRESHOLD = 3
 
-BOGOTA_TZ = datetime.timezone(datetime.timedelta(hours=-5))
-def _bogota_hour(ts):
-    return datetime.datetime.fromtimestamp(ts, tz=BOGOTA_TZ).hour
+DEFAULT_TZ = "America/Bogota"
+_TZ_CACHE = {}
+def _tz(name=None):
+    """ZoneInfo del nombre IANA dado (con cache); si es inválido o falta, usa DEFAULT_TZ."""
+    name = name or DEFAULT_TZ
+    z = _TZ_CACHE.get(name)
+    if z is None:
+        try:
+            z = ZoneInfo(name)
+        except Exception:
+            z = ZoneInfo(DEFAULT_TZ)
+        _TZ_CACHE[name] = z
+    return z
+
+def _venue_hour(ts, vid=None):
+    """Hora local (0-23) de un timestamp según la zona horaria configurada del venue."""
+    v = VENUES.get(vid or CUR_VID, {})
+    tzname = v.get("settings", {}).get("timezone")
+    return datetime.datetime.fromtimestamp(ts, tz=_tz(tzname)).hour
 
 def _scheduled_genre():
-    """Devuelve el género activo según el horario programado del venue actual (hora Bogotá)."""
+    """Devuelve el género activo según el horario programado del venue actual (su zona horaria)."""
     s = STATE["settings"]
     schedule = s.get("schedule", [])
     if not schedule:
         return s.get("genre", "reggaeton")
-    now = datetime.datetime.now(tz=BOGOTA_TZ)
+    now = datetime.datetime.now(tz=_tz(s.get("timezone")))
     cur = now.hour * 60 + now.minute
     for slot in schedule:
         try:
@@ -216,6 +233,7 @@ def make_venue(name):
             "poll_duration_secs": 120,     # duración del timer de la votación (segundos)
             "duelo_duration_secs": 60,     # duración del timer del duelo (segundos)
             "schedule": [],                # [{from:"HH:MM", to:"HH:MM", genre:str, label:str}]
+            "timezone": DEFAULT_TZ,         # zona horaria IANA del local (ej: "America/Bogota")
             "prepaid_mode": False,     # ON: saldo prepago por cliente en vez de cuenta de mesa
             "min_direct_pay": 700,     # piso para pago directo sin wallet (evita que la pasarela se coma el monto)
         },
@@ -350,7 +368,7 @@ def tym_analytics():
     fact_local, hour_rev, hour_ord = {}, {k: 0 for k in range(24)}, {k: 0 for k in range(24)}
     free = prem = total = 0
     for e in TYM["events"]:
-        h = _bogota_hour(e["ts"])
+        h = _venue_hour(e["ts"], e.get("venue"))
         if e["ev"] == "charge":
             fact_local[e["venue"]] = fact_local.get(e["venue"], 0) + e["amount"]
             hour_rev[h] += e["amount"]; total += e["amount"]
@@ -377,7 +395,7 @@ def venue_analytics(vid):
     for e in TYM["events"]:
         if e.get("venue") != vid:
             continue
-        h = _bogota_hour(e["ts"])
+        h = _venue_hour(e["ts"], vid)
         if e["ev"] == "charge":
             hour_rev[h] += e.get("amount", 0)
             total += e.get("amount", 0)
@@ -395,17 +413,18 @@ def venue_analytics(vid):
     recent_accts = sorted([a for a in TYM["accounts"].values() if a.get("venue") == vid],
                           key=lambda a: -(a.get("opened_at") or 0))[:20]
 
-    # ---- Dashboard transaccional: resumen de HOY (medianoche Bogotá) ----
-    now_bogota = datetime.datetime.now(tz=BOGOTA_TZ)
-    midnight_bogota = now_bogota.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+    # ---- Dashboard transaccional: resumen de HOY (medianoche hora del venue) ----
     v = VENUES.get(vid, {})
+    venue_tz = _tz(v.get("settings", {}).get("timezone"))
+    now_local = datetime.datetime.now(tz=venue_tz)
+    midnight_local = now_local.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
     ledger = v.get("ledger", [])
-    tonight_entries = [l for l in ledger if l.get("ts", 0) >= midnight_bogota]
+    tonight_entries = [l for l in ledger if l.get("ts", 0) >= midnight_local]
     tonight_total = sum(l.get("amount", 0) for l in tonight_entries)
     tonight_songs_priority = sum(1 for l in tonight_entries if l.get("kind") not in ("pase", ""))
     tonight_songs_free = sum(1 for e in TYM["events"]
                              if e.get("venue") == vid and e["ev"] == "order"
-                             and not e.get("premium") and e.get("ts", 0) >= midnight_bogota)
+                             and not e.get("premium") and e.get("ts", 0) >= midnight_local)
     # Por mesa: total y canciones
     per_table: dict = {}
     for l in tonight_entries:
@@ -799,6 +818,7 @@ def public_item(it, token):
             "duration": it.get("duration", DEFAULT_DUR), "mine": bool(token) and it.get("token") == token,
             "play_status": it.get("play_status", "pending"),
             "requeue_count": it.get("requeue_count", 0),
+            "ts": it.get("ts"), "played_at": it.get("played_at"),
             "reactions": counts, "my_reacts": mine, "react_total": total}
 
 def public_state(token=None, admin=False, mark_dedica=None):
@@ -826,6 +846,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                   "duration": np.get("duration", DEFAULT_DUR), "position": np.get("position", 0),
                   "learned_end": STATE["learned_end"].get(np["yt"]),
                   "message": (np.get("message") or ""),
+                  "ts": np.get("ts"), "played_at": np.get("played_at"),
                   "reactions": ncounts, "my_reacts": nmine, "react_total": ntotal}
         now_ts = time.time()
         np_pub["recent_reacts"] = [
@@ -995,7 +1016,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "venue_logo", "max_priority_queue_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
-                                       "schedule", "prepaid_mode", "min_direct_pay")},
+                                       "schedule", "timezone", "prepaid_mode", "min_direct_pay")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
@@ -1065,7 +1086,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
         out["curated"] = STATE["curated"]
         out["subscribers"] = list(reversed(TYM["subscribers"]))[:100]
         out["history"] = [{"id": h["id"], "yt": h["yt"], "title": h["title"],
-                           "artist": h.get("artist", "")} for h in STATE["history"][:10]]
+                           "artist": h.get("artist", ""),
+                           "ts": h.get("ts"), "played_at": h.get("played_at")} for h in STATE["history"][:10]]
         out["repeat_exceptions"] = list(STATE.get("repeat_exceptions", set()))
         out["all_dedicas"] = list(reversed(STATE.get("dedicas", [])))[:30]
         out["all_announcements"] = list(reversed(STATE.get("announcements", [])))
@@ -1882,6 +1904,8 @@ class H(BaseHTTPRequestHandler):
                     except Exception: pass
                 if "theme" in d and d["theme"] in ("azul", "purpura", "verde"):
                     s["theme"] = d["theme"]
+                if "timezone" in d and str(d["timezone"]) in available_timezones():
+                    s["timezone"] = str(d["timezone"])
                 for k in ("blocked_keywords", "allowed_keywords"):
                     if k in d and isinstance(d[k], list):
                         s[k] = [str(w).strip().lower()[:50] for w in d[k] if str(w).strip()][:30]

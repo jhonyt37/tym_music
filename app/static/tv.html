@@ -397,7 +397,7 @@ function _tvPollTick(){
 function renderPollTV(poll){
   const panel=$('pollPanel');if(!panel)return;
   if(!poll||!poll.active){panel.style.display='none';_tvPollEndsAt=null;clearTimeout(_tvPollRaf);return;}
-  panel.style.display='';
+  panel.style.display='block';
   _tvPollEndsAt=poll.ends_at||null;
   _tvPollDur=poll.duration||120;
   clearTimeout(_tvPollRaf);_tvPollTick();
@@ -426,7 +426,7 @@ function _tvDueloTick(){
 function renderDueloTV(duelo){
   const panel=$('dueloPanel');if(!panel)return;
   if(!duelo||!duelo.active){panel.style.display='none';_tvDueloEndsAt=null;clearTimeout(_tvDueloRaf);return;}
-  panel.style.display='';
+  panel.style.display='block';
   _tvDueloEndsAt=duelo.ends_at||null;_tvDueloDur=duelo.duration||60;
   clearTimeout(_tvDueloRaf);_tvDueloTick();
   const teams=duelo.teams||[];const votes=duelo.votes||{};

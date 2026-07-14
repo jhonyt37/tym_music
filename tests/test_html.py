@@ -110,8 +110,8 @@ class TestIndexHTML(unittest.TestCase):
         self.assertIn("confirmReq", self.h.src)
     def test_do_req_defined(self):
         self.assertIn("function doReq", self.h.src)
-    def test_place_sim_box_defined(self):
-        self.assertIn("placeSimBox", self.h.src)
+    def test_load_similar_defined(self):
+        self.assertIn("async function loadSimilar", self.h.src)
     def test_spawn_react_defined(self):
         # After our TV change, spawnReact should be in tv.html not index
         self.assertIn("spawnReact", open(os.path.join(STATIC, "tv.html")).read())
@@ -256,7 +256,7 @@ class TestAdminHTML(unittest.TestCase):
     def test_has_ledger_container(self):     self._require_id("ledger")
     def test_has_admin_search_input(self):   self._require_id("adminQ")
     def test_has_admin_results(self):        self._require_id("adminResults")
-    def test_has_hist_card(self):            self._require_id("histCard")
+    def test_has_hist_card(self):            self._require_id("recentHistCard")
     def test_has_hist_list(self):            self._require_id("histList")
 
     def test_admin_search_defined(self):

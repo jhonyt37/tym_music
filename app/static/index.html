@@ -80,9 +80,6 @@ body{padding-bottom:80px}
 .row.tappable{cursor:pointer}
 .row.tappable:active{opacity:.75}
 
-/* ---- Similar songs ---- */
-#simBox{margin-top:14px;border-top:1px solid var(--line);padding-top:12px}
-.sim-lbl{font-size:12px;color:var(--mut);margin-bottom:8px;font-weight:600}
 
 /* ---- Active tables ---- */
 .active-t{text-align:center;font-size:12px;color:var(--mut);padding:0 0 10px}
@@ -183,11 +180,6 @@ body{padding-bottom:80px}
         <div class="chips" id="recoChips"></div>
         <div class="list" id="results"></div>
       </div>
-      <!-- Sugerencias basadas en lo que suena -->
-      <div id="simBox" style="display:none;margin-top:14px;border-top:1px solid var(--line);padding-top:12px">
-        <div class="sim-lbl">🎵 Por si te gustó — <span id="simLabel"></span></div>
-        <div class="list" id="simList"></div>
-      </div>
     </div>
   </section>
 
@@ -222,6 +214,11 @@ body{padding-bottom:80px}
     <div class="card queue-card" id="queueCard">
       <h2>En cola 🎶 (<span id="qcount">0</span>)</h2>
       <div class="list" id="queueList"><div class="empty">Nada en cola — suena la lista del local.</div></div>
+    </div>
+    <!-- Sugerencias basadas en lo que suena -->
+    <div class="card" id="simBox" style="display:none">
+      <h2 style="font-size:15px">🎵 Por si te gustó — <span id="simLabel"></span></h2>
+      <div class="list" id="simList"></div>
     </div>
   </section>
 
@@ -476,6 +473,7 @@ let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=fals
 let prepaidMode=false, walletBalance=0, insufRetry=null, insufNeed=0, pendingRetry=null;
 const VENUE=new URLSearchParams(location.search).get('v')||'';
 let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], pass_obj={minutes:30,price:5000};
+let VENUE_TZ='America/Bogota';
 let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='';
 let assistActive=false, assistId=null, _lastBuzzTs=0;
 let _simLoadedForId=null, _nowYt=null;
@@ -486,6 +484,7 @@ const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const mm=s=>{s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const hm=ts=>ts?new Date(ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:VENUE_TZ}):'';
 
 // Carga nombre del bar y tema antes de login
 (async()=>{
@@ -567,18 +566,11 @@ function renderReco(){
 
 // ---------- Busqueda ----------
 const YT_RE=/youtu\.?be|youtube\.com\/(watch|shorts|embed)/i;
-function placeSimBox(searchActive){
-  const card=$('recoBox').parentNode;
-  if(searchActive) card.appendChild($('simBox'));
-  else card.insertBefore($('simBox'),$('recoBox'));
-}
 function onSearch(term){
   clearTimeout(searchTimer);
   if(!term.trim()){
-    placeSimBox(false);
     $('recoChips').style.display='flex';renderReco();return;
   }
-  placeSimBox(true); // resultados primero, simBox abajo con separador
   $('recoChips').style.display='none';
   if(YT_RE.test(term)){renderResults([{_link:term}]);return;}
   $('results').innerHTML='<div class="empty">Buscando…</div>';
@@ -624,8 +616,7 @@ function interleaveArtists(perArtist, max){
 async function loadSimilar(artists){
   const unique=[...new Set((Array.isArray(artists)?artists:[artists]).filter(Boolean))].slice(0,3);
   if(!unique.length){$('simBox').style.display='none';return;}
-  if(!$('q').value.trim())placeSimBox(false);
-  $('simBox').style.display='';
+  $('simBox').style.display='block';
   $('simLabel').textContent=unique.join(' · ');
   $('simList').innerHTML='<div class="empty" style="font-size:13px">Buscando…</div>';
   try{
@@ -657,7 +648,7 @@ async function loadSimilar(artists){
       shownArtists.forEach(a=>{
         const b=document.createElement('button');b.className='btn sm ghost';
         b.textContent='Más de '+a;
-        b.onclick=()=>{$('q').value=a;onSearch(a);};
+        b.onclick=()=>{showTab('pedir');$('q').value=a;onSearch(a);};
         wrap.appendChild(b);
       });
       box.appendChild(wrap);
@@ -725,7 +716,6 @@ async function doReq(payMethod){
     if(j.ok){if(j.session)sess=j.session;
       toast(mode==='super'?'⏫ ¡Tu canción al frente!':(mode==='pri'?'⚡ ¡Pedida con prioridad!':'¡Canción pedida!'),'ok');
       $('q').value='';$('recoChips').style.display='flex';
-      placeSimBox(false); // sugerencias arriba, catálogo del local abajo
       renderReco();refreshBal();}
     else if(j.needs_registration){showNeedsRegistration(()=>doReq());}
     else if(j.insufficient_balance){showInsufficient(j,()=>doReq('direct'));}
@@ -987,7 +977,8 @@ function renderHistorialSocial(history,bisVotes,bisThreshold,myBisVotes){
   if(!history||!history.length){box.innerHTML='<div class="empty">Todavía no ha sonado nada.</div>';return;}
   history.forEach(it=>{
     const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
-    div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.artist||'')}</div></div>`;
+    const playedTs=it.played_at||it.ts;
+    div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.artist||'')}${playedTs?' · sonó '+hm(playedTs):''}</div></div>`;
     const react_total=it.react_total||0;
     if(react_total>=5){
       const bisCount=(bisVotes&&bisVotes[it.yt])||0;
@@ -1243,7 +1234,8 @@ function playStatusBadge(it){
 function songRow(it,opts){
   const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
   const tag=it.super?'⏫ ':(it.priority?'⚡ ':'');
-  div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+esc(it.table||it.artist||'')}</div></div>`;
+  const tsHtml=it.ts?` · <span style="opacity:.7">pedida ${hm(it.ts)}</span>`:'';
+  div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+esc(it.table||it.artist||'')+tsHtml}</div></div>`;
   if(opts&&opts.boost){
     if(!it.priority){const b=document.createElement('button');b.className='btn sm gold';b.textContent='⚡ Impulsar';b.onclick=()=>boost(it.id,it.mine);div.appendChild(b);}
     if(jumpAvail&&!it.super){const jb=document.createElement('button');jb.className='btn sm';jb.style.background='#7c3aed';jb.textContent='⏫ #1';jb.title='Saltar al primer lugar';jb.onclick=()=>jump(it.id,it.mine);div.appendChild(jb);}
@@ -1366,6 +1358,7 @@ async function poll(){
     price=s.settings.price_priority;packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
     jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;price_queue_min=s.priority_queue_min||0;
     prepaidMode=!!s.settings.prepaid_mode;walletBalance=s.wallet_balance||0;
+    VENUE_TZ=s.settings.timezone||'America/Bogota';
     renderSocials(s.settings.socials);
     document.title='TYM · '+s.settings.venue_name;
     applyTheme(s.settings.theme);
@@ -1484,7 +1477,7 @@ async function poll(){
     const items=s.my_tab||[],tl=$('tabList');
     if(!items.length)tl.innerHTML='<div class="empty">Sin cargos todavía.</div>';
     else{tl.innerHTML='';items.forEach(x=>{const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<div class="info"><div class="t">${esc(x.title)}</div><div class="a">${esc(x.kind)}</div></div><div class="chip pri">${cop(x.amount)}</div>`;tl.appendChild(r);});tickify(tl);}
+      r.innerHTML=`<div class="info"><div class="t">${esc(x.title)}</div><div class="a">${esc(x.kind)}${x.ts?' · '+hm(x.ts):''}</div></div><div class="chip pri">${cop(x.amount)}</div>`;tl.appendChild(r);});tickify(tl);}
 
     // Saldo prepago
     $('walletBal').textContent=cop(walletBalance);
@@ -1492,7 +1485,7 @@ async function poll(){
     if(!wh.length)whl.innerHTML='<div class="empty">Sin movimientos todavía.</div>';
     else{whl.innerHTML='';wh.forEach(x=>{const r=document.createElement('div');r.className='row';
       const neg=x.amount<0;
-      r.innerHTML=`<div class="info"><div class="t">${esc(x.title)}</div><div class="a">${esc(x.kind)}</div></div><div class="chip${neg?'':' pri'}">${neg?'-':''}${cop(Math.abs(x.amount))}</div>`;whl.appendChild(r);});tickify(whl);}
+      r.innerHTML=`<div class="info"><div class="t">${esc(x.title)}</div><div class="a">${esc(x.kind)}${x.ts?' · '+hm(x.ts):''}</div></div><div class="chip${neg?'':' pri'}">${neg?'-':''}${cop(Math.abs(x.amount))}</div>`;whl.appendChild(r);});tickify(whl);}
 
     // Aviso al autor de likes
     if(typeof s.my_likes_total==='number'){
