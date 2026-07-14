@@ -1819,10 +1819,16 @@ class H(BaseHTTPRequestHandler):
             if path == "/api/tv_ping":
                 now = time.time()
                 device_id = d.get("device_id")
+                force = bool(d.get("force"))
                 owner = STATE.get("tv_owner")
                 conflict = False
                 if not device_id:
                     pass  # cliente viejo sin device_id: no arbitra, comportamiento previo
+                elif force:
+                    # Switch explícito confirmado por el operador (botón "Usar esta pantalla"):
+                    # toma el control aunque el dueño anterior siga con ping reciente. El
+                    # destronado se entera en su próximo ping (~2s) y queda en espera.
+                    STATE["tv_owner"] = {"id": device_id, "last_seen": now}
                 elif not owner or now - owner.get("last_seen", 0) > TV_OWNER_TIMEOUT:
                     STATE["tv_owner"] = {"id": device_id, "last_seen": now}
                 elif owner["id"] == device_id:

@@ -224,12 +224,23 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 </div>
 <div id="duplWarn" style="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#b45309;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;z-index:34;display:none">📺 Pestaña secundaria — solo visualización, no controla audio</div>
 
-<!-- TV bloqueada: ya hay otro DISPOSITIVO (no solo pestaña) activo con esta misma TV -->
+<!-- TV bloqueada (otro DISPOSITIVO, no solo pestaña): primera vez que se detecta, se pregunta -->
+<div id="tvLockConfirm" style="position:fixed;inset:0;background:rgba(0,0,0,.97);z-index:36;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:30px">
+  <div style="font-size:52px;margin-bottom:16px">🔒</div>
+  <h2 style="font-size:26px;font-weight:800;margin-bottom:10px">Ya hay una TV principal activa en este local</h2>
+  <p style="color:#9aa7c2;margin-bottom:8px;font-size:15px;max-width:520px">Solo una pantalla puede controlar la música a la vez — 2 TVs independientes se desincronizan y hacen saltar/repetir canciones.</p>
+  <p style="color:#c3ccdd;margin-bottom:24px;font-size:14px;max-width:520px"><b>Para mostrar la música en varias pantallas sin este riesgo:</b> usa un splitter HDMI físico desde la TV activa, en vez de tomar el control aquí.</p>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
+    <button onclick="rejectDeviceTakeover()" style="padding:14px 24px;border:1px solid #2a3550;border-radius:12px;background:transparent;color:#fff;font-size:16px;cursor:pointer">No, dejar la otra pantalla activa</button>
+    <button onclick="acceptDeviceTakeover()" style="padding:14px 24px;border:none;border-radius:12px;background:#3b82f6;color:#fff;font-size:16px;font-weight:700;cursor:pointer">Usar esta pantalla (detiene la otra)</button>
+  </div>
+</div>
+<!-- TV bloqueada: bloqueo silencioso (ya se decidió no tomar el control, o esta TV fue destronada) -->
 <div id="tvLockOverlay" style="position:fixed;inset:0;background:#000;z-index:36;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:30px">
   <div style="font-size:52px;margin-bottom:16px">🔒</div>
-  <h2 style="font-size:26px;font-weight:800;margin-bottom:10px">Ya hay una TV activa para este local</h2>
-  <p style="color:#9aa7c2;margin-bottom:6px;font-size:15px;max-width:520px">Esta pantalla no puede reproducir al mismo tiempo que otra — 2 TVs independientes se desincronizan y hacen saltar/repetir canciones.</p>
-  <p style="color:#c3ccdd;margin-top:10px;font-size:14px;max-width:520px"><b>Para mostrar la música en varias pantallas:</b> usa un splitter HDMI físico desde la TV activa, en vez de abrir esta página en otro dispositivo.</p>
+  <h2 style="font-size:26px;font-weight:800;margin-bottom:10px">Otra TV tiene el control de este local</h2>
+  <p style="color:#9aa7c2;margin-bottom:6px;font-size:15px;max-width:520px">Esta pantalla se mantiene en espera — se reactivará sola si la otra TV se desconecta.</p>
+  <p style="color:#c3ccdd;margin-top:10px;font-size:14px;max-width:520px"><b>Para mostrar la música en varias pantallas:</b> usa un splitter HDMI físico desde la TV activa, en vez de otro dispositivo.</p>
 </div>
 <div id="assistZone"></div>
 
@@ -284,7 +295,16 @@ const TV_VENUE=new URLSearchParams(location.search).get('v')||'';
 const TV_DEVICE_ID=(()=>{const k='tym_tv_device_id';let id;try{id=localStorage.getItem(k);}catch(e){}
   if(!id){id='tv_'+Math.random().toString(36).slice(2)+Date.now().toString(36);try{localStorage.setItem(k,id);}catch(e){}}
   return id;})();
-let tvBlocked=false;
+let tvBlocked=false,tvDeviceDecided=false,wasEverOwner=false;
+async function acceptDeviceTakeover(){
+  try{await fetch('/api/tv_ping',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:TV_DEVICE_ID,force:true})});}catch(e){}
+  tvBlocked=false;wasEverOwner=true;tvDeviceDecided=false;
+  $('tvLockConfirm').style.display='none';$('tvLockOverlay').style.display='none';
+}
+function rejectDeviceTakeover(){
+  tvDeviceDecided=true;
+  $('tvLockConfirm').style.display='none';$('tvLockOverlay').style.display='flex';
+}
 const THEMES={azul:{pri:'#3b82f6',bg:'#000'},purpura:{pri:'#a855f7',bg:'#050208'},verde:{pri:'#10b981',bg:'#020d07'}};
 function applyTheme(t){const th=THEMES[t]||THEMES.azul,r=document.documentElement.style;r.setProperty('--pri',th.pri);document.body.style.background=th.bg;}
 $('qrImg').src='/api/qr'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
@@ -657,12 +677,25 @@ setInterval(async()=>{
     const lj=await lr.json();
     if(lj.owner_conflict){
       tvBlocked=true;
-      $('tvLockOverlay').style.display='flex';
       try{if(player&&player.pauseVideo)player.pauseVideo();}catch(e){}
+      // Solo se pregunta la primera vez (pantalla nueva). Si esta TV ya fue dueña y la
+      // destronaron, o si el usuario ya eligió "no", se queda en espera silenciosa
+      // (evita pedir confirmación en loop cada 2s o un tira-y-afloja entre pantallas).
+      if(wasEverOwner||tvDeviceDecided){
+        $('tvLockConfirm').style.display='none';
+        $('tvLockOverlay').style.display='flex';
+      }else{
+        $('tvLockOverlay').style.display='none';
+        $('tvLockConfirm').style.display='flex';
+      }
       return;
-    }else if(tvBlocked){
-      tvBlocked=false;
-      $('tvLockOverlay').style.display='none';
+    }else{
+      wasEverOwner=true;
+      if(tvBlocked){
+        tvBlocked=false;
+        $('tvLockConfirm').style.display='none';
+        $('tvLockOverlay').style.display='none';
+      }
     }
   }catch(e){}
   try{
