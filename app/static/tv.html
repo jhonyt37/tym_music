@@ -223,6 +223,14 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   <p style="color:#ef4444;margin-top:20px;font-size:13px">⚠ Tener dos TVs activas al mismo tiempo puede saltarse canciones y perder pagos</p>
 </div>
 <div id="duplWarn" style="position:fixed;bottom:70px;left:50%;transform:translateX(-50%);background:#b45309;color:#fff;padding:10px 20px;border-radius:10px;font-size:13px;font-weight:700;z-index:34;display:none">📺 Pestaña secundaria — solo visualización, no controla audio</div>
+
+<!-- TV bloqueada: ya hay otro DISPOSITIVO (no solo pestaña) activo con esta misma TV -->
+<div id="tvLockOverlay" style="position:fixed;inset:0;background:#000;z-index:36;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:30px">
+  <div style="font-size:52px;margin-bottom:16px">🔒</div>
+  <h2 style="font-size:26px;font-weight:800;margin-bottom:10px">Ya hay una TV activa para este local</h2>
+  <p style="color:#9aa7c2;margin-bottom:6px;font-size:15px;max-width:520px">Esta pantalla no puede reproducir al mismo tiempo que otra — 2 TVs independientes se desincronizan y hacen saltar/repetir canciones.</p>
+  <p style="color:#c3ccdd;margin-top:10px;font-size:14px;max-width:520px"><b>Para mostrar la música en varias pantallas:</b> usa un splitter HDMI físico desde la TV activa, en vez de abrir esta página en otro dispositivo.</p>
+</div>
 <div id="assistZone"></div>
 
 <!-- Overlay dedicatoria standalone -->
@@ -271,6 +279,12 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const TV_VENUE=new URLSearchParams(location.search).get('v')||'';
+// Identidad persistente de ESTE dispositivo/TV física (distinto del BroadcastChannel de
+// pestañas duplicadas, que no cruza dispositivos). Sobrevive a recargas de la misma TV.
+const TV_DEVICE_ID=(()=>{const k='tym_tv_device_id';let id;try{id=localStorage.getItem(k);}catch(e){}
+  if(!id){id='tv_'+Math.random().toString(36).slice(2)+Date.now().toString(36);try{localStorage.setItem(k,id);}catch(e){}}
+  return id;})();
+let tvBlocked=false;
 const THEMES={azul:{pri:'#3b82f6',bg:'#000'},purpura:{pri:'#a855f7',bg:'#050208'},verde:{pri:'#10b981',bg:'#020d07'}};
 function applyTheme(t){const th=THEMES[t]||THEMES.azul,r=document.documentElement.style;r.setProperty('--pri',th.pri);document.body.style.background=th.bg;}
 $('qrImg').src='/api/qr'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
@@ -283,7 +297,6 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 
 // ---- Estado principal ----
 let player,ready=false,curYt=null,curId=null,wantAudio=false,manualPause=false;
-let _syncAnchorPos=0,_syncAnchorT=0,_syncMiss=0; // para re-sincronizar varias TVs a la misma posición
 let topLoved=[],lastReactTotal=0,lastReactId=null,_lastReactTs=0,authok=false;
 let isPrimary=true,advancingId=undefined;
 let _lastDedicaId=null,_dedicaToMark=null,_dedicaTimeout=null;
@@ -500,7 +513,7 @@ function onYouTubeIframeAPIReady(){
 setTimeout(()=>{if(!ready){const b=document.createElement('div');b.id='ytWarn';b.className='warn';b.textContent='⚠ El reproductor de YouTube está tardando en cargar (puede pasar en el primer arranque del servidor)…';document.body.appendChild(b);}},8000);
 
 async function advance(manual=false){
-  if(!isPrimary)return;
+  if(!isPrimary||tvBlocked)return;
   const snapId=curId!==null?curId:'';
   if(advancingId===snapId)return;
   advancingId=snapId;
@@ -522,10 +535,7 @@ function load(np){
       // Solo fijar curYt cuando el player carga el video
       curYt=np.yt;
       manualPause=false; // canción nueva: cualquier pausa manual de la anterior ya no aplica
-      _syncMiss=0; // canción nueva: descarta desfase acumulado de la anterior
-      // Arranca en la posición actual (no en 0) para engancharse con otras TVs que ya la tenían sonando
-      player.loadVideoById(np.yt, np.position||0);
-      _syncAnchorPos=np.position||0;_syncAnchorT=Date.now();
+      player.loadVideoById(np.yt);
       // NO llamar unMute() aquí — solo el gesto del usuario en #audioOverlay puede hacerlo
     }
     // Si !ready: curYt queda null, el próximo tick() o watchdog lo reintentará
@@ -639,6 +649,22 @@ async function tick(){
 
 setInterval(async()=>{
   if(!authok)return;
+  // Ownership por dispositivo físico: si otra TV (otro dispositivo) ya está activa para
+  // este local, esta pantalla queda bloqueada — no reproduce, no avanza, no reporta posición.
+  // Evita la carrera de /api/progress entre 2+ TVs pisándose la posición (causaba loops/saltos).
+  try{
+    const lr=await fetch('/api/tv_ping',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:TV_DEVICE_ID})});
+    const lj=await lr.json();
+    if(lj.owner_conflict){
+      tvBlocked=true;
+      $('tvLockOverlay').style.display='flex';
+      try{if(player&&player.pauseVideo)player.pauseVideo();}catch(e){}
+      return;
+    }else if(tvBlocked){
+      tvBlocked=false;
+      $('tvLockOverlay').style.display='none';
+    }
+  }catch(e){}
   try{
     let _tvUrl='/api/state'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
     if(_dedicaToMark){_tvUrl+=(_tvUrl.includes('?')?'&':'?')+'mark_dedica='+_dedicaToMark;_dedicaToMark=null;}
@@ -659,22 +685,8 @@ setInterval(async()=>{
           player.playVideo();
           if(wantAudio){try{player.unMute();player.setVolume(100);}catch(e){}}
         }
-        // Re-sincronizar con otras TVs: si nos desviamos >0.6s de la posición esperada
-        // (proyectada desde el último reporte, no el valor crudo — evita falsos positivos
-        // por el propio retraso normal del polling), saltamos ahí. Solo mientras reproduce.
-        // Requiere 2 desvíos seguidos (≈2s) antes de saltar: filtra ruido puntual de
-        // getCurrentTime()/red que no es desfase real entre TVs.
-        if(ps===1&&!manualPause){
-          const expected=_syncAnchorPos+(Date.now()-_syncAnchorT)/1000;
-          const cur=player.getCurrentTime();
-          if(Math.abs(cur-expected)>0.6){
-            _syncMiss++;
-            if(_syncMiss>=2){player.seekTo(expected,true);_syncMiss=0;}
-          }else{_syncMiss=0;}
-        }
       }catch(e){}
     }
-    if(s.now_playing){_syncAnchorPos=s.now_playing.position||0;_syncAnchorT=Date.now();}
 
     // Trim APRENDIDO
     {const le=s.now_playing&&s.now_playing.learned_end||0;
@@ -734,15 +746,13 @@ setInterval(async()=>{
      if(cnt>0&&s.settings&&s.settings.allow_skip_vote&&s.now_playing&&!s.now_playing.fallback){
        el.style.display='flex';$('skipVoteText').textContent=`${cnt}/${thr} quieren saltar`;
      }else{el.style.display='none';}}
-
-    fetch('/api/tv_ping',{method:'POST'}).catch(()=>{});
   }catch(e){}
 },2000);
 
 setInterval(()=>{
-  if(authok&&ready&&player&&player.getCurrentTime&&curYt){
+  if(authok&&!tvBlocked&&ready&&player&&player.getCurrentTime&&curYt){
     try{const pos=player.getCurrentTime(),dur=player.getDuration();
-      if(dur>0)fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:pos,duration:dur})});}catch(e){}
+      if(dur>0)fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:pos,duration:dur,device_id:TV_DEVICE_ID})});}catch(e){}
   }
 },2000);
 </script>

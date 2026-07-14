@@ -30,6 +30,7 @@ REDIS_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
 REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY   = "tym_state"
 DEFAULT_DUR = 210  # 3:30 si no se conoce la duracion
+TV_OWNER_TIMEOUT = 8  # seg sin ping del dueño actual de la TV -> se libera (4x el intervalo de ping de 2s)
 EMOJIS = ["❤️", "🔥", "👍"]  # reacciones positivas
 VIBES = ["🔥 Que todo el mundo cante", "💃 Más baile", "🎸 Más suave", "✨ Así está perfecto"]
 BIS_THRESHOLD = 3
@@ -257,6 +258,7 @@ def make_venue(name):
         "learned_end": {},         # yt -> seg de corte aprendido por saltos manuales
         "assists": [],             # {id, table, ts, resolved, resolve_ts, token}
         "tv_lastseen": 0,          # timestamp del último ping de la TV activa
+        "tv_owner": None,          # {"id": device_id, "last_seen": ts} — dueño actual de la TV (anti 2 TVs a la vez)
         "dedicas": [],             # [{id, from_table, to_table, message, ts, shown_tv}]
         "bis_votes": {},           # {yt: set(tokens)} — votos de bis por canción
         "poll": None,              # {options, votes, active, created_at, ends_at, triggered_by_np_id, auto}
@@ -1813,13 +1815,33 @@ class H(BaseHTTPRequestHandler):
                         a["resolved"] = True; a["resolve_ts"] = time.time(); break
                 return self._send(200, {"ok": True})
 
-            # ---- TV ping (marca TV como activa) ----
+            # ---- TV ping (marca TV como activa + arbitra dueño único por dispositivo) ----
             if path == "/api/tv_ping":
-                STATE["tv_lastseen"] = time.time()
-                return self._send(200, {"ok": True})
+                now = time.time()
+                device_id = d.get("device_id")
+                owner = STATE.get("tv_owner")
+                conflict = False
+                if not device_id:
+                    pass  # cliente viejo sin device_id: no arbitra, comportamiento previo
+                elif not owner or now - owner.get("last_seen", 0) > TV_OWNER_TIMEOUT:
+                    STATE["tv_owner"] = {"id": device_id, "last_seen": now}
+                elif owner["id"] == device_id:
+                    owner["last_seen"] = now
+                else:
+                    conflict = True
+                if not conflict:
+                    STATE["tv_lastseen"] = now
+                return self._send(200, {"ok": True, "owner_conflict": conflict})
 
             # ---- Player reporta progreso ----
             if path == "/api/progress":
+                # Defensa en profundidad: si hay un dueño de TV establecido y este device_id
+                # no es el dueño, ignorar (el bloqueo real ya ocurre en el cliente via /api/tv_ping,
+                # esto solo evita que un bug/tab vieja siga pisando la posición compartida).
+                owner = STATE.get("tv_owner")
+                dev = d.get("device_id")
+                if owner and dev and owner["id"] != dev:
+                    return self._send(200, {"ok": True, "ignored": True})
                 if STATE["now_playing"]:
                     try:
                         pos = max(0, int(float(d.get("position", 0))))
