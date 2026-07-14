@@ -73,36 +73,42 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 
 /* Panel de votación en TV */
 #pollPanel{position:fixed;bottom:90px;left:50%;transform:translateX(-50%);z-index:20;
-  background:rgba(10,14,22,.95);border:2px solid #3b82f6;border-radius:24px;
-  padding:24px 36px;min-width:460px;max-width:680px;backdrop-filter:blur(14px);
-  display:none;box-shadow:0 0 0 1px rgba(59,130,246,.2),0 8px 40px rgba(59,130,246,.18)}
-#pollPanel .pp-title{font-size:22px;font-weight:900;color:#fff;margin-bottom:6px;text-align:center;letter-spacing:.3px}
-#pollPanel .pp-sub{font-size:13px;color:#9aa7c2;text-align:center;margin-bottom:14px}
-#pollTimerTV{font-size:15px;font-weight:800;color:#3b82f6;text-align:center;margin-bottom:6px;letter-spacing:.5px}
-#pollTimerBarTV{height:6px;background:#1e2940;border-radius:3px;overflow:hidden;margin-bottom:16px}
+  background:rgba(10,14,22,.55);border:1px solid rgba(59,130,246,.5);border-radius:20px;
+  padding:18px 26px;min-width:460px;max-width:760px;backdrop-filter:blur(6px);
+  display:none;box-shadow:0 8px 32px rgba(0,0,0,.25)}
+#pollPanel .pp-title{font-size:19px;font-weight:900;color:#fff;margin-bottom:4px;text-align:center;letter-spacing:.3px}
+#pollPanel .pp-sub{font-size:12px;color:#c3ccdd;text-align:center;margin-bottom:12px}
+#pollTimerTV{font-size:14px;font-weight:800;color:#3b82f6;text-align:center;margin-bottom:6px;letter-spacing:.5px}
+#pollTimerBarTV{height:5px;background:rgba(30,41,64,.7);border-radius:3px;overflow:hidden;margin-bottom:14px}
 #pollTimerBarTV .fill{height:100%;background:#3b82f6;border-radius:3px;transition:width .5s linear}
-.pp-opt{display:flex;align-items:center;gap:12px;margin-bottom:10px}
-.pp-opt .pp-title-s{flex:1;font-size:17px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.pp-bar{flex:2;height:12px;background:#1e2940;border-radius:6px;overflow:hidden}
-.pp-bar .fill{height:100%;background:#3b82f6;border-radius:6px;transition:width .6s}
-.pp-count{font-size:15px;color:#9aa7c2;width:44px;text-align:right;font-weight:800}
+.pp-opt{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.pp-thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;background:#1e2940}
+.pp-info{flex:1;min-width:0}
+.pp-title-s{font-size:15px;font-weight:700;line-height:1.25;margin-bottom:5px;color:#fff}
+.pp-row{display:flex;align-items:center;gap:10px}
+.pp-bar{flex:1;height:10px;background:rgba(30,41,64,.7);border-radius:5px;overflow:hidden}
+.pp-bar .fill{height:100%;background:#3b82f6;border-radius:5px;transition:width .6s}
+.pp-count{font-size:14px;color:#c3ccdd;width:34px;text-align:right;font-weight:800;flex-shrink:0}
 
 /* Panel de duelo en TV */
 #dueloPanel{position:fixed;bottom:90px;right:30px;z-index:22;
-  background:rgba(10,14,22,.95);border:2px solid #f59e0b;border-radius:24px;
-  padding:22px 28px;width:380px;backdrop-filter:blur(14px);
-  display:none;box-shadow:0 0 0 1px rgba(245,158,11,.2),0 8px 40px rgba(245,158,11,.18)}
-#dueloPanel .dp-title{font-size:20px;font-weight:900;color:#fff;text-align:center;margin-bottom:4px}
-#dueloPanel .dp-sub{font-size:12px;color:#9aa7c2;text-align:center;margin-bottom:10px}
-#dueloTimerTV{font-size:14px;font-weight:800;color:#f59e0b;text-align:center;margin-bottom:5px}
-#dueloTimerBarTV{height:5px;background:#1e2940;border-radius:3px;overflow:hidden;margin-bottom:14px}
+  background:rgba(10,14,22,.55);border:1px solid rgba(245,158,11,.5);border-radius:20px;
+  padding:16px 22px;width:420px;backdrop-filter:blur(6px);
+  display:none;box-shadow:0 8px 32px rgba(0,0,0,.25)}
+#dueloPanel .dp-title{font-size:17px;font-weight:900;color:#fff;text-align:center;margin-bottom:3px}
+#dueloPanel .dp-sub{font-size:11px;color:#c3ccdd;text-align:center;margin-bottom:8px}
+#dueloTimerTV{font-size:13px;font-weight:800;color:#f59e0b;text-align:center;margin-bottom:5px}
+#dueloTimerBarTV{height:4px;background:rgba(30,41,64,.7);border-radius:3px;overflow:hidden;margin-bottom:12px}
 #dueloTimerBarTV .fill{height:100%;background:#f59e0b;border-radius:3px;transition:width .5s linear}
 .dp-team{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.dp-label{font-size:11px;font-weight:900;color:#f59e0b;letter-spacing:.5px;width:22px;text-align:center}
-.dp-title-s{flex:1;font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dp-bar{flex:2;height:10px;background:#1e2940;border-radius:5px;overflow:hidden}
-.dp-bar .fill{height:100%;background:#f59e0b;border-radius:5px;transition:width .6s}
-.dp-count{font-size:13px;color:#9aa7c2;width:36px;text-align:right;font-weight:800}
+.dp-thumb{width:38px;height:38px;border-radius:7px;object-fit:cover;flex-shrink:0;background:#1e2940}
+.dp-label{font-size:11px;font-weight:900;color:#f59e0b;letter-spacing:.5px;width:16px;text-align:center;flex-shrink:0}
+.dp-info{flex:1;min-width:0}
+.dp-title-s{font-size:13px;font-weight:700;line-height:1.2;margin-bottom:4px;color:#fff}
+.dp-row{display:flex;align-items:center;gap:8px}
+.dp-bar{flex:1;height:8px;background:rgba(30,41,64,.7);border-radius:4px;overflow:hidden}
+.dp-bar .fill{height:100%;background:#f59e0b;border-radius:4px;transition:width .6s}
+.dp-count{font-size:12px;color:#c3ccdd;width:28px;text-align:right;font-weight:800;flex-shrink:0}
 /* Indicador de vibe (esquina inferior derecha) */
 #vibeIndicator{position:fixed;bottom:90px;right:26px;z-index:21;background:rgba(10,14,22,.80);
   border:1px solid #2a3550;border-radius:12px;padding:8px 16px;font-size:15px;font-weight:700;
@@ -277,6 +283,7 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 
 // ---- Estado principal ----
 let player,ready=false,curYt=null,curId=null,wantAudio=false,manualPause=false;
+let _syncAnchorPos=0,_syncAnchorT=0,_syncMiss=0; // para re-sincronizar varias TVs a la misma posición
 let topLoved=[],lastReactTotal=0,lastReactId=null,_lastReactTs=0,authok=false;
 let isPrimary=true,advancingId=undefined;
 let _lastDedicaId=null,_dedicaToMark=null,_dedicaTimeout=null;
@@ -407,7 +414,7 @@ function renderPollTV(poll){
   opts.forEach(opt=>{
     const count=votes[opt.yt]||0;const pct=Math.round(100*count/totalV);
     const row=document.createElement('div');row.className='pp-opt';
-    row.innerHTML=`<div class="pp-title-s">${esc(opt.title)}</div><div class="pp-bar"><div class="fill" style="width:${pct}%"></div></div><div class="pp-count">${count}</div>`;
+    row.innerHTML=`<img class="pp-thumb" src="https://i.ytimg.com/vi/${opt.yt}/mqdefault.jpg" onerror="this.style.visibility='hidden'"><div class="pp-info"><div class="pp-title-s">${esc(opt.title)}</div><div class="pp-row"><div class="pp-bar"><div class="fill" style="width:${pct}%"></div></div><div class="pp-count">${count}</div></div></div>`;
     box.appendChild(row);
   });
 }
@@ -435,7 +442,7 @@ function renderDueloTV(duelo){
   teams.forEach((team,idx)=>{
     const count=votes[team.yt]||0;const pct=Math.round(100*count/totalV);
     const row=document.createElement('div');row.className='dp-team';
-    row.innerHTML=`<div class="dp-label">${idx===0?'A':'B'}</div><div class="dp-title-s">${esc(team.title)}</div><div class="dp-bar"><div class="fill" style="width:${pct}%"></div></div><div class="dp-count">${count}</div>`;
+    row.innerHTML=`<div class="dp-label">${idx===0?'A':'B'}</div><img class="dp-thumb" src="https://i.ytimg.com/vi/${team.yt}/mqdefault.jpg" onerror="this.style.visibility='hidden'"><div class="dp-info"><div class="dp-title-s">${esc(team.title)}</div><div class="dp-row"><div class="dp-bar"><div class="fill" style="width:${pct}%"></div></div><div class="dp-count">${count}</div></div></div>`;
     box.appendChild(row);
   });
 }
@@ -476,7 +483,7 @@ function onYouTubeIframeAPIReady(){
     host:'https://www.youtube-nocookie.com',
     playerVars:{autoplay:1,playsinline:1,rel:0,controls:0,modestbranding:1,enablejsapi:1,origin:location.origin},
     events:{
-      onReady:()=>{ready=true;if(authok)tick();},
+      onReady:()=>{ready=true;const w=document.getElementById('ytWarn');if(w)w.remove();if(authok)tick();},
       onStateChange:e=>{
         if(e.data===YT.PlayerState.ENDED)advance();
         // Pausa manual (clic/space del operador en el propio player) — nunca la del
@@ -490,7 +497,7 @@ function onYouTubeIframeAPIReady(){
 }
 
 // Fallback: si el player no se inicializó en 8s, mostrar aviso
-setTimeout(()=>{if(!ready){const b=document.createElement('div');b.className='warn';b.textContent='⚠ El reproductor de YouTube no cargó. Verifica la conexión a internet y recarga la página.';document.body.appendChild(b);}},8000);
+setTimeout(()=>{if(!ready){const b=document.createElement('div');b.id='ytWarn';b.className='warn';b.textContent='⚠ El reproductor de YouTube está tardando en cargar (puede pasar en el primer arranque del servidor)…';document.body.appendChild(b);}},8000);
 
 async function advance(manual=false){
   if(!isPrimary)return;
@@ -515,7 +522,10 @@ function load(np){
       // Solo fijar curYt cuando el player carga el video
       curYt=np.yt;
       manualPause=false; // canción nueva: cualquier pausa manual de la anterior ya no aplica
-      player.loadVideoById(np.yt);
+      _syncMiss=0; // canción nueva: descarta desfase acumulado de la anterior
+      // Arranca en la posición actual (no en 0) para engancharse con otras TVs que ya la tenían sonando
+      player.loadVideoById(np.yt, np.position||0);
+      _syncAnchorPos=np.position||0;_syncAnchorT=Date.now();
       // NO llamar unMute() aquí — solo el gesto del usuario en #audioOverlay puede hacerlo
     }
     // Si !ready: curYt queda null, el próximo tick() o watchdog lo reintentará
@@ -649,8 +659,22 @@ setInterval(async()=>{
           player.playVideo();
           if(wantAudio){try{player.unMute();player.setVolume(100);}catch(e){}}
         }
+        // Re-sincronizar con otras TVs: si nos desviamos >0.6s de la posición esperada
+        // (proyectada desde el último reporte, no el valor crudo — evita falsos positivos
+        // por el propio retraso normal del polling), saltamos ahí. Solo mientras reproduce.
+        // Requiere 2 desvíos seguidos (≈2s) antes de saltar: filtra ruido puntual de
+        // getCurrentTime()/red que no es desfase real entre TVs.
+        if(ps===1&&!manualPause){
+          const expected=_syncAnchorPos+(Date.now()-_syncAnchorT)/1000;
+          const cur=player.getCurrentTime();
+          if(Math.abs(cur-expected)>0.6){
+            _syncMiss++;
+            if(_syncMiss>=2){player.seekTo(expected,true);_syncMiss=0;}
+          }else{_syncMiss=0;}
+        }
       }catch(e){}
     }
+    if(s.now_playing){_syncAnchorPos=s.now_playing.position||0;_syncAnchorT=Date.now();}
 
     // Trim APRENDIDO
     {const le=s.now_playing&&s.now_playing.learned_end||0;
