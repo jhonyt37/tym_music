@@ -648,6 +648,13 @@ def get_customer(sess):
     phone = sess and sess.get("phone")
     return STATE["customers"].get(phone) if phone else None
 
+def session_public(sess):
+    """Vista de la sesión que viaja al cliente. 'registered' indica si tiene celular
+    asociado (modo prepago) — el cliente lo usa para saber si debe mostrar el gate de
+    registro en vez de asumir que cualquier sesión existente ya puede pagar."""
+    return {"table": sess["table"], "credits": sess["credits"], "pass_until": sess["pass_until"],
+            "registered": bool(sess.get("phone"))}
+
 def customer_label(name, station):
     return f"{name} · {station}" if station else name
 
@@ -1131,8 +1138,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         "skip_threshold": max(2, -(-len({se["table"] for se in STATE.get("sessions", {}).values()
                                          if time.time() - se.get("created", 0) < 7200}) // 2)),
         "my_skip_vote": bool(token and token in STATE.get("skip_votes", set())),
-        "session": (None if not sess else {"table": sess["table"], "credits": sess["credits"],
-                                           "pass_until": sess["pass_until"]}),
+        "session": (session_public(sess) if sess else None),
     }
     if sess:
         tbl = sess["table"]
@@ -1514,7 +1520,7 @@ class H(BaseHTTPRequestHandler):
                                           "existing_tab": existing_tab})
                 return self._send(200, {"ok": True, "token": token,
                                         "existing_tab": existing_tab,
-                                        "session": {"table": table, "credits": 0, "pass_until": 0}})
+                                        "session": session_public(STATE["sessions"][token])})
 
             # ---- Registro por celular (reemplaza el PIN en modo prepago) ----
             if path == "/api/register":
@@ -1546,7 +1552,7 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True, "token": token, "recovered": recovered,
                                         "balance": customer["balance"],
                                         "wallet_history": customer["wallet_history"][:20],
-                                        "session": {"table": label, "credits": 0, "pass_until": 0}})
+                                        "session": session_public(STATE["sessions"][token])})
 
             # ---- Recargar saldo (modo prepago; simulado esta fase) ----
             if path == "/api/wallet/topup":
@@ -1599,8 +1605,7 @@ class H(BaseHTTPRequestHandler):
                     sess["credits"] += pkg["qty"]
                 else:
                     sess["pass_until"] = max(time.time(), sess["pass_until"]) + tp["minutes"] * 60
-                return self._send(200, {"ok": True, "session": {
-                    "table": sess["table"], "credits": sess["credits"], "pass_until": sess["pass_until"]}})
+                return self._send(200, {"ok": True, "session": session_public(sess)})
 
             # ---- Pedir cancion ----
             if path == "/api/request":
@@ -1704,8 +1709,7 @@ class H(BaseHTTPRequestHandler):
                 if STATE["now_playing"] is None and item["status"] == "approved":
                     promote_next()
                 return self._send(200, {"ok": True, "mode": mode,
-                                        "session": {"table": table, "credits": sess["credits"],
-                                                    "pass_until": sess["pass_until"]}})
+                                        "session": session_public(sess)})
 
             # ---- Reaccionar (positivo) ----
             if path == "/api/react":
@@ -1756,8 +1760,7 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "Esa canción ya no está en la cola"})
                 if target.get("priority"):
                     return self._send(200, {"ok": True, "already": True,
-                                            "session": {"table": sess["table"], "credits": sess["credits"],
-                                                        "pass_until": sess["pass_until"]}})
+                                            "session": session_public(sess)})
                 now = time.time()
                 free = sess["pass_until"] > now or sess["credits"] > 0
                 price = 0 if free else STATE["settings"]["price_priority"]
@@ -1780,8 +1783,7 @@ class H(BaseHTTPRequestHandler):
                     target["charge_on_play"] = 0
                 else:
                     target["charge_on_play"] = 0 if charge_via else price
-                return self._send(200, {"ok": True, "session": {"table": sess["table"], "credits": sess["credits"],
-                                                                "pass_until": sess["pass_until"]}})
+                return self._send(200, {"ok": True, "session": session_public(sess)})
 
             # ---- Saltar al #1 (premium, 1 por canción, primera mesa que lo hace) ----
             if path == "/api/jump":

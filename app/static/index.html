@@ -1405,8 +1405,11 @@ async function poll(){
     updateHeaderTicker(s.my_tab_total||0);
     updateAssistBtn();
 
-    // Gate
-    if(!sess){
+    // Gate — en modo prepago, una sesión de mesa vieja (sin celular registrado) NO
+    // basta para pedir/pagar: si no, poll() (cada 2s) cierra el gate de registro que
+    // showNeedsRegistration() acaba de abrir, y el cliente queda en un loop sin poder
+    // registrarse nunca (bug reportado: "vuelve a login y salta de vuelta a home").
+    if(!sess||(prepaidMode&&!sess.registered)){
       $('gate').style.display='flex';
       $('gatePin').style.display=prepaidMode?'none':'';
       $('gateRegister').style.display=prepaidMode?'':'none';
