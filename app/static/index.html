@@ -456,6 +456,15 @@ body{padding-bottom:80px}
   </div>
 </div>
 
+<!-- Sheet pasarela de pago (simulada) -->
+<div class="sheet-bg" id="gatewaySheet" style="z-index:32;align-items:center;justify-content:center">
+  <div class="sheet" style="text-align:center;max-width:320px;border-radius:22px">
+    <div id="gatewayIcon" style="font-size:42px;margin-bottom:8px">💳</div>
+    <div id="gatewayText" style="font-weight:700;font-size:16px"></div>
+    <div class="muted" style="margin-top:6px;font-size:13px">Pasarela de pago simulada · Wompi</div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 <div id="fx"></div>
 
@@ -1301,12 +1310,28 @@ async function doJump(id,payMethod){
 }
 
 // ---------- Saldo prepago ----------
-function openTopup(suggested){$('topupCustom').value=suggested||'';$('topupSheet').classList.add('open');}
-function closeTopup(){$('topupSheet').classList.remove('open');}
+function openTopup(suggested){$('topupCustom').value=suggested||'';$('topupSheet').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');}
+function closeTopup(){$('topupSheet').classList.remove('open');document.body.style.overflow='';$('nav').classList.remove('modal-open');}
 function pickTopup(n){confirmModal('Confirmar recarga','Se agregarán <b>'+cop(n)+'</b> a tu saldo en este local (simulado, vía Wompi).',()=>doTopup(n));}
 function confirmTopup(){const n=parseInt($('topupCustom').value||0);if(n<100){toast('Monto inválido','err');return;}pickTopup(n);}
+// Simula el paso por la pasarela de pago (Wompi real es fase futura — ver docs).
+// Da la sensación de un ciclo de pago real: "conectando" → "aprobado" → cierra solo.
+function simulateGateway(){
+  return new Promise(resolve=>{
+    $('gatewayIcon').textContent='💳';$('gatewayText').textContent='Conectando con Wompi…';
+    $('gatewaySheet').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
+    setTimeout(()=>{
+      $('gatewayIcon').textContent='✅';$('gatewayText').textContent='Pago aprobado';
+      setTimeout(()=>{
+        $('gatewaySheet').classList.remove('open');document.body.style.overflow='';$('nav').classList.remove('modal-open');
+        resolve();
+      },600);
+    },900);
+  });
+}
 async function doTopup(amount){
   closeTopup();
+  await simulateGateway();
   const j=await (await fetch('/api/wallet/topup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,amount})})).json();
   if(j.ok){toast('💳 Saldo recargado: '+cop(j.balance),'ok');poll();if(insufRetry){const r=insufRetry;insufRetry=null;r();}}
   else if(j.needs_registration){showNeedsRegistration(()=>doTopup(amount));}
@@ -1318,9 +1343,9 @@ function showInsufficient(j,retryWithDirect){
   $('insufDirectBtn').style.display=need>=minDp?'':'none';
   $('insufDirectBtn').textContent='⚡ Pagar directo '+cop(need)+' (simulado · Wompi)';
   insufRetry=retryWithDirect;insufNeed=need;
-  $('insufBg').classList.add('open');
+  $('insufBg').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
 }
-function closeInsuf(){$('insufBg').classList.remove('open');insufRetry=null;}
+function closeInsuf(){$('insufBg').classList.remove('open');document.body.style.overflow='';$('nav').classList.remove('modal-open');insufRetry=null;}
 function fromInsufTopup(){const need=insufNeed;closeInsuf();openTopup(need);}
 function fromInsufDirect(){const r=insufRetry;closeInsuf();r&&r();}
 function showNeedsRegistration(retryFn){
