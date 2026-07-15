@@ -628,24 +628,42 @@ function interleaveArtists(perArtist, max){
   }
   return out;
 }
-async function loadSimilar(artists){
+// Normaliza un título para detectar la MISMA canción en otro video (distinto yt id):
+// quita "(Official Video)"/"(Letra)"/etc, todo tras "ft./feat.", y puntuación.
+function normTitle(t){
+  return (t||'').toLowerCase()
+    .replace(/[\(\[][^)\]]*[\)\]]/g,' ')
+    .replace(/\b(ft|feat|featuring)\b.*$/,'')
+    .replace(/[^a-z0-9áéíóúñ]+/g,' ')
+    .trim();
+}
+async function loadSimilar(artists,genres,recentTitles){
   const unique=[...new Set((Array.isArray(artists)?artists:[artists]).filter(Boolean))].slice(0,3);
-  if(!unique.length){$('simBox').style.display='none';return;}
+  // genres: género real de la canción (iTunes) + género del local, si son distintos —
+  // así si iTunes no responde o trae poco, el género del local sigue completando (fallback).
+  const uniqueGenres=[...new Set((Array.isArray(genres)?genres:[genres]).filter(Boolean).map(g=>g.toLowerCase()))];
+  if(!unique.length&&!uniqueGenres.length){$('simBox').style.display='none';return;}
   $('simBox').style.display='block';
-  $('simLabel').textContent=unique.join(' · ');
+  $('simLabel').textContent=[...unique,...uniqueGenres].filter(Boolean).join(' · ');
   $('simList').innerHTML='<div class="empty" style="font-size:13px">Buscando…</div>';
   try{
-    // Busca todos los artistas en paralelo
-    const perArtist=await Promise.all(unique.map(a=>
-      fetch('/api/search?q='+encodeURIComponent(a)).then(r=>r.json()).catch(()=>[])
+    // Busca todos los artistas + los géneros en paralelo
+    const queries=[...unique,...uniqueGenres.map(g=>g+' canciones')];
+    const perQuery=await Promise.all(queries.map(q=>
+      fetch('/api/search?q='+encodeURIComponent(q)).then(r=>r.json()).catch(()=>[])
     ));
-    // Dedup global (excluye la canción actual)
-    const seen=new Set([_nowYt]);
-    const filtered=perArtist.map(ar=>ar.filter(s=>{
-      if(!s.yt||seen.has(s.yt))return false;
-      seen.add(s.yt);return true;
+    // Dedup: excluye la canción actual (por id) y cualquiera ya sonada (por título,
+    // para atrapar el mismo tema en un video de YouTube distinto).
+    const seenYt=new Set([_nowYt]);
+    const seenTitle=new Set((recentTitles||[]).map(normTitle).filter(Boolean));
+    const filtered=perQuery.map(ar=>ar.filter(s=>{
+      if(!s.yt||seenYt.has(s.yt))return false;
+      const nt=normTitle(s.title);
+      if(nt&&seenTitle.has(nt))return false;
+      seenYt.add(s.yt);if(nt)seenTitle.add(nt);
+      return true;
     }));
-    // Round-robin: garantiza al menos 3 canciones de cada artista en 9 slots
+    // Round-robin: garantiza representación de cada artista/género en 9 slots
     const merged=interleaveArtists(filtered,9);
     const box=$('simList');box.innerHTML='';
     if(!merged.length){$('simBox').style.display='none';return;}
@@ -1432,7 +1450,16 @@ async function poll(){
     if(np&&np.artist&&np.id!==_simLoadedForId){
       _simLoadedForId=np.id;_nowYt=np.yt;
       const simArtists=[np.artist,(s.history[0]||{}).artist,(s.history[1]||{}).artist];
-      loadSimilar(simArtists);
+      const recentTitles=[np.title,...(s.history||[]).map(h=>h.title)];
+      const npId=np.id;
+      // Género REAL de la canción que suena (iTunes), no el género fijo del local —
+      // así si suena salsa, salen más salsa, aunque el local tenga otro género configurado.
+      fetch('/api/genre?artist='+encodeURIComponent(np.artist)+'&title='+encodeURIComponent(np.title))
+        .then(r=>r.json()).catch(()=>({}))
+        .then(g=>{
+          if(_simLoadedForId!==npId)return; // la canción ya cambió, descarta esta respuesta vieja
+          loadSimilar(simArtists,[g.genre,s.active_genre],recentTitles);
+        });
     }else if(!np){$('simBox').style.display='none';_simLoadedForId=null;}
 
     // Now playing

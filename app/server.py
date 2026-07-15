@@ -589,6 +589,58 @@ def yt_search(q, limit=12):
     _search_cache[key] = (now, res)
     return res
 
+# ---- Genero real de la cancion sonando (iTunes Search API: gratis, sin API key) ----
+# Se usa para sugerir "mas de este genero" con el genero REAL de la cancion que suena,
+# en vez de depender del genero fijo configurado en el local (settings.genre).
+_genre_cache = {}
+GENRE_TTL = 6 * 3600
+
+def _clean_for_lookup(t):
+    """Quita '(Video Oficial)'/'[Lyrics]'/etc y todo tras 'ft./feat.' — sin esto iTunes
+    no encuentra nada (probado: con parentesis da 0 resultados, limpio si matchea)."""
+    t = re.sub(r"[\(\[][^)\]]*[\)\]]", " ", t or "")
+    t = re.sub(r"\b(ft|feat|featuring)\b.*$", "", t, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", t).strip()
+
+def _itunes_query(term, entity):
+    if not term:
+        return []
+    url = "https://itunes.apple.com/search?" + urllib.parse.urlencode(
+        {"term": term, "entity": entity, "limit": 3, "country": "CO"})
+    try:
+        d = json.loads(urllib.request.urlopen(url, timeout=6).read())
+        return d.get("results", [])
+    except Exception:
+        return []
+
+def itunes_genre(artist, title):
+    artist = (artist or "").strip()[:80]
+    title = (title or "").strip()[:150]
+    if not artist and not title:
+        return None
+    key = (artist.lower(), title.lower())
+    now = time.time()
+    hit = _genre_cache.get(key)
+    if hit and now - hit[0] < GENRE_TTL:
+        return hit[1]
+    genre = None
+    clean_title = _clean_for_lookup(title)
+    results = _itunes_query(f"{artist} {clean_title}".strip(), "song")
+    al = artist.lower()
+    match = next((r for r in results if al and (al in (r.get("artistName") or "").lower()
+                  or (r.get("artistName") or "").lower() in al)), None)
+    genre = (match or (results[0] if results else {})).get("primaryGenreName")
+    if not genre and artist:
+        results = _itunes_query(artist, "musicArtist")
+        if results:
+            genre = results[0].get("primaryGenreName")
+    _genre_cache[key] = (now, genre)
+    if len(_genre_cache) > 3000:
+        stale = [k for k, v in _genre_cache.items() if now - v[0] > GENRE_TTL]
+        for k in stale:
+            del _genre_cache[k]
+    return genre
+
 def get_session(token):
     return STATE["sessions"].get(token) if token else None
 
@@ -1261,6 +1313,12 @@ class H(BaseHTTPRequestHandler):
                 return self._send(429, {"error": "Demasiadas búsquedas. Espera un momento."})
             q = self._q("q")[:150]
             return self._send(200, yt_search(q))
+        if path == "/api/genre":
+            ip = self.client_address[0]
+            if not _rate_ok(ip, "search"):
+                return self._send(429, {"error": "Demasiadas búsquedas. Espera un momento."})
+            genre = itunes_genre(self._q("artist"), self._q("title"))
+            return self._send(200, {"genre": genre})
         if path == "/api/me":
             av = self.authed_venue()
             if not av:
