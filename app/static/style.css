@@ -55,6 +55,13 @@ header.bar{
 .search{width:100%;padding:14px 16px;border-radius:12px;border:1px solid var(--line);
   background:var(--bg2);color:var(--txt);font-size:16px;outline:none}
 .search:focus{border-color:var(--pri)}
+
+.search-wrap{position:relative}
+.search-wrap input{padding-right:38px}
+.search-clear{position:absolute;right:6px;top:50%;transform:translateY(-50%);width:28px;height:28px;
+  border:none;background:transparent;color:var(--mut);font-size:16px;cursor:pointer;border-radius:50%;
+  display:none;align-items:center;justify-content:center;line-height:1;padding:0}
+.search-clear:hover{color:var(--txt);background:rgba(255,255,255,.08)}
 .muted{color:var(--mut);font-size:13px}
 
 .list{display:flex;flex-direction:column;gap:8px;margin-top:10px}

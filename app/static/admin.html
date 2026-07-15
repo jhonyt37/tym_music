@@ -122,7 +122,10 @@
         <div class="card">
           <p class="sec">Agregar canción a la cola</p>
           <div style="display:flex;gap:8px">
-            <input class="field" id="adminQ" placeholder="Buscar canción…" style="margin:0;flex:1" oninput="adminSearch()" onkeydown="if(event.key==='Enter')adminSearch()">
+            <div class="search-wrap" style="margin:0;flex:1">
+              <input class="field" id="adminQ" placeholder="Buscar canción…" style="margin:0;width:100%" oninput="adminSearch()" onkeydown="if(event.key==='Enter')adminSearch()">
+              <button type="button" class="search-clear" id="adminQClear" aria-label="Borrar búsqueda">✕</button>
+            </div>
           </div>
           <div class="list" id="adminResults" style="margin-top:8px"></div>
         </div>
@@ -340,7 +343,10 @@
       <!-- Curated playlist -->
       <div class="card">
         <p class="sec">Recomendadas del local</p>
-        <input class="search" id="curq" placeholder="Buscar para añadir…" autocomplete="off">
+        <div class="search-wrap">
+          <input class="search" id="curq" placeholder="Buscar para añadir…" autocomplete="off">
+          <button type="button" class="search-clear" id="curqClear" aria-label="Borrar búsqueda">✕</button>
+        </div>
         <div class="list" id="curResults" style="margin-top:8px;max-height:170px;overflow:auto"></div>
         <h2 style="margin-top:14px;font-size:14px;font-weight:700">En tu lista</h2>
         <div class="list" id="curList"></div>
@@ -437,7 +443,10 @@
       <div id="pollAdminStatus" style="margin-bottom:12px"></div>
       <div id="pollAdminForm">
         <div class="small" style="margin-bottom:8px;color:var(--mut)">Busca y selecciona 2-3 canciones para la votación:</div>
-        <input class="field" id="pollSearch" placeholder="Buscar canción para la votación…" oninput="pollAdminSearch()">
+        <div class="search-wrap">
+          <input class="field" id="pollSearch" placeholder="Buscar canción para la votación…" oninput="pollAdminSearch()">
+          <button type="button" class="search-clear" id="pollSearchClear" aria-label="Borrar búsqueda">✕</button>
+        </div>
         <div class="list" id="pollSearchResults" style="margin-top:6px;max-height:160px;overflow:auto"></div>
         <div id="pollSelected" style="margin-top:10px"></div>
         <button class="btn block" style="margin-top:10px" onclick="createPoll()">🗳️ Crear votación</button>
@@ -451,9 +460,15 @@
       <div class="small" style="color:var(--mut);margin-bottom:10px">Enfrenta 2 canciones — la que más votos tenga en el tiempo asignado se encola automáticamente.</div>
       <div id="dueloAdminStatus" style="margin-bottom:10px"></div>
       <div id="dueloAdminForm">
-        <input class="field" id="dueloSearchA" placeholder="🔴 Buscar canción A…" oninput="dueloSearch('A')">
+        <div class="search-wrap">
+          <input class="field" id="dueloSearchA" placeholder="🔴 Buscar canción A…" oninput="dueloSearch('A')">
+          <button type="button" class="search-clear" id="dueloSearchAClear" aria-label="Borrar búsqueda">✕</button>
+        </div>
         <div class="list" id="dueloResultsA" style="margin-top:4px;max-height:140px;overflow:auto;margin-bottom:10px"></div>
-        <input class="field" id="dueloSearchB" placeholder="🔵 Buscar canción B…" oninput="dueloSearch('B')">
+        <div class="search-wrap">
+          <input class="field" id="dueloSearchB" placeholder="🔵 Buscar canción B…" oninput="dueloSearch('B')">
+          <button type="button" class="search-clear" id="dueloSearchBClear" aria-label="Borrar búsqueda">✕</button>
+        </div>
         <div class="list" id="dueloResultsB" style="margin-top:4px;max-height:140px;overflow:auto;margin-bottom:10px"></div>
         <div id="dueloSelectedA" style="margin-bottom:6px"></div>
         <div id="dueloSelectedB" style="margin-bottom:10px"></div>
@@ -678,6 +693,18 @@ async function loadTables(){
   });
 }
 async function addTable(){await post('/api/admin/tables',{action:'add'});loadTables();}
+
+// Botón "✕" para limpiar un input de búsqueda: aparece con texto, al click limpia
+// y redispara el 'input' del propio campo (reutiliza el listener/oninput que ya tenga).
+function initSearchClear(inputId,btnId){
+  const el=$(inputId),btn=$(btnId);
+  if(!el||!btn)return;
+  const sync=()=>{btn.style.display=el.value?'flex':'none';};
+  el.addEventListener('input',sync);
+  btn.addEventListener('click',()=>{el.value='';el.dispatchEvent(new Event('input',{bubbles:true}));el.focus();sync();});
+  sync();
+}
+['adminQ','curq','pollSearch','dueloSearchA','dueloSearchB'].forEach(id=>initSearchClear(id,id+'Clear'));
 
 // Curadas
 $('curq').addEventListener('input',e=>{

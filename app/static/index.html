@@ -175,7 +175,10 @@ body{padding-bottom:80px}
   <section class="tab on" id="tab-pedir">
     <div class="card">
       <h2>Pon tu canción 🎵</h2>
-      <input class="search" id="q" placeholder="Buscar canción, artista o pega un link de YouTube…" autocomplete="off">
+      <div class="search-wrap">
+        <input class="search" id="q" placeholder="Buscar canción, artista o pega un link de YouTube…" autocomplete="off">
+        <button type="button" class="search-clear" id="qClear" aria-label="Borrar búsqueda">✕</button>
+      </div>
       <div id="recoBox" style="margin-top:14px">
         <div class="chips" id="recoChips"></div>
         <div class="list" id="results"></div>
@@ -474,7 +477,7 @@ let prepaidMode=false, walletBalance=0, insufRetry=null, insufNeed=0, pendingRet
 const VENUE=new URLSearchParams(location.search).get('v')||'';
 let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], pass_obj={minutes:30,price:5000};
 let VENUE_TZ='America/Bogota';
-let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='';
+let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='', lastList=null, lastMax=12;
 let assistActive=false, assistId=null, _lastBuzzTs=0;
 let _simLoadedForId=null, _nowYt=null;
 let _npState=null;
@@ -497,9 +500,20 @@ const hm=ts=>ts?new Date(ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',min
   }catch(e){}
 })();
 
+// Botón "✕" para limpiar un input de búsqueda: aparece con texto, al click limpia
+// y redispara el 'input' del propio campo (reutiliza el listener que ya tenga).
+function initSearchClear(inputId,btnId){
+  const el=$(inputId),btn=$(btnId);
+  if(!el||!btn)return;
+  const sync=()=>{btn.style.display=el.value?'flex':'none';};
+  el.addEventListener('input',sync);
+  btn.addEventListener('click',()=>{el.value='';el.dispatchEvent(new Event('input',{bubbles:true}));el.focus();sync();});
+  sync();
+}
 async function boot(){
   CAT=await (await fetch('/api/catalog')).json();
   $('q').addEventListener('input',e=>onSearch(e.target.value));
+  initSearchClear('q','qClear');
   $('pinInput').addEventListener('keydown',e=>{if(e.key==='Enter')enterPin();});
   ['regName','regPhone','regEmail'].forEach(id=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')enterRegister();}));
   document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
@@ -582,6 +596,7 @@ function onSearch(term){
   },350);
 }
 function renderResults(list, max=12){
+  lastList=list;lastMax=max;
   const res=$('results');res.innerHTML='';
   if(!list||!list.length){res.innerHTML='<div class="empty">Sin resultados. Prueba otro nombre o pega un link de YouTube.</div>';return;}
   list.slice(0,max).forEach(s=>{
@@ -648,7 +663,7 @@ async function loadSimilar(artists){
       shownArtists.forEach(a=>{
         const b=document.createElement('button');b.className='btn sm ghost';
         b.textContent='Más de '+a;
-        b.onclick=()=>{showTab('pedir');$('q').value=a;onSearch(a);};
+        b.onclick=()=>{showTab('pedir');$('q').value=a;$('q').dispatchEvent(new Event('input'));};
         wrap.appendChild(b);
       });
       box.appendChild(wrap);
@@ -715,8 +730,11 @@ async function doReq(payMethod){
     const j=await r.json();
     if(j.ok){if(j.session)sess=j.session;
       toast(mode==='super'?'⏫ ¡Tu canción al frente!':(mode==='pri'?'⚡ ¡Pedida con prioridad!':'¡Canción pedida!'),'ok');
-      $('q').value='';$('recoChips').style.display='flex';
-      renderReco();refreshBal();}
+      // Mantiene la búsqueda/lista visible (no la resetea) para poder seguir pidiendo
+      // más canciones del mismo artista/búsqueda sin tener que escribir de nuevo.
+      if(chosen.yt)_queueYts.add(chosen.yt);
+      if(lastList)renderResults(lastList,lastMax);
+      refreshBal();}
     else if(j.needs_registration){showNeedsRegistration(()=>doReq());}
     else if(j.insufficient_balance){showInsufficient(j,()=>doReq('direct'));}
     else toast(j.error||'Error',j.race?'warn':'err');
