@@ -1522,6 +1522,22 @@ class H(BaseHTTPRequestHandler):
                                         "existing_tab": existing_tab,
                                         "session": session_public(STATE["sessions"][token])})
 
+            # ---- Sesion anonima (modo prepago): deja navegar/pedir gratis sin formulario.
+            # El registro por celular (nombre+telefono) solo se pide despues, en el momento
+            # de pagar algo (try_charge_prepaid -> needs_registration), no de entrada. ----
+            if path == "/api/anon_session":
+                if not _rate_ok(self.client_address[0], "session"):
+                    return self._send(429, {"error": "Demasiados intentos. Espera un momento."})
+                if not STATE["settings"].get("prepaid_mode"):
+                    return self._send(400, {"error": "Este local no usa registro por celular."})
+                token = gen_token()
+                STATE["sessions"][token] = {"table": "Invitado", "credits": 0, "pass_until": 0,
+                                            "created": time.time(), "phone": None}
+                TOKENS[token] = CUR_VID
+                open_account(token, CUR_VID, "Invitado")
+                return self._send(200, {"ok": True, "token": token,
+                                        "session": session_public(STATE["sessions"][token])})
+
             # ---- Registro por celular (reemplaza el PIN en modo prepago) ----
             if path == "/api/register":
                 if not _rate_ok(self.client_address[0], "session"):

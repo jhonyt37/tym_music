@@ -159,14 +159,19 @@ body{padding-bottom:80px}
   </div>
   <div class="box" id="gateRegister" style="display:none">
     <div class="logo" style="font-size:26px">TY<b>M</b> Music</div>
-    <h2>Regístrate para pedir</h2>
+    <h2>Regístrate para pagar</h2>
     <div class="muted">Tu saldo queda guardado a tu celular</div>
-    <input class="field" id="regName" placeholder="Tu nombre" style="margin-top:14px">
-    <input class="field" id="regPhone" inputmode="tel" placeholder="Celular" style="margin-top:8px">
-    <input class="field" id="regEmail" type="email" placeholder="Correo" style="margin-top:8px">
-    <select class="field" id="regStation" style="margin-top:8px;display:none"></select>
-    <button class="btn block" style="margin-top:12px" onclick="enterRegister()">Entrar</button>
+    <form autocomplete="on" onsubmit="event.preventDefault();enterRegister();">
+      <input class="field" id="regName" name="name" placeholder="Tu nombre" autocomplete="name" style="margin-top:14px">
+      <input class="field" id="regPhone" name="tel" type="tel" inputmode="tel" placeholder="Celular" autocomplete="tel" style="margin-top:8px">
+      <input class="field" id="regEmail" name="email" type="email" placeholder="Correo" autocomplete="email" style="margin-top:8px">
+      <select class="field" id="regStation" style="margin-top:8px;display:none"></select>
+      <button class="btn block" type="submit" style="margin-top:12px">Entrar</button>
+    </form>
     <div class="small" id="regErr" style="color:var(--red);margin-top:10px;min-height:16px"></div>
+    <div class="small" style="margin-top:2px">
+      <a href="#" onclick="cancelRegisterGate();return false;" style="color:var(--mut)">Ahora no</a>
+    </div>
   </div>
 </div>
 
@@ -483,6 +488,7 @@ function applyTheme(t){
 }
 let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0;
 let prepaidMode=false, walletBalance=0, insufRetry=null, insufNeed=0, pendingRetry=null;
+let registerGateOpen=false, _anonBusy=false;
 const VENUE=new URLSearchParams(location.search).get('v')||'';
 let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], pass_obj={minutes:30,price:5000};
 let VENUE_TZ='America/Bogota';
@@ -524,7 +530,6 @@ async function boot(){
   $('q').addEventListener('input',e=>onSearch(e.target.value));
   initSearchClear('q','qClear');
   $('pinInput').addEventListener('keydown',e=>{if(e.key==='Enter')enterPin();});
-  ['regName','regPhone','regEmail'].forEach(id=>$(id).addEventListener('keydown',e=>{if(e.key==='Enter')enterRegister();}));
   document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
   initBellDrag();
   loadReco();
@@ -561,6 +566,7 @@ async function enterRegister(){
   const j=await r.json();
   if(j.ok){
     token=j.token;localStorage.setItem('tym_token_'+VENUE,token);sess=j.session;
+    registerGateOpen=false;
     $('gate').style.display='none';
     toast(j.recovered?'¡Bienvenido de nuevo! Saldo: '+cop(j.balance):'¡Bienvenido! Ya puedes pedir tu música 🎶','ok');
     poll();
@@ -1350,8 +1356,25 @@ function fromInsufTopup(){const need=insufNeed;closeInsuf();openTopup(need);}
 function fromInsufDirect(){const r=insufRetry;closeInsuf();r&&r();}
 function showNeedsRegistration(retryFn){
   pendingRetry=retryFn;
+  registerGateOpen=true;
   $('gate').style.display='flex';$('gatePin').style.display='none';$('gateRegister').style.display='';
-  toast('Este local ahora usa saldo prepago — regístrate para continuar','err');
+  toast('Para pagar necesitamos tu celular — regístrate para continuar','err');
+}
+function cancelRegisterGate(){
+  pendingRetry=null;registerGateOpen=false;
+  $('gate').style.display='none';
+}
+// Sesión ligera sin formulario (modo prepago): permite navegar y pedir gratis de
+// entrada. El registro completo (nombre+celular) solo se pide al pagar algo.
+async function ensureAnonSession(){
+  if(_anonBusy||token)return;
+  _anonBusy=true;
+  try{
+    const r=await fetch('/api/anon_session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({v:VENUE})});
+    const j=await r.json();
+    if(j.ok){token=j.token;localStorage.setItem('tym_token_'+VENUE,token);sess=j.session;poll();}
+  }catch(e){}
+  finally{_anonBusy=false;}
 }
 function renderSocials(soc){
   const box=$('socialLinks');if(!box)return;box.innerHTML='';
@@ -1430,26 +1453,28 @@ async function poll(){
     updateHeaderTicker(s.my_tab_total||0);
     updateAssistBtn();
 
-    // Gate — en modo prepago, una sesión de mesa vieja (sin celular registrado) NO
-    // basta para pedir/pagar: si no, poll() (cada 2s) cierra el gate de registro que
-    // showNeedsRegistration() acaba de abrir, y el cliente queda en un loop sin poder
-    // registrarse nunca (bug reportado: "vuelve a login y salta de vuelta a home").
-    if(!sess||(prepaidMode&&!sess.registered)){
-      $('gate').style.display='flex';
-      $('gatePin').style.display=prepaidMode?'none':'';
-      $('gateRegister').style.display=prepaidMode?'':'none';
-      if(prepaidMode){
-        const stSel=$('regStation'),stations=s.stations||[];
-        if(stations.length){
-          stSel.style.display='';
-          if(stSel.dataset.count!=stations.length){
-            stSel.innerHTML=stations.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
-            stSel.dataset.count=stations.length;
-          }
-        }else stSel.style.display='none';
-      }
+    // Gate. En modo prepago se navega y se pide GRATIS sin formulario (sesión anónima
+    // silenciosa vía ensureAnonSession) — el registro de celular solo se pide cuando
+    // se va a pagar algo de verdad (showNeedsRegistration, activado por el servidor).
+    // registerGateOpen es la única señal que controla el gate de registro: así este
+    // poll() (cada 2s) nunca lo cierra solo mientras el cliente lo está completando
+    // (bug ya corregido antes: "vuelve a login y salta de vuelta a home").
+    if(prepaidMode){
+      const stSel=$('regStation'),stations=s.stations||[];
+      if(stations.length){
+        stSel.style.display='';
+        if(stSel.dataset.count!=stations.length){
+          stSel.innerHTML=stations.map(n=>`<option value="${esc(n)}">${esc(n)}</option>`).join('');
+          stSel.dataset.count=stations.length;
+        }
+      }else stSel.style.display='none';
     }
-    else{$('gate').style.display='none';}
+    if(registerGateOpen){
+      // completando un registro pedido a mitad de un pago — no tocar el gate
+    }else if(!sess){
+      if(prepaidMode){$('gate').style.display='none';ensureAnonSession();}
+      else{$('gate').style.display='flex';$('gatePin').style.display='';$('gateRegister').style.display='none';}
+    }else{$('gate').style.display='none';}
 
     $('tabCard').style.display=prepaidMode?'none':'';
     $('walletCard').style.display=prepaidMode?'':'none';
