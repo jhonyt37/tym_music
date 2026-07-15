@@ -76,10 +76,16 @@ function onYouTubeIframeAPIReady(){
     events:{onReady:()=>{ready=true;if(authok)tick();},onStateChange:onState,onError:onErr}});
 }
 function onState(e){ if(e.data===YT.PlayerState.ENDED){ advance(); } }
-function onErr(){ if(isRawIP&&!isLocal){ showLocalHint(); return; } setTimeout(advance,1200); }
+function onErr(){ if(isRawIP&&!isLocal){ showLocalHint(); return; } setTimeout(()=>advance({from_id:curId,manual:true}),1200); }
 function startAudio(){wantAudio=true; if(player){player.unMute();player.setVolume(100);player.playVideo();}}
 
-async function advance(body){ await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); tick(); }
+async function advance(body){
+  await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})});
+  // Fuerza recarga aunque el servidor devuelva la misma canción (ej. re-encolada): sin esto
+  // el player se queda congelado en la pantalla de error porque load() no ve cambio de yt.
+  curYt=null;
+  tick();
+}
 async function skip(){ // salto manual: el servidor APRENDE el punto (silencios/outros)
   let body={};
   try{ if(player&&player.getCurrentTime&&curYt) body={manual:true,yt:curYt,position:player.getCurrentTime(),duration:player.getDuration()}; }catch(e){}

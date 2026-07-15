@@ -524,7 +524,7 @@ function onYouTubeIframeAPIReady(){
         if(e.data===YT.PlayerState.PAUSED&&isPrimary)manualPause=true;
         if(e.data===YT.PlayerState.PLAYING)manualPause=false;
       },
-      onError:()=>{if(!isRawIP||isLocal)setTimeout(()=>advance(),1200);}
+      onError:()=>{if(!isRawIP||isLocal)setTimeout(()=>advance(false,true),1200);}
     }
   });
 }
@@ -532,15 +532,19 @@ function onYouTubeIframeAPIReady(){
 // Fallback: si el player no se inicializó en 8s, mostrar aviso
 setTimeout(()=>{if(!ready){const b=document.createElement('div');b.id='ytWarn';b.className='warn';b.textContent='⚠ El reproductor de YouTube está tardando en cargar (puede pasar en el primer arranque del servidor)…';document.body.appendChild(b);}},8000);
 
-async function advance(manual=false){
+async function advance(manual=false,forceSkip=false){
   if(!isPrimary||tvBlocked)return;
   const snapId=curId!==null?curId:'';
   if(advancingId===snapId)return;
   advancingId=snapId;
   const body={from_id:snapId};
   if(manual&&curYt){try{body.yt=curYt;body.position=player.getCurrentTime();body.duration=player.getDuration();body.manual=true;}catch(e){}}
+  else if(forceSkip){body.manual=true;}
   try{await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
   finally{advancingId=undefined;}
+  // Fuerza recarga aunque el servidor devuelva la misma canción (ej. re-encolada): sin esto
+  // el player se queda congelado en la pantalla de error porque load() no ve cambio de yt.
+  curYt=null;
   tick();
 }
 
