@@ -106,6 +106,7 @@ header.bar{
 @media(max-width:760px){.grid2{grid-template-columns:1fr}}
 .kpi{font-size:30px;font-weight:800}
 .kpi.gold{color:var(--gold)}
+.kpi.green{color:var(--green)}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 80px);transform:translateX(-50%);background:#1e2c46;
   color:var(--txt);border:1px solid var(--line);font-weight:700;padding:12px 18px;border-radius:12px;opacity:0;transition:.3s;z-index:60;white-space:normal;max-width:calc(100vw - 32px);text-align:center;word-break:break-word}
 .toast.show{opacity:1}

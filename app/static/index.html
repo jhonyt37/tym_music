@@ -341,14 +341,14 @@ body{padding-bottom:80px}
       <div class="small" style="margin-top:8px" id="pkgHint">Las prioridades se suman a la cuenta de tu mesa.</div>
     </div>
     <div class="card" id="tabCard">
-      <h2>Tu cuenta de la mesa 🧾</h2>
+      <h2>Tu cuenta de la mesa (a pagar) 🧾</h2>
       <div class="kpi gold" id="tabTotal">$0</div>
       <div class="small">Esto se suma a tu cuenta del bar (coincide con lo que ve el local)</div>
       <div class="list" id="tabList" style="margin-top:10px"><div class="empty">Sin cargos todavía.</div></div>
     </div>
     <div class="card" id="walletCard" style="display:none">
-      <h2>Tu saldo 💳</h2>
-      <div class="kpi gold" id="walletBal">$0</div>
+      <h2>Tu saldo a favor 💳</h2>
+      <div class="kpi green" id="walletBal">$0</div>
       <div class="small">Saldo prepago, válido solo en este local (no reembolsable en efectivo)</div>
       <button class="btn gold block" style="margin-top:10px" onclick="openTopup()">🔋 Recargar saldo</button>
       <div class="list" id="walletHistList" style="margin-top:10px"><div class="empty">Sin movimientos todavía.</div></div>
@@ -1147,17 +1147,19 @@ function updateHeaderTicker(tabTotal){
   if(!sess){wrap.style.display='none';return;}
   wrap.style.display='';
   const now=Date.now()/1000;
+  // Saldo a favor (verde) vs deuda pendiente (dorado) — antes ambos se veían igual
+  // (mismo color, sin palabra), no se distinguía cuál era plata a favor y cuál por pagar.
   const parts=['📍 '+esc(sess.table)];
-  if(prepaidMode) parts.push('💳 '+cop(walletBalance));
-  else if((tabTotal||0)>0) parts.push('🧾 '+cop(tabTotal));
+  if(prepaidMode) parts.push('<span style="color:var(--green);font-weight:800">💳 Saldo '+cop(walletBalance)+'</span>');
+  else if((tabTotal||0)>0) parts.push('<span style="color:var(--gold);font-weight:800">🧾 Debes '+cop(tabTotal)+'</span>');
   if((sess.credits||0)>0) parts.push('⚡ '+sess.credits+' créd.');
   if(sess.pass_until>now) parts.push('⏱ pase activo');
   const text=parts.join(' · ');
   if(parts.length<=1){
-    tick.textContent=text;tick.classList.remove('go');
+    tick.innerHTML=text;tick.classList.remove('go');
   }else{
     tick.innerHTML='<span style="padding-right:24px">'+text+'</span><span style="padding-right:24px">'+text+'</span>';
-    tick.style.animationDuration=Math.max(6,text.length*0.22)+'s';
+    tick.style.animationDuration=Math.max(6,text.replace(/<[^>]+>/g,'').length*0.22)+'s';
     tick.classList.add('go');
   }
 }
