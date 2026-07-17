@@ -31,6 +31,15 @@
 .tabpanel.active{display:block}
 /* ---- Section titles ---- */
 .sec{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 12px;padding-bottom:7px;border-bottom:1px solid var(--line)}
+/* ---- Secciones colapsables de Ajustes ---- */
+.settingsSection{border-top:1px solid var(--line);margin-top:18px;padding-top:18px}
+.settingsSection:first-of-type{border-top:none;margin-top:0;padding-top:0}
+.settingsSection summary{cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.settingsSection summary::-webkit-details-marker{display:none}
+.settingsSection summary .sec{margin:0;border-bottom:none;flex:1}
+.settingsSection summary .chev{color:var(--mut);font-size:12px;transition:transform .15s;flex-shrink:0}
+.settingsSection[open] summary .chev{transform:rotate(90deg)}
+.settingsSection .secBody{padding-top:2px}
 /* ---- Keyword tags ---- */
 .kwtag{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:999px;font-size:13px;font-weight:600;background:var(--bg);border:1px solid var(--line)}
 .kwtag.blocked{background:rgba(239,68,68,.15);border-color:rgba(239,68,68,.4);color:#fca5a5}
@@ -199,7 +208,9 @@
   <div class="wrap" style="max-width:560px">
     <div class="card">
 
-      <p class="sec">Información del local</p>
+      <details class="settingsSection" open>
+        <summary><span class="sec">Información del local</span><span class="chev">▸</span></summary>
+        <div class="secBody">
       <label class="small">Nombre del local</label>
       <input class="field" id="venue">
       <label class="small">Precio por prioridad (COP)</label>
@@ -229,8 +240,12 @@
         <div><b>Auto-aprobar pedidos</b><div class="small">Si está apagado, tú apruebas cada canción</div></div>
         <input type="checkbox" id="auto" style="width:22px;height:22px">
       </label>
+        </div>
+      </details>
 
-      <p class="sec" style="margin-top:22px">Reproducción y restricciones</p>
+      <details class="settingsSection">
+        <summary><span class="sec">Reproducción y restricciones</span><span class="chev">▸</span></summary>
+        <div class="secBody">
       <div class="pkgrow"><span class="small" style="flex:1">No repetir la misma en (minutos, 0=sin límite)</span><input class="field" id="repMin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Ni dentro de las últimas N canciones</span><input class="field" id="repSongs" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Cortar últimos seg del video (silencios)</span><input class="field" id="trimEnd" type="number"></div>
@@ -238,15 +253,23 @@
         <div><b>Lista del local en orden aleatorio</b><div class="small">Si está apagado, sigue el orden en que añadiste las canciones</div></div>
         <input type="checkbox" id="fbShuffle" style="width:22px;height:22px">
       </label>
+        </div>
+      </details>
 
-      <p class="sec" style="margin-top:22px">Cobro (modo de pago)</p>
+      <details class="settingsSection">
+        <summary><span class="sec">Cobro (modo de pago)</span><span class="chev">▸</span></summary>
+        <div class="secBody">
       <label class="opt" style="margin-top:10px">
         <div><b>Modo saldo prepago</b><div class="small">Para locales sin cuenta abierta (gimnasios, cafés de mostrador, barberías): cada cliente recarga saldo en vez de abrir cuenta de mesa.</div></div>
         <input type="checkbox" id="prepaid" style="width:22px;height:22px">
       </label>
       <div class="pkgrow"><span class="small" style="flex:1">Monto mínimo para "pagar directo" (COP)</span><input class="field" id="minDirectPay" type="number" step="100"></div>
+        </div>
+      </details>
 
-      <p class="sec" style="margin-top:22px">Límites y premium</p>
+      <details class="settingsSection">
+        <summary><span class="sec">Límites y premium</span><span class="chev">▸</span></summary>
+        <div class="secBody">
       <div class="pkgrow"><span class="small" style="flex:1">Canciones gratis por mesa</span><input class="field" id="freeN" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">...cada (minutos)</span><input class="field" id="freeWin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (× precio)</span><input class="field" id="jumpMult" type="number"></div>
@@ -264,8 +287,12 @@
       <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">⚔️ Duración del duelo (segundos)</label>
       <div class="small" style="color:var(--mut);margin-bottom:6px">Tiempo para votar en un duelo de canciones. Default: 60 (1 min).</div>
       <input class="field" id="dueloDurationSecs" type="number" min="20" max="300" step="10" placeholder="60" style="max-width:140px">
+        </div>
+      </details>
 
-      <p class="sec" style="margin-top:22px">Filtro de contenido 🚫</p>
+      <details class="settingsSection">
+        <summary><span class="sec">Filtro de contenido 🚫</span><span class="chev">▸</span></summary>
+        <div class="secBody">
       <div class="small" style="margin-bottom:10px">Controla qué canciones pueden pedir los clientes según el título o artista.</div>
 
       <label class="small" style="display:block;margin-bottom:4px">🚫 Palabras BLOQUEADAS (ej: metal, trap, reggaetón)</label>
@@ -282,28 +309,45 @@
         <button class="btn sm" onclick="addKeyword('allowed')">+ Agregar</button>
       </div>
       <div id="allowedTags" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px;margin-bottom:14px"></div>
+        </div>
+      </details>
 
-      <p class="sec" style="margin-top:22px">Tema de color</p>
+      <details class="settingsSection">
+        <summary><span class="sec">Tema de color</span><span class="chev">▸</span></summary>
+        <div class="secBody">
       <div style="display:flex;gap:8px;margin:8px 0" id="themeRow">
         <div onclick="pickTheme('azul')" data-t="azul" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #3b82f6;background:#0e1320;color:#3b82f6">Azul</div>
         <div onclick="pickTheme('purpura')" data-t="purpura" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #a855f7;background:#0e0b1e;color:#a855f7">Púrpura</div>
         <div onclick="pickTheme('verde')" data-t="verde" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #10b981;background:#081411;color:#10b981">Verde</div>
       </div>
+        </div>
+      </details>
 
-      <p class="sec" style="margin-top:28px">Horario automático 📅</p>
+      <details class="settingsSection">
+        <summary><span class="sec">Horario automático 📅</span><span class="chev">▸</span></summary>
+        <div class="secBody">
       <div class="small" style="color:var(--mut);margin-bottom:12px">Define franjas horarias con géneros distintos. La lista de fallback cambia automáticamente a la hora indicada (hora Bogotá).</div>
       <div id="scheduleSlots" style="margin-bottom:10px"></div>
       <button class="btn ghost sm" onclick="addScheduleSlot()">+ Agregar franja</button>
       <div class="small" style="color:var(--mut);margin-top:8px" id="activeSlotInfo"></div>
+        </div>
+      </details>
 
       <button class="btn block" style="margin-top:22px" onclick="save()">Guardar ajustes</button>
-      <button class="btn ghost block sm" style="margin-top:8px" onclick="reset()">Reiniciar demo</button>
 
-      <p class="sec" style="margin-top:28px">Seguridad — Cambiar contraseña</p>
+      <details class="settingsSection">
+        <summary><span class="sec">Cuenta y seguridad</span><span class="chev">▸</span></summary>
+        <div class="secBody">
       <label class="small">Nueva contraseña (mín. 8 caracteres)</label>
       <input class="field" id="newPass" type="password" placeholder="Nueva contraseña" autocomplete="new-password">
       <input class="field" id="newPassConfirm" type="password" placeholder="Repetir contraseña" autocomplete="new-password" style="margin-top:8px">
       <button class="btn ghost block sm" style="margin-top:10px" onclick="changePassword()">🔑 Cambiar contraseña</button>
+
+      <p class="sec" style="margin-top:22px">Zona de peligro</p>
+      <button class="btn ghost block sm" onclick="reset()">Reiniciar demo</button>
+        </div>
+      </details>
+
     </div>
   </div>
 </div>
