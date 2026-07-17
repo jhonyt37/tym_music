@@ -2246,6 +2246,10 @@ class H(BaseHTTPRequestHandler):
                                                  "duration": _parse_len(d.get("length")) or DEFAULT_DUR})
                 elif act == "remove":
                     STATE["curated"] = [c for c in STATE["curated"] if c["yt"] != d.get("yt")]
+                elif act == "reorder":
+                    order = d.get("order") or []
+                    pos = {yt: i for i, yt in enumerate(order)}
+                    STATE["curated"].sort(key=lambda c: pos.get(c["yt"], 999999))
                 return self._send(200, {"ok": True, "curated": STATE["curated"]})
 
             if path == "/api/admin/add":
