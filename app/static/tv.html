@@ -319,6 +319,7 @@ document.addEventListener('visibilitychange',()=>{if(document.visibilityState===
 let player,ready=false,curYt=null,curId=null,wantAudio=false,manualPause=false;
 let topLoved=[],lastReactTotal=0,lastReactId=null,_lastReactTs=0,authok=false;
 let isPrimary=true,advancingId=undefined;
+let _errBurst=[];const ERR_BURST_LIMIT=4,ERR_BURST_WINDOW=25000;
 let _lastDedicaId=null,_dedicaToMark=null,_dedicaTimeout=null;
 let _songMsgTimeouts=[],_songMsgNpId=null;
 const VIBES_TV=["🔥 Que todo el mundo cante","💃 Más baile","🎸 Más suave","✨ Así está perfecto"];
@@ -522,9 +523,26 @@ function onYouTubeIframeAPIReady(){
         // Pausa manual (clic/space del operador en el propio player) — nunca la del
         // tv_takeover, que pausa una pestaña secundaria a propósito (isPrimary ya false).
         if(e.data===YT.PlayerState.PAUSED&&isPrimary)manualPause=true;
-        if(e.data===YT.PlayerState.PLAYING)manualPause=false;
+        if(e.data===YT.PlayerState.PLAYING){manualPause=false;_errBurst=[];}
       },
-      onError:()=>{if(!isRawIP||isLocal)setTimeout(()=>advance(false,true),1200);}
+      onError:()=>{
+        if(isRawIP&&!isLocal)return;
+        // Freno de emergencia: si varios videos SEGUIDOS fallan en poco tiempo (ej. el
+        // navegador no puede reproducir NINGÚN video, no solo uno bloqueado), dejar de
+        // saltar sin parar por todo el catálogo — mejor avisar y detenerse.
+        const now=Date.now();
+        _errBurst=_errBurst.filter(t=>now-t<ERR_BURST_WINDOW);_errBurst.push(now);
+        if(_errBurst.length>=ERR_BURST_LIMIT){
+          if(!document.getElementById('errBurstWarn')){
+            const b=document.createElement('div');b.id='errBurstWarn';b.className='warn';
+            b.style.background='#7f1d1d';
+            b.innerHTML='⚠ Varios videos seguidos no cargaron en este dispositivo/red. Se detuvo el salto automático — recarga la página o prueba desde otra red/computador.';
+            document.body.appendChild(b);
+          }
+          return;
+        }
+        setTimeout(()=>advance(false,true),1200);
+      }
     }
   });
 }

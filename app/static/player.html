@@ -53,6 +53,7 @@ const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let player,ready=false,curId=null,curYt=null,wantAudio=false,authok=false;
+let _errBurst=[];const ERR_BURST_LIMIT=4,ERR_BURST_WINDOW=25000;
 async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';}
 (async()=>{const me=await fetch('/api/me');if(!me.ok){$('loginGate').style.display='flex';return;}authok=true;if(ready)tick();})();
 const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
@@ -75,8 +76,23 @@ function onYouTubeIframeAPIReady(){
     playerVars:{autoplay:1,playsinline:1,rel:0,modestbranding:1,enablejsapi:1,origin:location.origin},
     events:{onReady:()=>{ready=true;if(authok)tick();},onStateChange:onState,onError:onErr}});
 }
-function onState(e){ if(e.data===YT.PlayerState.ENDED){ advance(); } }
-function onErr(){ if(isRawIP&&!isLocal){ showLocalHint(); return; } setTimeout(()=>advance({from_id:curId,manual:true}),1200); }
+function onState(e){
+  if(e.data===YT.PlayerState.ENDED)advance();
+  if(e.data===YT.PlayerState.PLAYING)_errBurst=[];
+}
+function onErr(){
+  if(isRawIP&&!isLocal){ showLocalHint(); return; }
+  // Freno de emergencia: si varios videos seguidos fallan en poco tiempo, dejar de
+  // saltar sin parar por todo el catálogo — mejor avisar y detenerse.
+  const now=Date.now();
+  _errBurst=_errBurst.filter(t=>now-t<ERR_BURST_WINDOW);_errBurst.push(now);
+  if(_errBurst.length>=ERR_BURST_LIMIT){
+    $('bigT').textContent='Varios videos seguidos no cargaron';
+    $('bigA').textContent='Se detuvo el salto automático — recarga la página o revisa la conexión.';
+    return;
+  }
+  setTimeout(()=>advance({from_id:curId,manual:true}),1200);
+}
 function startAudio(){wantAudio=true; if(player){player.unMute();player.setVolume(100);player.playVideo();}}
 
 async function advance(body){
