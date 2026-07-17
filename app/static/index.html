@@ -801,8 +801,21 @@ function toast(t,type){
 function initBellDrag(){
   const el=$('floatBell');
   let ox=0,oy=0,bx=0,by=0,moved=false,_ht=null;
+  const MARGIN=14;
+  // Limites verticales seguros: nunca tapar el nav de abajo ni quedar pegada arriba del todo.
+  function maxY(){const navH=(document.querySelector('.nav')||{}).offsetHeight||60;return window.innerHeight-navH-el.offsetHeight-MARGIN;}
+  function snapTo(x,y,animate){
+    const sy=Math.max(MARGIN,Math.min(y,maxY()));
+    if(animate){el.style.transition='left .25s cubic-bezier(.34,1.4,.64,1),top .2s ease';setTimeout(()=>{el.style.transition='';},260);}
+    el.style.right='auto';el.style.bottom='auto';el.style.left=x+'px';el.style.top=sy+'px';
+    try{localStorage.setItem('bell_pos',JSON.stringify({x,y:sy}));}catch(e){}
+  }
   try{const s=JSON.parse(localStorage.getItem('bell_pos')||'null');
-    if(s){el.style.right='auto';el.style.bottom='auto';el.style.left=s.x+'px';el.style.top=s.y+'px';}}
+    if(s){
+      // Vuelve a pegarla al costado mas cercano por si la pantalla cambio de tamaño/orientacion.
+      const edgeX=(s.x+el.offsetWidth/2<window.innerWidth/2)?MARGIN:(window.innerWidth-el.offsetWidth-MARGIN);
+      snapTo(edgeX,s.y,false);
+    }}
   catch(e){}
   function start(cx,cy){
     moved=false;ox=cx;oy=cy;const r=el.getBoundingClientRect();bx=r.left;by=r.top;
@@ -813,6 +826,8 @@ function initBellDrag(){
     const dx=cx-ox,dy=cy-oy;
     if(!moved&&(Math.abs(dx)>6||Math.abs(dy)>6)){moved=true;clearTimeout(_ht);el.classList.remove('holding');}
     if(!moved)return;
+    // Mientras se arrastra sigue el dedo libremente; el "click" al costado mas cercano
+    // pasa solo al soltar (ver end()), como los chat-heads de Messenger/Android.
     const nx=Math.max(0,Math.min(bx+cx-ox,window.innerWidth-el.offsetWidth));
     const ny=Math.max(0,Math.min(by+cy-oy,window.innerHeight-el.offsetHeight));
     el.style.right='auto';el.style.bottom='auto';el.style.left=nx+'px';el.style.top=ny+'px';
@@ -822,7 +837,9 @@ function initBellDrag(){
     const longPress=el.classList.contains('holding');
     el.classList.remove('holding');
     if(moved){
-      try{localStorage.setItem('bell_pos',JSON.stringify({x:parseInt(el.style.left),y:parseInt(el.style.top)}));}catch(e){}
+      const curX=parseInt(el.style.left)||0,curY=parseInt(el.style.top)||0;
+      const edgeX=(curX+el.offsetWidth/2<window.innerWidth/2)?MARGIN:(window.innerWidth-el.offsetWidth-MARGIN);
+      snapTo(edgeX,curY,true);
     }else if(longPress&&assistActive){
       cancelAssist();
     }else{
@@ -838,6 +855,14 @@ function initBellDrag(){
     const mm=m=>move(m.clientX,m.clientY);
     document.addEventListener('mousemove',mm);
     document.addEventListener('mouseup',()=>{document.removeEventListener('mousemove',mm);end();},{once:true});
+  });
+  // Si el celular rota (o cambia el tamaño de la ventana), reajusta al costado mas cercano
+  // para que no quede fuera de pantalla o tapando el nav con las nuevas dimensiones.
+  window.addEventListener('resize',()=>{
+    if(el.style.left==='auto'||!el.style.left)return;
+    const curX=parseInt(el.style.left)||0,curY=parseInt(el.style.top)||0;
+    const edgeX=(curX+el.offsetWidth/2<window.innerWidth/2)?MARGIN:(window.innerWidth-el.offsetWidth-MARGIN);
+    snapTo(edgeX,curY,false);
   });
 }
 
