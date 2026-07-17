@@ -515,7 +515,7 @@ function rejectDupl(){isPrimary=false;$('duplModal').style.display='none';$('aud
 function onYouTubeIframeAPIReady(){
   player=new YT.Player('yt',{height:'100%',width:'100%',
     host:'https://www.youtube-nocookie.com',
-    playerVars:{autoplay:1,playsinline:1,rel:0,controls:0,modestbranding:1,enablejsapi:1,origin:location.origin},
+    playerVars:{autoplay:1,mute:1,playsinline:1,rel:0,controls:0,modestbranding:1,enablejsapi:1,origin:location.origin},
     events:{
       onReady:()=>{ready=true;const w=document.getElementById('ytWarn');if(w)w.remove();if(authok)tick();},
       onStateChange:e=>{
@@ -586,21 +586,21 @@ function load(np){
 }
 
 // ---- Activación de audio (único punto con gesto garantizado) ----
+// El player arranca SIEMPRE en mute (playerVars.mute:1, autoplay mudo esta permitido en
+// todo navegador sin gesto). unMute()/playVideo() deben ir SINCRONOS, sin ningun await de
+// por medio: en movil (Safari/Chrome) el permiso que da el toque del usuario se pierde en
+// cuanto el codigo hace un await (ej. un fetch) — en desktop Chrome es mas permisivo y por
+// eso este bug no se notaba ahi. El mute-state del player persiste entre canciones, asi que
+// una vez desmutado aqui, las canciones siguientes (cargadas por tick()/watchdog) ya suenan.
 async function activateAudio(){
   wantAudio=true;
   try{sessionStorage.setItem('tym_tv_started','1');}catch(e){}
   $('audioOverlay').style.display='none';
   toggleFs();
-  // Activar audio con el gesto del usuario
-  if(player){
-    try{player.setVolume(100);player.unMute();}catch(e){}
-    // Si el video ya está cargado, reproducirlo con audio
-    if(curYt){try{player.playVideo();}catch(e){}}
-  }
-  // Si no hay video cargado, forzar tick
+  if(player){try{player.setVolume(100);player.unMute();player.playVideo();}catch(e){}}
+  // Si aun no hay cancion cargada, recien aqui se pide (async esta bien: el desmuteo de
+  // arriba ya quedo aplicado dentro del gesto; loadVideoById() hereda el mute-state actual).
   if(!curYt&&authok)await tick();
-  // Intentar de nuevo después de tick
-  if(player&&curYt){try{player.playVideo();player.unMute();}catch(e){}}
   burstNow();
 }
 
@@ -609,14 +609,11 @@ async function forceRestart(){
   wantAudio=true;
   try{sessionStorage.setItem('tym_tv_started','1');}catch(e){}
   $('audioOverlay').style.display='none';
+  if(player){try{player.setVolume(100);player.unMute();}catch(e){}}
   // Descargar el video actual para forzar recarga
   curYt=null;
   if(player){try{player.stopVideo();}catch(e){}}
   await tick();
-  // Con gesto del usuario: activar audio
-  if(player){
-    try{player.setVolume(100);player.unMute();if(curYt)player.playVideo();}catch(e){}
-  }
   burstNow();
 }
 
@@ -655,8 +652,11 @@ schedule(burstReacts,CYCLE,50000); // reacciones a mitad del ciclo, lejos del no
 
 // ---- Pantalla completa ----
 function toggleFs(){
-  if(!document.fullscreenElement){(document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen||function(){}).call(document.documentElement);}
-  else{(document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document);}
+  // requestFullscreen()/exitFullscreen() devuelven una Promise que puede rechazar (ej. en
+  // iOS Safari, que no soporta pantalla completa de un <div>) — el .catch evita que quede
+  // como "Uncaught (in promise)" en consola; el audio no depende de que esto tenga exito.
+  if(!document.fullscreenElement){Promise.resolve((document.documentElement.requestFullscreen||document.documentElement.webkitRequestFullscreen||function(){}).call(document.documentElement)).catch(()=>{});}
+  else{Promise.resolve((document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document)).catch(()=>{});}
 }
 $('fsBtn').onclick=toggleFs;
 document.addEventListener('keydown',e=>{
