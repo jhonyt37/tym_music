@@ -103,8 +103,8 @@ header.bar{
 .field{width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--line);
   background:var(--card);color:var(--txt);font-size:16px;outline:none;margin-top:10px}
 
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
-@media(max-width:760px){.grid2{grid-template-columns:1fr}}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:14px}
+@media(max-width:760px){.grid2{grid-template-columns:minmax(0,1fr)}}
 .kpi{font-size:30px;font-weight:800}
 .kpi.gold{color:var(--gold)}
 .kpi.green{color:var(--green)}
