@@ -372,7 +372,11 @@
     </div>
     <div class="card">
       <p class="sec">Clientes con saldo (<span id="custCount">0</span>)</p>
-      <div class="list" id="custList"><div class="empty">Aún no hay clientes registrados.</div></div>
+      <div class="search-wrap">
+        <input class="search" id="custq" placeholder="Buscar por nombre o celular…" autocomplete="off" oninput="filterCustomers()">
+        <button type="button" class="search-clear" id="custqClear" aria-label="Borrar búsqueda">✕</button>
+      </div>
+      <div class="list" id="custList" style="margin-top:8px"><div class="empty">Aún no hay clientes registrados.</div></div>
     </div>
   </div>
 </div>
@@ -767,7 +771,7 @@ function initSearchClear(inputId,btnId){
   btn.addEventListener('click',()=>{el.value='';el.dispatchEvent(new Event('input',{bubbles:true}));el.focus();sync();});
   sync();
 }
-['adminQ','curq','pollSearch','dueloSearchA','dueloSearchB'].forEach(id=>initSearchClear(id,id+'Clear'));
+['adminQ','curq','pollSearch','dueloSearchA','dueloSearchB','custq'].forEach(id=>initSearchClear(id,id+'Clear'));
 
 // Curadas
 $('curq').addEventListener('input',e=>{
@@ -844,10 +848,18 @@ async function addStation(){
 }
 // Clientes con saldo (modo prepago)
 function renderCustomers(list){
+  window._customers=list;
   $('custCount').textContent=list.length;
+  filterCustomers();
+}
+function filterCustomers(){
+  const list=window._customers||[];
+  const q=($('custq')?.value||'').trim().toLowerCase();
+  const filtered=q?list.filter(c=>(c.name||'').toLowerCase().includes(q)||(c.phone||'').includes(q)):list;
   const box=$('custList');box.innerHTML='';
   if(!list.length){box.innerHTML='<div class="empty">Aún no hay clientes registrados.</div>';return;}
-  list.forEach(c=>{
+  if(!filtered.length){box.innerHTML='<div class="empty">Sin resultados para "'+esc(q)+'".</div>';return;}
+  filtered.forEach(c=>{
     const r=document.createElement('div');r.className='row';
     const masked=(c.phone||'').slice(-4).padStart((c.phone||'').length,'*');
     r.innerHTML=`<div class="info"><div class="t">${esc(c.name||'?')}</div><div class="a">${esc(masked)}</div></div><div class="chip pri">${cop(c.balance||0)}</div>`;
