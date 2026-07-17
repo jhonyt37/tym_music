@@ -73,6 +73,7 @@ header.bar{
 .row .btn{flex:none}
 .row .info .t{font-weight:600;font-size:15px!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .row .info .a{color:var(--mut);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes rowTick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 .pos{font-weight:800;color:var(--mut);width:26px;text-align:center}
 .chip{font-size:11px;padding:2px 8px;border-radius:999px;font-weight:700}
 .chip.pri{background:rgba(245,179,1,.16);color:var(--gold);border:1px solid rgba(245,179,1,.4)}

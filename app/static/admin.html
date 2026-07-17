@@ -518,6 +518,23 @@ const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function applyTicker(el){
+  if(el.dataset.tkd)return;
+  if(!el.getClientRects().length)return; // oculto — no marcar, reintentar después
+  el.dataset.tkd='1';
+  if(el.scrollWidth<=el.clientWidth+2)return; // título cabe, sin ticker
+  const html=el.innerHTML;
+  const dur=Math.max(10,el.textContent.length*0.34)+'s';
+  const span=document.createElement('span');
+  span.style.cssText=`display:inline-block;white-space:nowrap;font-size:inherit;line-height:inherit;animation:rowTick ${dur} linear infinite`;
+  span.innerHTML=`<span style="padding-right:40px">${html}</span><span style="padding-right:40px">${html}</span>`;
+  el.innerHTML='';el.appendChild(span);
+}
+function tickify(parent){
+  setTimeout(()=>{
+    (parent||document).querySelectorAll('.info .t:not([data-tkd])').forEach(applyTicker);
+  },120);
+}
 let editing=false, formLoaded=false, curTimer=null, packages=[], pass_obj={minutes:30,price:5000}, curTheme='azul';
 let VENUE_TZ='America/Bogota';
 
@@ -604,6 +621,7 @@ function adminSearch(){
         row.addEventListener('dragend',()=>{row.classList.remove('dragging');_dragSearchSong=null;});
         box.appendChild(row);
       });
+      tickify(box);
     }catch(e){box.innerHTML='<div class="empty">Error al buscar.</div>';}
   },350);
 }
@@ -720,6 +738,7 @@ $('curq').addEventListener('input',e=>{
       a.onclick=async()=>{await post('/api/admin/curated',{action:'add',yt:s.yt,title:s.title,artist:s.artist,length:s.length});toast('Añadida');renderCurated(window._cur||[]);tick();};
       r.appendChild(a);box.appendChild(r);
     });
+    tickify(box);
   },350);
 });
 function renderCurated(list){
@@ -732,6 +751,7 @@ function renderCurated(list){
     x.onclick=async()=>{await post('/api/admin/curated',{action:'remove',yt:c.yt});tick();};
     r.appendChild(x);box.appendChild(r);
   });
+  tickify(box);
 }
 
 // Estaciones
@@ -866,7 +886,7 @@ async function tick(){
       const ok=document.createElement('button');ok.className='btn green sm';ok.textContent='Aprobar';ok.onclick=()=>approve(it.id);
       const no=document.createElement('button');no.className='btn red sm';no.textContent='✕';no.onclick=()=>reject(it.id);
       r.appendChild(ok);r.appendChild(no);P.appendChild(r);
-    });}
+    });tickify(P);}
 
     // Sonando + cola (con drag & drop)
     const Q=$('queue');
@@ -918,6 +938,7 @@ async function tick(){
       });
       Q.appendChild(r);
     });
+    tickify(Q);
 
     // Actividad activa ahora (mesas con canciones en cola o pendientes)
     const activeTbls=[...new Set([...q.map(x=>x.table),...(s.pending||[]).map(x=>x.table)].filter(t=>t&&!t.includes('🎚️')&&!t.includes('Votación')&&!t.includes('Duelo')))];
@@ -955,6 +976,7 @@ async function tick(){
         rb.onclick=async()=>{const j=await post('/api/admin/allow_repeat',{yt:h.yt});toast(j.allowed?'Repetición permitida':'Repetición bloqueada');tick();};
         r.appendChild(rb);HL.appendChild(r);
       });
+      tickify(HL);
     }else HC.style.display='none';
 
     // Badge de alertas en el tab "En vivo"
@@ -1010,6 +1032,7 @@ async function loadAnalytics(){
       r.innerHTML=`<div class="pos">${i+1}</div><div class="info"><div class="t">${esc(s.title)}</div></div><div class="chip">${s.count} pedido${s.count!==1?'s':''}</div>`;
       sbox.appendChild(r);
     });
+    tickify(sbox);
     // Cuentas recientes
     const abox=$('analAccts');const accts=d.cuentas_recientes||[];abox.innerHTML='';
     const hm2=ts=>{if(!ts)return '—';const dt=new Date(ts*1000);return dt.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit',timeZone:VENUE_TZ});};
@@ -1087,6 +1110,7 @@ async function loadHistory(days){
         <span class="chip" style="white-space:nowrap">${esc(badge)}</span>${price}`;
       box.appendChild(r);
     });
+    tickify(box);
   }catch(err){$('histList').innerHTML='<div class="empty">Error cargando historial.</div>';}
 }
 
@@ -1121,6 +1145,7 @@ function pollAdminSearch(){
         };
         r.appendChild(addBtn);box.appendChild(r);
       });
+      tickify(box);
     }catch(e){box.innerHTML='<div class="empty">Error al buscar.</div>';}
   },350);
 }
@@ -1135,6 +1160,7 @@ function renderPollSelected(){
     rm.onclick=()=>{_pollSongs.splice(i,1);renderPollSelected();};
     r.appendChild(rm);box.appendChild(r);
   });
+  tickify(box);
 }
 
 async function createPoll(){
@@ -1176,6 +1202,7 @@ function dueloSearch(side){
         };
         results.appendChild(r);
       });
+      tickify(results);
     }catch(e){}
   },350);
   if(side==='A')_dueloTimerA=t;else _dueloTimerB=t;
@@ -1187,6 +1214,7 @@ function renderDueloSelected(){
   };
   $('dueloSelectedA').innerHTML='<div class="small" style="color:#f87171;font-weight:700;margin-bottom:4px">⚔️ Equipo A</div>'+mkCard(_dueloA,'A');
   $('dueloSelectedB').innerHTML='<div class="small" style="color:#60a5fa;font-weight:700;margin-bottom:4px">⚔️ Equipo B</div>'+mkCard(_dueloB,'B');
+  tickify($('dueloSelectedA'));tickify($('dueloSelectedB'));
 }
 async function createDuelo(){
   if(!_dueloA||!_dueloB){toast('Selecciona una canción para cada equipo','err');return;}
@@ -1220,6 +1248,7 @@ function renderSocialAdmin(s){
       html+=`<div class="row" style="flex-wrap:wrap;margin-bottom:4px"><div class="info" style="flex:1"><div class="t">${esc(opt.title)}</div></div><span class="chip">${count} votos (${pct}%)</span><div style="flex-basis:100%;height:5px;background:var(--line);border-radius:3px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--pri);border-radius:3px;transition:width .4s"></div></div></div>`;
     });
     statusBox.innerHTML=html;
+    tickify(statusBox);
   }else{
     formBox.style.display='';closeBtn.style.display='none';
     if(p&&!p.active){statusBox.innerHTML='<div class="small" style="color:var(--mut)">Votación cerrada.</div>';}
@@ -1243,6 +1272,7 @@ function renderSocialAdmin(s){
         dhtml+=`<div class="row" style="flex-wrap:wrap;margin-bottom:4px"><div class="info" style="flex:1"><div class="t">${['🔴','🔵'][idx]||''} ${esc(team.title)}</div></div><span class="chip">${count} votos (${pct}%)</span><div style="flex-basis:100%;height:5px;background:var(--line);border-radius:3px;margin-top:4px;overflow:hidden"><div style="height:100%;width:${pct}%;background:#f59e0b;border-radius:3px;transition:width .4s"></div></div></div>`;
       });
       dueloStatusBox.innerHTML=dhtml;
+      tickify(dueloStatusBox);
     }else{
       dueloFormBox.style.display='';dueloCloseBtn.style.display='none';
       if(!_dueloA&&!_dueloB)renderDueloSelected();

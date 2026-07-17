@@ -52,6 +52,23 @@
 const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function applyTicker(el){
+  if(el.dataset.tkd)return;
+  if(!el.getClientRects().length)return; // oculto — no marcar, reintentar después
+  el.dataset.tkd='1';
+  if(el.scrollWidth<=el.clientWidth+2)return; // título cabe, sin ticker
+  const html=el.innerHTML;
+  const dur=Math.max(10,el.textContent.length*0.34)+'s';
+  const span=document.createElement('span');
+  span.style.cssText=`display:inline-block;white-space:nowrap;font-size:inherit;line-height:inherit;animation:rowTick ${dur} linear infinite`;
+  span.innerHTML=`<span style="padding-right:40px">${html}</span><span style="padding-right:40px">${html}</span>`;
+  el.innerHTML='';el.appendChild(span);
+}
+function tickify(parent){
+  setTimeout(()=>{
+    (parent||document).querySelectorAll('.info .t:not([data-tkd])').forEach(applyTicker);
+  },120);
+}
 let player,ready=false,curId=null,curYt=null,wantAudio=false,authok=false;
 let _errBurst=[];const ERR_BURST_LIMIT=4,ERR_BURST_WINDOW=25000;
 async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';}
@@ -134,6 +151,7 @@ function paintUp(s){
     const r=document.createElement('div');r.className='row';
     r.innerHTML=`<div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.table||'')}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
     up.appendChild(r);});
+  tickify(up);
 }
 
 // Refresca cola y detecta saltos externos

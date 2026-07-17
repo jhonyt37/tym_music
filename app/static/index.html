@@ -74,8 +74,6 @@ body{padding-bottom:80px}
 .tick{display:inline-flex;font-size:12px;font-weight:600;white-space:nowrap;will-change:transform;color:var(--txt)}
 .tick.go{animation:tickGo 8s linear infinite}
 @keyframes tickGo{from{transform:translateX(0)}to{transform:translateX(-50%)}}
-/* ---- Row title ticker ---- */
-@keyframes rowTick{from{transform:translateX(0)}to{transform:translateX(-50%)}}
 /* Filas de la lista: hacer toda la fila clickeable */
 .row.tappable{cursor:pointer}
 .row.tappable:active{opacity:.75}
@@ -539,6 +537,9 @@ function showTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.id==='tab-'+name));
   document.querySelectorAll('.nav button').forEach(b=>b.classList.toggle('on',b.dataset.tab===name));
   window.scrollTo(0,0);
+  // Reintenta el banner de títulos largos por si se armó mientras este tab estaba oculto
+  // (ej. la caja de recomendadas se carga una sola vez por canción, no en cada poll).
+  tickify($('tab-'+name));
   if(name==='social'){$('badgePoll').style.display='none';_subscribePush();}
 }
 
@@ -688,6 +689,7 @@ async function loadSimilar(artists,genres,recentTitles){
       r.onclick=()=>openSheet(s);
       box.appendChild(r);
     });
+    tickify(box);
     // Botones "Más de [Artista]" — uno por artista único en la lista mostrada
     const shownArtists=[...new Set(merged.map(s=>s.artist).filter(Boolean))];
     if(shownArtists.length){
@@ -964,6 +966,7 @@ function renderPoll(poll){
     box.appendChild(div);
   });
   setTimeout(()=>{box.querySelectorAll('.poll-bar-fill').forEach((el,i)=>{const count=votes[(opts[i]||{}).yt]||0;const pct=Math.round(100*count/totalVotes);el.style.width=pct+'%';});},50);
+  tickify(box);
 }
 async function votePoll(yt){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
@@ -1002,6 +1005,7 @@ function renderDuelo(duelo){
     box.appendChild(div);
   });
   setTimeout(()=>{box.querySelectorAll('.duelo-bar-fill').forEach((el,i)=>{const count=votes[(teams[i]||{}).yt]||0;const pct=Math.round(100*count/total);el.style.width=pct+'%';});},50);
+  tickify(box);
 }
 async function voteDuelo(yt){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
@@ -1125,6 +1129,9 @@ function teaseCreditInvite(){
 // ---------- Row title ticker ----------
 function applyTicker(el){
   if(el.dataset.tkd)return;
+  // Si el elemento está oculto (tab inactivo) el ancho es 0 y no se puede medir de verdad —
+  // NO marcar data-tkd todavía, para que un tickify() posterior (al cambiar de tab) lo reintente.
+  if(!el.getClientRects().length)return;
   el.dataset.tkd='1';
   if(el.scrollWidth<=el.clientWidth+2)return; // título cabe, sin ticker
   const html=el.innerHTML;
