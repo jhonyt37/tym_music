@@ -12,6 +12,7 @@ import urllib.request, urllib.parse
 from zoneinfo import ZoneInfo, available_timezones
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
+from concurrent.futures import ThreadPoolExecutor, as_completed, TimeoutError as _FuturesTimeoutError
 try:
     from pywebpush import webpush, WebPushException
     from py_vapid import Vapid
@@ -528,6 +529,118 @@ def _make_icon_png(size):
     iend = chunk(b'IEND', b'')
     return b'\x89PNG\r\n\x1a\n' + ihdr + idat + iend
 
+# ---- Limpieza del titulo para MOSTRAR (distinto de _clean_for_lookup, mas abajo,
+# que es agresivo porque solo alimenta una busqueda; aqui hay que conservar info util
+# como "(Remix)"/"(Live)"/"(feat. X)" y solo quitar basura de subida tipo "Video Oficial"/"Lyrics"). ----
+_JUNK_PHRASES = [
+    "official music video", "official video", "official audio",
+    "video oficial", "vídeo oficial", "audio oficial",
+    "video lirico", "video lírico", "vídeo lírico", "lirico", "lírico",
+    "lyric video", "lyrics video", "video lyrics", "lyrics", "letra oficial",
+    "letra completa", "letra", "visualizer", "karaoke",
+    "video clip oficial", "videoclip oficial", "videoclip",
+]
+_BRACKET_RE = re.compile(r"[\(\[\{]([^()\[\]{}]*)[\)\]\}]")
+_JUNK_WORD_RE = re.compile(r"\b(hd|4k|hq|official|oficial)\b", re.IGNORECASE)
+_JUNK_TRAILING_RE = re.compile(
+    r"\s*[-|]\s*(?:" + "|".join(re.escape(p) for p in _JUNK_PHRASES) + r")\s*$",
+    re.IGNORECASE)
+
+def _clean_title_display(t):
+    original = (t or "").strip()
+    def strip_group(m):
+        inner = m.group(1)
+        low = inner.lower().strip()
+        if any(p in low for p in _JUNK_PHRASES):
+            return " "
+        bare = _JUNK_WORD_RE.sub("", low)
+        bare = re.sub(r"[\d\s]+", "", bare)
+        if not bare:  # solo quedaban numeros/HD/4K/"official" sueltos, ej. "(HD)"/"(2023)"
+            return " "
+        return m.group(0)  # conserva contenido real: (Remix), (Live), (feat. X)...
+    t = _BRACKET_RE.sub(strip_group, original)
+    t = _JUNK_TRAILING_RE.sub("", t)
+    t = re.sub(r"\s+", " ", t).strip(" -|")
+    return t if t else original
+
+# ---- Cruce con iTunes para corregir el "artista" (hoy es el canal de YouTube, que
+# a menudo es un canal de lyrics/mixes ajeno, ej. "XRangerFK" en vez de "Plan B") ----
+_artist_cache = {}
+ARTIST_TTL = 7 * 24 * 3600
+
+def _norm_words(s):
+    s = re.sub(r"[^a-z0-9áéíóúñ\s]", " ", (s or "").lower())
+    return set(w for w in s.split() if len(w) > 2)
+
+def _match_score(a, b):
+    wa, wb = _norm_words(a), _norm_words(b)
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / max(1, min(len(wa), len(wb)))
+
+# Titulos de covers/instrumentales quedan CASI siempre repletos de las mismas
+# palabras clave que el original (para SEO), asi que ganan el match por overlap
+# de palabras aunque el artista sea un canal de karaoke/instrumentales ajeno
+# (encontrado probando "BAD BUNNY x JHAY CORTEZ - DAKITI": el primer resultado
+# que matcheaba por palabras era un instrumental de "Vox Freaks", no el original).
+_COVER_MARKERS = (
+    "instrumental", "karaoke", "tribute", "made famous by",
+    "in the style of", "originally performed", "cover version",
+)
+
+def _lookup_real_artist(clean_title):
+    if not clean_title:
+        return None
+    best, best_score = None, 0.0
+    for r in _itunes_query(clean_title, "song"):
+        track = r.get("trackName", "") or ""
+        if any(m in track.lower() for m in _COVER_MARKERS):
+            continue
+        score = _match_score(clean_title, track)
+        if score > best_score:
+            best, best_score = r, score
+    return best.get("artistName") if best and best_score >= 0.5 else None
+
+def enrich_artists(items):
+    """Reemplaza el 'artista' (canal de YouTube) por el artista real de iTunes cuando
+    hay match confiable. Best-effort: en paralelo (cada request ya corre en su propio
+    hilo, ThreadingHTTPServer) y cacheado por yt id, asi solo paga la latencia una vez."""
+    now = time.time()
+    todo = []
+    for it in items:
+        hit = _artist_cache.get(it["yt"])
+        if hit and now - hit[0] < ARTIST_TTL:
+            if hit[1]:
+                it["artist"] = hit[1]
+            continue
+        todo.append(it)
+    if not todo:
+        return items
+    ex = ThreadPoolExecutor(max_workers=6)
+    try:
+        futs = {ex.submit(_lookup_real_artist, _clean_for_lookup(it["title"])): it for it in todo}
+        try:
+            for fut in as_completed(futs, timeout=6):
+                it = futs[fut]
+                try:
+                    artist = fut.result()
+                except Exception:
+                    artist = None
+                _artist_cache[it["yt"]] = (now, artist)
+                if artist:
+                    it["artist"] = artist
+        except _FuturesTimeoutError:
+            pass  # se agoto el tiempo total; lo que no alcanzo a resolver se queda con el artista original (canal de YouTube)
+    finally:
+        # wait=False: si algun hilo quedo colgado en la request a iTunes, no bloquear
+        # la respuesta esperandolo (with-block habria esperado a shutdown(wait=True)).
+        ex.shutdown(wait=False)
+    if len(_artist_cache) > 5000:
+        stale = [k for k, v in _artist_cache.items() if now - v[0] > ARTIST_TTL]
+        for k in stale:
+            del _artist_cache[k]
+    return items
+
 # ---- Busqueda real en YouTube (sin API key) ----
 _search_cache = {}
 SEARCH_TTL = 300
@@ -563,7 +676,7 @@ def yt_search(q, limit=12):
                 v = o["videoRenderer"]
                 try:
                     vid = v["videoId"]
-                    title = "".join(r.get("text", "") for r in v["title"]["runs"])
+                    title = _clean_title_display("".join(r.get("text", "") for r in v["title"]["runs"]))
                     length = v.get("lengthText", {}).get("simpleText", "")
                     ot = v.get("ownerText", {}).get("runs", [{}])
                     ch = ot[0].get("text", "") if ot else ""
@@ -586,6 +699,7 @@ def yt_search(q, limit=12):
         seen.add(it["yt"]); res.append(it)
         if len(res) >= limit:
             break
+    enrich_artists(res)
     _search_cache[key] = (now, res)
     return res
 
