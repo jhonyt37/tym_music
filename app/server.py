@@ -413,14 +413,19 @@ def tym_analytics():
             "hora_pico_ingresos": hour_rev, "hora_pico_pedidos": hour_ord,
             "cuentas": accts, "venues": venues_info, "owners": owners_info}
 
-def venue_analytics(vid):
-    """Informe del local para el dueño: facturación, pedidos, canciones top, horas pico."""
+def venue_analytics(vid, days=None):
+    """Informe del local para el dueño: facturación, pedidos, canciones top, horas pico.
+    days=None -> todo el historico; days=N -> solo eventos de los ultimos N dias
+    (facturacion_total/canciones_top/horas pico quedan acotados al rango elegido)."""
     hour_rev = {k: 0 for k in range(24)}
     hour_ord = {k: 0 for k in range(24)}
     songs, total, week_total, free, prem = {}, 0, 0, 0, 0
     week_ago = time.time() - 7 * 86400
+    range_since = (time.time() - days * 86400) if days else None
     for e in TYM["events"]:
         if e.get("venue") != vid:
+            continue
+        if range_since is not None and e.get("ts", 0) < range_since:
             continue
         h = _venue_hour(e["ts"], vid)
         if e["ev"] == "charge":
@@ -1478,8 +1483,10 @@ class H(BaseHTTPRequestHandler):
             av = self.authed_venue()
             if not av or av not in VENUES:
                 return self._send(401, {"error": "no auth"})
+            days_q = self._q("days")
+            days = int(days_q) if days_q.isdigit() else None
             with LOCK:
-                return self._send(200, venue_analytics(av))
+                return self._send(200, venue_analytics(av, days))
         if path == "/api/admin/request_log":
             av = self.authed_venue()
             if not av or av not in VENUES:

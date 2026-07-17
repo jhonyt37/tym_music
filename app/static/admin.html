@@ -453,7 +453,15 @@
     </div>
 
     <div class="card" style="margin-bottom:14px">
-      <p class="sec">Resumen del local 📊</p>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <p class="sec" style="margin:0">Resumen del local 📊</p>
+        <div style="display:flex;gap:6px;margin-left:auto">
+          <button class="btn sm ghost" onclick="loadAnalytics(1)" id="abtn1">Hoy</button>
+          <button class="btn sm ghost" onclick="loadAnalytics(7)" id="abtn7">7 días</button>
+          <button class="btn sm ghost" onclick="loadAnalytics(30)" id="abtn30">30 días</button>
+          <button class="btn sm ghost active" onclick="loadAnalytics(0)" id="abtn0">Todo</button>
+        </div>
+      </div>
       <div class="kpis" id="analKpis" style="margin-bottom:18px"></div>
       <div class="grid2">
         <div>
@@ -1083,14 +1091,20 @@ function renderPkgInputs(){
   });
 }
 
-async function loadAnalytics(){
+let _analyticsDays=0; // 0 = todo el historico
+async function loadAnalytics(days){
+  if(days!==undefined)_analyticsDays=days;
+  ['abtn1','abtn7','abtn30','abtn0'].forEach(id=>{const b=$(id);if(b)b.classList.remove('active');});
+  const activeBtn=$('abtn'+_analyticsDays);if(activeBtn)activeBtn.classList.add('active');
   try{
-    const d=await (await fetch('/api/admin/analytics')).json();
+    const qs=_analyticsDays?('?days='+_analyticsDays):'';
+    const d=await (await fetch('/api/admin/analytics'+qs)).json();
     const cop2=n=>'$'+(n||0).toLocaleString('es-CO');
     // KPIs
+    const totalLbl=_analyticsDays===1?'Facturación hoy':_analyticsDays?'Facturación ('+_analyticsDays+' días)':'Facturación total';
     const kbox=$('analKpis');kbox.innerHTML='';
-    [{n:cop2(d.facturacion_total),l:'Facturación total',gold:true},
-     {n:cop2(d.facturacion_semana),l:'Esta semana'},
+    [{n:cop2(d.facturacion_total),l:totalLbl,gold:true},
+     {n:cop2(d.facturacion_semana),l:'Últimos 7 días'},
      {n:d.orders_premium,l:'Pedidos premium'},
      {n:d.orders_free,l:'Pedidos gratis'}].forEach(k=>{
       const b=document.createElement('div');b.className='kpibox';
