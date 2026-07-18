@@ -150,10 +150,14 @@ body{padding-bottom:80px}
     <div class="logo" style="font-size:26px">TY<b>M</b> Music</div>
     <div id="gateName" style="font-size:18px;font-weight:700;color:var(--pri);margin:4px 0 2px;min-height:24px"></div>
     <h2>¿En qué mesa estás?</h2>
-    <div class="muted">Ingresa el código que está en tu mesa</div>
+    <div class="muted">Ingresa el código de 4 dígitos que está en un cartel o sticker sobre tu mesa</div>
     <input class="pin" id="pinInput" inputmode="numeric" maxlength="4" placeholder="••••">
     <button class="btn block" onclick="enterPin()">Entrar</button>
     <div class="small" id="pinErr" style="color:var(--red);margin-top:10px;min-height:16px"></div>
+    <div class="small" style="margin-top:10px">
+      <a href="#" onclick="event.preventDefault();this.style.display='none';document.getElementById('pinHelp').style.display='block';" style="color:var(--mut)">¿No encuentras el código?</a>
+      <div id="pinHelp" style="display:none;color:var(--mut);margin-top:6px;line-height:1.4">Búscalo en un cartelito, sticker o base de la mesa — normalmente cerca del centro. Si no lo ves, pídeselo a un mesero: cada mesa tiene el suyo.</div>
+    </div>
   </div>
   <div class="box" id="gateRegister" style="display:none">
     <div class="logo" style="font-size:26px">TY<b>M</b> Music</div>

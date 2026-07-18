@@ -1289,8 +1289,12 @@ def public_state(token=None, admin=False, mark_dedica=None):
         "duelo": duelo_state,
         "vibe": vibe_state,
         "skip_votes_count": len(STATE.get("skip_votes", set())),
-        "skip_threshold": max(2, -(-len({se["table"] for se in STATE.get("sessions", {}).values()
-                                         if time.time() - se.get("created", 0) < 7200}) // 2)),
+        # Umbral en base a PERSONAS activas (sesiones), no mesas distintas — consistente con
+        # skip_votes_count, que tambien cuenta por persona/token. Antes usaba mesas distintas:
+        # con una mesa de 4 personas y otra de 1, el umbral solo veia "2 mesas" en vez de
+        # "5 personas", dejando el voto de saltar demasiado facil de alcanzar para la mesa grande.
+        "skip_threshold": max(2, -(-sum(1 for se in STATE.get("sessions", {}).values()
+                                        if time.time() - se.get("created", 0) < 7200) // 2)),
         "my_skip_vote": bool(token and token in STATE.get("skip_votes", set())),
         "session": (session_public(sess) if sess else None),
     }
