@@ -830,11 +830,13 @@ function cfNo(){
   if(!$('sheet').classList.contains('open'))$('nav').classList.remove('modal-open');
   if(cfNoCb){cfNoCb();cfNoCb=null;}
 }
-function toast(t,type){
+let _toastT=null;
+function toast(t,type,ms){
   const e=$('toast'),nav=$('nav');
   e.style.bottom=nav?(nav.offsetHeight+16)+'px':'80px';
   e.textContent=t;e.className='toast'+(type?' '+type:'');e.classList.add('show');
-  setTimeout(()=>e.classList.remove('show'),2200);
+  clearTimeout(_toastT);
+  _toastT=setTimeout(()=>e.classList.remove('show'),ms||2200);
 }
 let _reqFlashT=null;
 function showReqFlash(icon,msg,songTitle){
@@ -1207,12 +1209,18 @@ function applyTicker(el){
   if(!el.getClientRects().length)return;
   el.dataset.tkd='1';
   if(el.scrollWidth<=el.clientWidth+2)return; // título cabe, sin ticker
+  const fullText=el.textContent;
   const html=el.innerHTML;
   const dur=Math.max(10,el.textContent.length*0.34)+'s';
   const span=document.createElement('span');
   span.style.cssText=`display:inline-block;white-space:nowrap;font-size:inherit;line-height:inherit;animation:rowTick ${dur} linear infinite`;
   span.innerHTML=`<span style="padding-right:40px">${html}</span><span style="padding-right:40px">${html}</span>`;
   el.innerHTML='';el.appendChild(span);
+  // Con el título corriendo es fácil no alcanzar a leerlo — un toque muestra el nombre
+  // completo al instante en vez de tener que esperar el ciclo del banner. stopPropagation
+  // evita que el toque también dispare el click de la fila (ej. abrir el sheet de pedir).
+  el.style.cursor='pointer';
+  el.addEventListener('click',e=>{e.stopPropagation();toast('🎵 '+fullText,'',3500);});
 }
 function tickify(parent){
   setTimeout(()=>{

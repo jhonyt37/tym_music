@@ -614,12 +614,15 @@ function applyTicker(el){
   if(!el.getClientRects().length)return; // oculto — no marcar, reintentar después
   el.dataset.tkd='1';
   if(el.scrollWidth<=el.clientWidth+2)return; // título cabe, sin ticker
+  const fullText=el.textContent;
   const html=el.innerHTML;
   const dur=Math.max(10,el.textContent.length*0.34)+'s';
   const span=document.createElement('span');
   span.style.cssText=`display:inline-block;white-space:nowrap;font-size:inherit;line-height:inherit;animation:rowTick ${dur} linear infinite`;
   span.innerHTML=`<span style="padding-right:40px">${html}</span><span style="padding-right:40px">${html}</span>`;
   el.innerHTML='';el.appendChild(span);
+  el.style.cursor='pointer';
+  el.addEventListener('click',e=>{e.stopPropagation();toast('🎵 '+fullText,'',3500);});
 }
 function tickify(parent){
   setTimeout(()=>{
@@ -673,7 +676,8 @@ document.addEventListener('focusin',e=>{if(e.target.matches('.field, input'))edi
 document.addEventListener('focusout',()=>setTimeout(()=>editing=false,500));
 
 async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})})).json();}
-function toast(t){const e=$('toast');e.textContent=t;e.classList.add('show');setTimeout(()=>e.classList.remove('show'),2000);}
+let _toastT=null;
+function toast(t,type,ms){const e=$('toast');e.textContent=t;e.classList.add('show');clearTimeout(_toastT);_toastT=setTimeout(()=>e.classList.remove('show'),ms||2000);}
 
 async function approve(id){await post('/api/admin/approve',{id});tick();}
 async function reject(id){await post('/api/admin/reject',{id});tick();}
