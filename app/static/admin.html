@@ -1029,8 +1029,13 @@ async function tick(){
     const Q=$('queue');
     // Habilitar drop de búsqueda al final de la cola
     Q.ondragover=e=>e.preventDefault();
+    // Excluye solo las filas de la cola que ya manejan su propio drop (draggable=true,
+    // insertan en esa posición) — cualquier otro punto dentro de #queue (la fila "Sonando
+    // ahora", el placeholder vacío, o el padding) agrega al final. Antes exigía
+    // e.target===Q exacto, que solo se cumple soltando en un pixel de padding casi
+    // imposible de acertar — soltar sobre "Sonando ahora" o la cola vacía no hacía nada.
     Q.ondrop=e=>{
-      if(e.target===Q&&_dragSearchSong){
+      if(_dragSearchSong&&!e.target.closest('.row[draggable="true"]')){
         e.preventDefault();adminAddSong(_dragSearchSong.yt,_dragSearchSong.title,_dragSearchSong.artist,_dragSearchSong.length,null);_dragSearchSong=null;
       }
     };
@@ -1109,6 +1114,9 @@ async function tick(){
         const exc=reptExc.has(h.yt);
         const hTs=h.played_at||h.ts;
         r.innerHTML=`<span class="drag-handle" style="opacity:.6">⠿</span><img class="mini" src="${img(h.yt)}"><div class="info"><div class="t">${esc(h.title)}</div><div class="a small">${esc(h.artist||'')}${hTs?' · '+hm3(hTs):''}</div></div>`;
+        const addBtn=document.createElement('button');addBtn.className='btn green sm';addBtn.textContent='+ Cola';addBtn.title='Agregar de nuevo a la cola';
+        addBtn.onclick=()=>adminAddSong(h.yt,h.title,h.artist,h.duration,null);
+        r.appendChild(addBtn);
         const rb=document.createElement('button');rb.className='btn sm';rb.style.background=exc?'var(--green)':'var(--bg2)';rb.style.border='1px solid var(--line)';rb.style.color=exc?'#fff':'var(--mut)';rb.textContent=exc?'🔁 Repetir OK':'🔁 Bloquear';rb.title='Permitir/bloquear repetición';
         rb.onclick=async()=>{const j=await post('/api/admin/allow_repeat',{yt:h.yt});toast(j.allowed?'Repetición permitida':'Repetición bloqueada');tick();};
         r.appendChild(rb);
