@@ -119,11 +119,18 @@ def verify_password(p, stored):
 _DUMMY_PASS_HASH = hash_password(secrets.token_hex(8))  # costo decoy para usuarios inexistentes (evita timing leak)
 
 # ---- Envio de correo (recuperar clave) — stdlib puro, sin dependencias nuevas ----
-# Config vía variables de entorno (nunca hardcodeadas): SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS.
-# SMTP_USER en Gmail necesita una "contraseña de aplicación" (Cuenta Google → Seguridad →
-# Verificación en 2 pasos → Contraseñas de aplicaciones), NO la contraseña normal de la cuenta.
-# Sin esas variables configuradas (ej. en dev local), el correo queda solo en el log del
-# servidor en vez de enviarse de verdad — así el flujo completo se puede probar sin credenciales.
+# Dos vías, en este orden de prioridad:
+# 1) Resend (API HTTPS, vía RESEND_API_KEY) — funciona en hosts que bloquean SMTP saliente
+#    (ej. Render), porque viaja como tráfico HTTPS normal, no por el puerto 465/587.
+#    Sin dominio propio verificado en Resend, usa RESEND_FROM=onboarding@resend.dev (su
+#    dirección de pruebas, sirve para enviar sin configurar nada más).
+# 2) SMTP (SMTP_HOST/PORT/USER/PASS) — sirve en dev local o en hosts que sí permiten SMTP.
+#    SMTP_USER en Gmail necesita una "contraseña de aplicación" (Cuenta Google → Seguridad →
+#    Verificación en 2 pasos → Contraseñas de aplicaciones), NO la contraseña normal.
+# Sin ninguna de las dos configuradas, el correo queda solo en el log del servidor en vez de
+# enviarse de verdad — así el flujo completo se puede probar sin credenciales.
+RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
+RESEND_FROM = os.environ.get("RESEND_FROM", "TYM Music <onboarding@resend.dev>")
 SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
@@ -138,11 +145,26 @@ def mask_email(email):
     keep = min(3, max(1, len(local) - 1))
     return local[:keep] + "***@" + domain
 
+def _send_email_resend(to_addr, subject, body):
+    payload = json.dumps({"from": RESEND_FROM, "to": [to_addr], "subject": subject, "text": body}).encode("utf-8")
+    req = urllib.request.Request("https://api.resend.com/emails", data=payload, method="POST",
+                                  headers={"Authorization": f"Bearer {RESEND_API_KEY}",
+                                           "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            r.read()
+        return True
+    except Exception as e:
+        print(f"✉️  Error enviando correo (Resend) a {to_addr}:", e, flush=True)
+        return False
+
 def send_email(to_addr, subject, body):
     if not to_addr:
         return False
+    if RESEND_API_KEY:
+        return _send_email_resend(to_addr, subject, body)
     if not (SMTP_USER and SMTP_PASS):
-        print(f"✉️  [correo simulado — falta SMTP_USER/SMTP_PASS] Para: {to_addr} | Asunto: {subject}\n{body}", flush=True)
+        print(f"✉️  [correo simulado — falta RESEND_API_KEY o SMTP_USER/SMTP_PASS] Para: {to_addr} | Asunto: {subject}\n{body}", flush=True)
         return True
     try:
         msg = MIMEText(body, "plain", "utf-8")

@@ -847,17 +847,21 @@ function renderCurated(list){
   if(!list.length){box.innerHTML='<div class="empty">Aún no has añadido recomendadas.</div>';return;}
   _curSnapshot=list.map(c=>c.yt);
   list.forEach(c=>{
-    const r=document.createElement('div');r.className='row';r.draggable=true;
-    r.innerHTML=`<span class="drag-handle" title="Arrastra para reordenar">⠿</span><img class="mini" src="${img(c.yt)}"><div class="info"><div class="t">${esc(c.title)}</div><div class="a">${esc(c.artist||'')}</div></div>`;
+    const r=document.createElement('div');r.className='row';r.draggable=true;r.title='Arrastra para reordenar aquí, o suéltala en la cola en vivo para agregarla';
+    r.innerHTML=`<span class="drag-handle" title="Arrastra para reordenar o agregar a la cola">⠿</span><img class="mini" src="${img(c.yt)}"><div class="info"><div class="t">${esc(c.title)}</div><div class="a">${esc(c.artist||'')}</div></div>`;
     const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';
     x.onclick=async()=>{await post('/api/admin/curated',{action:'remove',yt:c.yt});tick();};
     r.appendChild(x);
     r.addEventListener('dragstart',e=>{
-      _dragCurYt=c.yt;
-      e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','cur:'+c.yt);
+      // Doble propósito: soltar dentro de esta misma lista reordena (_dragCurYt, patrón
+      // existente); soltar sobre la cola en vivo la agrega (_dragSearchSong, mismo mecanismo
+      // que ya usan los resultados del buscador admin) — la cola no necesita saber de dónde
+      // vino la canción, solo lee _dragSearchSong si está presente.
+      _dragCurYt=c.yt;_dragSearchSong={yt:c.yt,title:c.title,artist:c.artist||'',length:''};
+      e.dataTransfer.effectAllowed='copyMove';e.dataTransfer.setData('text/plain','cur:'+c.yt);
       setTimeout(()=>r.classList.add('dragging'),0);
     });
-    r.addEventListener('dragend',()=>{r.classList.remove('dragging');box.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));});
+    r.addEventListener('dragend',()=>{r.classList.remove('dragging');_dragSearchSong=null;box.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));});
     r.addEventListener('dragover',e=>{
       e.preventDefault();e.dataTransfer.dropEffect='move';
       box.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));
@@ -1101,13 +1105,20 @@ async function tick(){
     const HC=$('recentHistCard');const HL=$('recentHistList');
     if(hist.length){HC.style.display='';HL.innerHTML='';
       hist.forEach(h=>{
-        const r=document.createElement('div');r.className='row';
+        const r=document.createElement('div');r.className='row';r.draggable=true;r.title='Arrastra a la cola para agregarla de nuevo';
         const exc=reptExc.has(h.yt);
         const hTs=h.played_at||h.ts;
-        r.innerHTML=`<img class="mini" src="${img(h.yt)}"><div class="info"><div class="t">${esc(h.title)}</div><div class="a small">${esc(h.artist||'')}${hTs?' · '+hm3(hTs):''}</div></div>`;
+        r.innerHTML=`<span class="drag-handle" style="opacity:.6">⠿</span><img class="mini" src="${img(h.yt)}"><div class="info"><div class="t">${esc(h.title)}</div><div class="a small">${esc(h.artist||'')}${hTs?' · '+hm3(hTs):''}</div></div>`;
         const rb=document.createElement('button');rb.className='btn sm';rb.style.background=exc?'var(--green)':'var(--bg2)';rb.style.border='1px solid var(--line)';rb.style.color=exc?'#fff':'var(--mut)';rb.textContent=exc?'🔁 Repetir OK':'🔁 Bloquear';rb.title='Permitir/bloquear repetición';
         rb.onclick=async()=>{const j=await post('/api/admin/allow_repeat',{yt:h.yt});toast(j.allowed?'Repetición permitida':'Repetición bloqueada');tick();};
-        r.appendChild(rb);HL.appendChild(r);
+        r.appendChild(rb);
+        r.addEventListener('dragstart',e=>{
+          _dragQId=null;_dragSearchSong={yt:h.yt,title:h.title,artist:h.artist||'',length:h.duration||''};
+          e.dataTransfer.effectAllowed='copy';e.dataTransfer.setData('text/plain','hist:'+h.yt);
+          r.classList.add('dragging');
+        });
+        r.addEventListener('dragend',()=>{r.classList.remove('dragging');_dragSearchSong=null;});
+        HL.appendChild(r);
       });
       tickify(HL);
     }else HC.style.display='none';
