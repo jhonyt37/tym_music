@@ -871,6 +871,38 @@ def queue_view():
 def pending_view():
     return [i for i in STATE["items"] if i["status"] == "pending"]
 
+# ---- Gate + duración dinámica para votación/duelo (llamar bajo LOCK) ----
+# El ganador siempre se marca "super" para sonar inmediatamente después de la actual (ver
+# _close_poll_winner/_close_duelo_winner) — por eso el lanzamiento se bloquea si la canción
+# ya va en >=50% (played_enough, ya trackeado por /api/progress) o si el siguiente puesto de
+# la cola ya es un salto pagado (nadie puede colarse antes de quien pagó por sonar de primera).
+POLL_CLOSE_BUFFER_SECS = 8
+POLL_MIN_DURATION_SECS = 20
+
+def _poll_gate_error():
+    np = STATE.get("now_playing")
+    if not np:
+        return "No hay ninguna canción sonando ahora mismo."
+    # Calculado directo del ratio posición/duración (no del flag played_enough — ese es
+    # de una sola vía por diseño, para otro propósito, y en teoría podría quedar "pegado"
+    # en True si la posición bajara; en uso real la posición del video solo avanza, pero
+    # calcularlo directo evita depender de ese acoplamiento).
+    dur = np.get("duration") or DEFAULT_DUR
+    pos = np.get("position") or 0
+    if dur > 0 and pos / dur >= 0.5:
+        return "Esta canción ya va en más de la mitad — espera a la siguiente para lanzar esto."
+    q = queue_view()
+    if q and q[0].get("super"):
+        return "La siguiente canción ya fue pagada para sonar de primera — espera a que termine."
+    return None
+
+def _poll_dynamic_duration():
+    np = STATE["now_playing"]
+    dur = np.get("duration") or DEFAULT_DUR
+    pos = np.get("position") or 0
+    remaining = dur - pos
+    return max(POLL_MIN_DURATION_SECS, int(remaining - POLL_CLOSE_BUFFER_SECS))
+
 def promote_next(manual=False):
     old = STATE["now_playing"]
     if old:
@@ -987,7 +1019,10 @@ def _close_poll_winner(p, vid=None):
     poll_item = {"id": nid(), "title": winner_opt["title"],
                  "artist": winner_opt.get("artist", ""), "yt": winner_yt,
                  "token": None, "table": "Votación 🗳️", "priority": False,
-                 "super": False, "mode": "normal", "duration": DEFAULT_DUR,
+                 # super=True: suena inmediatamente después de la actual, para no perder
+                 # el hype de quien votó — ya se garantizó al lanzar que no hay un salto
+                 # pagado esperando en el siguiente puesto (ver _poll_gate_error).
+                 "super": True, "mode": "normal", "duration": DEFAULT_DUR,
                  "status": "approved", "play_status": "pending", "played_enough": False,
                  "requeue_count": 0, "ts": time.time(), "charge_on_play": 0,
                  "charged": False, "charge_kind": "", "repeat_exception": True, "message": ""}
@@ -1014,7 +1049,8 @@ def _close_duelo_winner(d):
     item = {"id": nid(), "title": winner_team["title"],
             "artist": winner_team.get("artist", ""), "yt": winner_yt,
             "token": None, "table": f"⚔️ Duelo · {winner_team.get('label','Ganador')}",
-            "priority": False, "super": False, "mode": "normal", "duration": DEFAULT_DUR,
+            # super=True: mismo motivo que en _close_poll_winner — suena de primera.
+            "priority": False, "super": True, "mode": "normal", "duration": DEFAULT_DUR,
             "status": "approved", "play_status": "pending", "played_enough": False,
             "requeue_count": 0, "ts": time.time(), "charge_on_play": 0,
             "charged": False, "charge_kind": "", "repeat_exception": True, "message": ""}
@@ -2035,6 +2071,11 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "No hay nada sonando aún."})
                 if STATE.get("jump_used_for") == np["id"]:
                     return self._send(400, {"error": "Alguien llegó primero al salto. Disponible en la próxima canción 🎵", "jump_conflict": True})
+                # Si hay una votación/duelo activo, su ganador ya tiene garantizado sonar
+                # justo después de esta canción (super=True) — permitir un salto pagado aquí
+                # rompería esa garantía (el salto tendría un ts más viejo y se colaría antes).
+                if (STATE.get("poll") or {}).get("active") or (STATE.get("duelo") or {}).get("active"):
+                    return self._send(400, {"error": "Hay una votación/duelo en curso — espera a que termine para saltar tu canción."})
                 target = None
                 for i in STATE["items"]:
                     if i["id"] == d.get("id"):
@@ -2634,6 +2675,9 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Admin: crear votación ----
             if path == "/api/admin/poll":
+                gate_err = _poll_gate_error()
+                if gate_err:
+                    return self._send(400, {"error": gate_err})
                 options = d.get("options", [])
                 valid_opts = [{"yt": (o.get("yt") or "").strip(),
                                "title": str(o.get("title", "Canción"))[:120],
@@ -2643,7 +2687,7 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "Se necesitan al menos 2 opciones válidas."})
                 if len(valid_opts) > 3:
                     valid_opts = valid_opts[:3]
-                duration = int(STATE["settings"].get("poll_duration_secs", 120))
+                duration = _poll_dynamic_duration()
                 np_id = (STATE.get("now_playing") or {}).get("id")
                 now = time.time()
                 STATE["poll"] = {"options": valid_opts,
@@ -2664,10 +2708,13 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Admin: crear duelo ----
             if path == "/api/admin/duelo":
+                gate_err = _poll_gate_error()
+                if gate_err:
+                    return self._send(400, {"error": gate_err})
                 teams = d.get("teams", [])
                 if len(teams) != 2 or not all(t.get("yt") and t.get("title") for t in teams):
                     return self._send(400, {"error": "Se necesitan exactamente 2 equipos con yt y título."})
-                duration = int(STATE["settings"].get("duelo_duration_secs", 60))
+                duration = _poll_dynamic_duration()
                 now = time.time()
                 STATE["duelo"] = {
                     "teams": [{"yt": t["yt"], "title": t["title"],
