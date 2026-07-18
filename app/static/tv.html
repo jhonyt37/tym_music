@@ -717,7 +717,7 @@ const CYCLE=90000;
 schedule(burstNow,CYCLE,1500);
 schedule(()=>burst($('up'),11000),CYCLE,30000);
 schedule(()=>burst($('qr'),30000),CYCLE,15000);
-schedule(()=>{if(topLoved.length)burst($('loved'),9000);},CYCLE,75000);
+schedule(()=>{if(topLoved.length)burst($('loved'),11000);},CYCLE,75000);
 schedule(burstReacts,CYCLE,50000); // reacciones a mitad del ciclo, lejos del nombre de la canción
 
 // ---- Pantalla completa ----
@@ -835,7 +835,7 @@ setInterval(async()=>{
       if(newReacts.length){newReacts.sort((a,b)=>a.ts-b.ts).forEach((rx,i)=>setTimeout(()=>spawnReact(rx.emoji,rx.table||null),i*200));_lastReactTs=Math.max(...newReacts.map(rx=>rx.ts));}
     }
     topLoved=s.top_loved||[];
-    $('lovedItems').innerHTML=topLoved.slice(0,3).map((it,i)=>`<div class="it">${i+1}. ${esc(it.title)}<span class="love">❤️ ${it.total}</span></div>`).join('');
+    $('lovedItems').innerHTML=topLoved.slice(0,5).map((it,i)=>`<div class="it">${i+1}. ${esc(it.title)}<span class="love">❤️ ${it.total}</span></div>`).join('');
     paintNext(s.queue,s.queue_count);
     checkNewRequests(s.queue);
     renderAssists(s.assists||[]);
