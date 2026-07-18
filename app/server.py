@@ -147,9 +147,13 @@ def mask_email(email):
 
 def _send_email_resend(to_addr, subject, body):
     payload = json.dumps({"from": RESEND_FROM, "to": [to_addr], "subject": subject, "text": body}).encode("utf-8")
+    # User-Agent explícito: el default de urllib ("Python-urllib/3.x") lo bloquea Cloudflare
+    # (delante de la API de Resend) con error 1010 al detectarlo como firma de bot — confirmado
+    # en vivo probando la misma llamada desde una terminal local (2026-07-18).
     req = urllib.request.Request("https://api.resend.com/emails", data=payload, method="POST",
                                   headers={"Authorization": f"Bearer {RESEND_API_KEY}",
-                                           "Content-Type": "application/json"})
+                                           "Content-Type": "application/json",
+                                           "User-Agent": "TYM-Music-Server/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=10) as r:
             r.read()
