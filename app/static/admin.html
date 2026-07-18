@@ -572,6 +572,22 @@
 
 <script>
 const $=id=>document.getElementById(id);
+// ---- Ojito de mostrar/ocultar contraseña (reusado en cada input type=password) ----
+function initPasswordToggle(id){
+  const el=document.getElementById(id);
+  if(!el||el.dataset.pwToggled)return;
+  el.dataset.pwToggled='1';
+  const wrap=document.createElement('div');
+  wrap.style.position='relative';
+  el.parentNode.insertBefore(wrap,el);
+  wrap.appendChild(el);
+  el.style.paddingRight='42px';
+  const btn=document.createElement('button');
+  btn.type='button';btn.textContent='👁';btn.title='Mostrar/ocultar contraseña';
+  btn.style.cssText='position:absolute;right:4px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:17px;padding:8px;opacity:.6;line-height:1';
+  btn.onclick=()=>{const show=el.type==='password';el.type=show?'text':'password';btn.textContent=show?'🙈':'👁';btn.style.opacity=show?'1':'.6';};
+  wrap.appendChild(btn);
+}
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -780,6 +796,7 @@ function initSearchClear(inputId,btnId){
   sync();
 }
 ['adminQ','curq','pollSearch','dueloSearchA','dueloSearchB','custq'].forEach(id=>initSearchClear(id,id+'Clear'));
+['lgPass','newPass','newPassConfirm'].forEach(initPasswordToggle);
 
 // Curadas
 $('curq').addEventListener('input',e=>{
