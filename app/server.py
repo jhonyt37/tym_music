@@ -2940,6 +2940,14 @@ def _load_into(v, snap):
             v["settings"].update(snap[k])   # conserva defaults de claves nuevas
         else:
             v[k] = snap[k]
+    # La canción que sonaba justo antes de un reinicio/deploy retoma desde el inicio: el
+    # reproductor de la TV siempre carga el video desde 0 en una recarga fresca (no hay forma
+    # de reanudar un iframe de YouTube a mitad de canción), así que dejar aquí la posición
+    # vieja solo generaba una barra de progreso/contador confusos (mostraba varios minutos
+    # avanzados mientras el video en realidad arrancaba de cero) — bug reportado en vivo.
+    if v.get("now_playing"):
+        v["now_playing"]["position"] = 0
+        v["now_playing"]["played_enough"] = False
     v["reactions"] = {int(k): {e: set(lst) for e, lst in r.items()}
                       for k, r in snap.get("reactions", {}).items()}
     v["reaction_pub"] = {int(k): {e: set(lst) for e, lst in r.items()}

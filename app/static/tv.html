@@ -569,7 +569,7 @@ function onYouTubeIframeAPIReady(){
     host:'https://www.youtube-nocookie.com',
     playerVars:{autoplay:1,mute:1,playsinline:1,rel:0,controls:0,modestbranding:1,enablejsapi:1,origin:location.origin},
     events:{
-      onReady:()=>{ready=true;const w=document.getElementById('ytWarn');if(w)w.remove();if(authok)tick();},
+      onReady:()=>{ready=true;const w=document.getElementById('ytWarn');if(w)w.remove();try{sessionStorage.removeItem('tym_tv_autoreload');}catch(e){}if(authok)tick();},
       onStateChange:e=>{
         if(e.data===YT.PlayerState.ENDED)advance();
         // Pausa manual (clic/space del operador en el propio player) — nunca la del
@@ -601,6 +601,35 @@ function onYouTubeIframeAPIReady(){
 
 // Fallback: si el player no se inicializó en 8s, mostrar aviso
 setTimeout(()=>{if(!ready){const b=document.createElement('div');b.id='ytWarn';b.className='warn';b.textContent='⚠ El reproductor de YouTube está tardando en cargar (puede pasar en el primer arranque del servidor)…';document.body.appendChild(b);}},8000);
+// Auto-recuperación: si el player nunca llega a inicializar (ready sigue false), antes solo
+// quedaba el aviso de arriba parpadeando para siempre — el dueño tenía que notar el problema
+// y refrescar a mano, a veces varias veces seguidas hasta que el script de YouTube cargara
+// bien. Ahora se recarga sola una vez pasado el margen razonable de un cold-start de Render
+// (~30s documentado en DEPLOY.md), con tope de reintentos para no quedar en loop si de verdad
+// no hay red.
+setTimeout(()=>{
+  if(ready)return;
+  let n=0; try{n=parseInt(sessionStorage.getItem('tym_tv_autoreload')||'0');}catch(e){}
+  if(n>=3)return; // ya se intentó varias veces solo — deja el aviso estático, algo más de fondo
+  try{sessionStorage.setItem('tym_tv_autoreload',String(n+1));}catch(e){}
+  location.reload();
+},25000);
+// Mismo espíritu para cuando el player SÍ inicializó pero se quedó sin cargar nunca la canción
+// actual (curYt nunca alcanza a igualar la del servidor pese a los reintentos normales de
+// tick()) — reseteo el contador de intentos apenas queda sincronizado, para no gastar los 3
+// intentos en un problema de arranque y dejar sin margen a uno real más adelante en la noche.
+let _stuckPolls=0;
+function _watchdogStuck(hasNp,synced){
+  if(!ready||!authok||!hasNp){_stuckPolls=0;return;}
+  if(synced){_stuckPolls=0;try{sessionStorage.removeItem('tym_tv_autoreload2');}catch(e){}return;}
+  _stuckPolls++;
+  if(_stuckPolls<6)return; // ~12s de polls (cada 2s) sin lograr sincronizar
+  _stuckPolls=0;
+  let n=0; try{n=parseInt(sessionStorage.getItem('tym_tv_autoreload2')||'0');}catch(e){}
+  if(n>=3)return;
+  try{sessionStorage.setItem('tym_tv_autoreload2',String(n+1));}catch(e){}
+  location.reload();
+}
 
 async function advance(manual=false,forceSkip=false){
   if(!isPrimary||tvBlocked)return;
@@ -806,6 +835,7 @@ setInterval(async()=>{
 
     // Recuperar: si hay canción en servidor pero no está cargada en el player
     if(s.now_playing&&ready&&s.now_playing.yt!==curYt){load(s.now_playing);}
+    _watchdogStuck(!!s.now_playing, !s.now_playing||s.now_playing.yt===curYt);
 
     // Recuperar player detenido/pausado/cued después de carga exitosa
     // (ps===2/PAUSED se respeta si fue una pausa manual del operador — ver onStateChange)
