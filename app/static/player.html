@@ -15,6 +15,7 @@
     <input class="field" id="lgPass" type="password" placeholder="Contraseña" style="margin-top:8px">
     <button class="btn block" style="margin-top:12px" onclick="doLogin()">Entrar</button>
     <div class="small" id="lgErr" style="color:var(--red);margin-top:8px;min-height:16px"></div>
+    <div class="small" style="margin-top:6px"><a href="#" onclick="forgotPassword();return false" style="color:var(--pri)">¿Olvidaste tu contraseña?</a></div>
     <div class="small" style="margin-top:14px;color:var(--mut)">Demo: bardemo / tym1234</div>
   </div>
 </div>
@@ -88,7 +89,22 @@ function tickify(parent){
 }
 let player,ready=false,curId=null,curYt=null,wantAudio=false,authok=false;
 let _errBurst=[];const ERR_BURST_LIMIT=4,ERR_BURST_WINDOW=25000;
-async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';}
+async function doLogin(){
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});
+  if(r.ok){location.reload();return;}
+  $('lgErr').style.color='var(--red)';
+  if(r.status===403){const j=await r.json().catch(()=>({}));$('lgErr').textContent=j.error||'Cuenta bloqueada.';}
+  else $('lgErr').textContent='Usuario o contraseña incorrectos';
+}
+async function forgotPassword(){
+  const u=($('lgUser').value||'').trim();
+  if(!u){$('lgErr').textContent='Escribe tu usuario arriba primero.';return;}
+  if(!confirm('¿Enviar un correo con una nueva contraseña a la dirección registrada de "'+u+'"?'))return;
+  const r=await fetch('/api/forgot_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:u})});
+  const j=await r.json().catch(()=>({}));
+  $('lgErr').style.color='var(--green)';
+  $('lgErr').textContent=j.message||j.error||'Si el usuario existe, en unos minutos llegará un correo.';
+}
 (async()=>{const me=await fetch('/api/me');if(!me.ok){$('loginGate').style.display='flex';return;}authok=true;if(ready)tick();})();
 const isLocal=['localhost','127.0.0.1'].includes(location.hostname);
 const isRawIP=/^\d{1,3}(\.\d{1,3}){3}$/.test(location.hostname);

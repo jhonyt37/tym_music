@@ -68,6 +68,7 @@
     <input class="field" id="lgPass" type="password" placeholder="Contraseña" style="margin-top:8px" autocomplete="current-password">
     <button class="btn block" style="margin-top:12px" onclick="doLogin()">Entrar</button>
     <div class="small" id="lgErr" style="color:var(--red);margin-top:8px;min-height:16px"></div>
+    <div class="small" style="margin-top:6px"><a href="#" onclick="forgotPassword();return false" style="color:var(--pri)">¿Olvidaste tu contraseña?</a></div>
     <div class="small" style="margin-top:14px;color:var(--mut)">Demo: bardemo / tym1234</div>
   </div>
 </div>
@@ -338,7 +339,11 @@
       <details class="settingsSection">
         <summary><span class="sec">Cuenta y seguridad</span><span class="chev">▸</span></summary>
         <div class="secBody">
-      <label class="small">Nueva contraseña (mín. 8 caracteres)</label>
+      <label class="small">Correo de recuperación (a donde llega tu clave si la olvidas)</label>
+      <input class="field" id="ownerEmail" type="email" placeholder="tu@correo.com">
+      <button class="btn ghost block sm" style="margin-top:8px" onclick="updateEmail()">✉️ Guardar correo</button>
+
+      <label class="small" style="display:block;margin-top:18px">Nueva contraseña (mín. 8 caracteres)</label>
       <input class="field" id="newPass" type="password" placeholder="Nueva contraseña" autocomplete="new-password">
       <input class="field" id="newPassConfirm" type="password" placeholder="Repetir contraseña" autocomplete="new-password" style="margin-top:8px">
       <button class="btn ghost block sm" style="margin-top:10px" onclick="changePassword()">🔑 Cambiar contraseña</button>
@@ -406,6 +411,10 @@
 
         <div class="card">
           <p class="sec">Marca y redes</p>
+          <label class="opt">
+            <div><b>Mostrar "TYM Music" en la pantalla del TV</b><div class="small">Apagado por defecto. El logo/nombre de tu local siempre se muestra, esto es solo la marca TYM.</div></div>
+            <input type="checkbox" id="showTymBrand" style="width:22px;height:22px">
+          </label>
           <label class="small">Logo TYM (imagen)</label>
           <input type="file" id="tymLogoFile" accept="image/*" class="field">
           <label class="small">Logo del bar (imagen)</label>
@@ -743,6 +752,7 @@ async function save(){
     max_priority_queue_min:parseInt($('maxPrioMin').value||0),
     fallback_shuffle:$('fbShuffle').checked,
     prepaid_mode:$('prepaid').checked, min_direct_pay:parseInt($('minDirectPay').value||0),
+    show_tym_brand:$('showTymBrand').checked,
     theme:curTheme,
     blocked_keywords:[..._kwBlocked],
     allowed_keywords:[..._kwAllowed],
@@ -909,6 +919,8 @@ async function tick(){
       $('fbShuffle').checked=s.settings.fallback_shuffle!==false;
       $('prepaid').checked=s.settings.prepaid_mode||false;
       $('minDirectPay').value=s.settings.min_direct_pay||700;
+      $('showTymBrand').checked=s.settings.show_tym_brand||false;
+      $('ownerEmail').value=s.owner_email||'';
       if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;
       if($('pollDurationSecs'))$('pollDurationSecs').value=s.settings.poll_duration_secs||120;
       if($('dueloDurationSecs'))$('dueloDurationSecs').value=s.settings.duelo_duration_secs||60;
@@ -1495,9 +1507,27 @@ async function changePassword(){
   if(r&&r.ok){toast('Contraseña actualizada ✓','ok');$('newPass').value='';$('newPassConfirm').value='';}
   else toast(r&&r.error||'Error al cambiar contraseña','err');
 }
+async function updateEmail(){
+  const email=($('ownerEmail').value||'').trim();
+  const r=await post('/api/admin/update_email',{email});
+  if(r&&r.ok)toast('Correo actualizado ✓','ok');
+  else toast(r&&r.error||'Error al guardar el correo','err');
+}
 async function doLogin(){
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});
-  if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';
+  if(r.ok){location.reload();return;}
+  $('lgErr').style.color='var(--red)';
+  if(r.status===403){const j=await r.json().catch(()=>({}));$('lgErr').textContent=j.error||'Cuenta bloqueada.';}
+  else $('lgErr').textContent='Usuario o contraseña incorrectos';
+}
+async function forgotPassword(){
+  const u=($('lgUser').value||'').trim();
+  if(!u){$('lgErr').textContent='Escribe tu usuario arriba primero.';return;}
+  if(!confirm('¿Enviar un correo con una nueva contraseña a la dirección registrada de "'+u+'"?'))return;
+  const r=await fetch('/api/forgot_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:u})});
+  const j=await r.json().catch(()=>({}));
+  $('lgErr').style.color='var(--green)';
+  $('lgErr').textContent=j.message||j.error||'Si el usuario existe, en unos minutos llegará un correo.';
 }
 async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
 

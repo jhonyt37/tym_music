@@ -24,6 +24,7 @@
     <input class="field" id="lgPass" type="password" placeholder="Contraseña" style="margin-top:8px">
     <button class="btn block" style="margin-top:12px" onclick="doLogin()">Entrar</button>
     <div class="small" id="lgErr" style="color:var(--red);margin-top:8px;min-height:16px"></div>
+    <div class="small" style="margin-top:6px"><a href="#" onclick="forgotPassword();return false" style="color:var(--pri)">¿Olvidaste tu contraseña?</a></div>
     <div class="small" style="margin-top:14px;color:var(--mut)">Demo: tym / tymmaster</div>
   </div>
 </div>
@@ -85,6 +86,8 @@
       <input class="field" id="nUser" placeholder="ej: lazona" autocomplete="off">
       <label class="small">Contraseña del dueño</label>
       <input class="field" id="nPass" type="password" placeholder="Contraseña" autocomplete="new-password">
+      <label class="small">Correo del dueño (para recuperar la clave si la olvida)</label>
+      <input class="field" id="nEmail" type="email" placeholder="dueno@correo.com">
       <button class="btn block" style="margin-top:12px" onclick="createVenue()">Registrar local</button>
       <div class="small" id="nErr" style="color:var(--red);margin-top:8px;min-height:16px"></div>
     </div>
@@ -114,7 +117,22 @@ function initPasswordToggle(id){
 }
 ['lgPass','nPass'].forEach(initPasswordToggle);
 let VENMAP={};
-async function doLogin(){const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});if(r.ok)location.reload();else $('lgErr').textContent='Usuario o contraseña incorrectos';}
+async function doLogin(){
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});
+  if(r.ok){location.reload();return;}
+  $('lgErr').style.color='var(--red)';
+  if(r.status===403){const j=await r.json().catch(()=>({}));$('lgErr').textContent=j.error||'Cuenta bloqueada.';}
+  else $('lgErr').textContent='Usuario o contraseña incorrectos';
+}
+async function forgotPassword(){
+  const u=($('lgUser').value||'').trim();
+  if(!u){$('lgErr').textContent='Escribe tu usuario arriba primero.';return;}
+  if(!confirm('¿Enviar un correo con una nueva contraseña a la dirección registrada de "'+u+'"?'))return;
+  const r=await fetch('/api/forgot_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:u})});
+  const j=await r.json().catch(()=>({}));
+  $('lgErr').style.color='var(--green)';
+  $('lgErr').textContent=j.message||j.error||'Si el usuario existe, en unos minutos llegará un correo.';
+}
 async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
 
 const MODE_LABEL={normal:'🆓 Gratis',credito:'⚡ Crédito',pase:'⚡ Pase',salto:'⏫ Salto',single:'💰 Cobrado'};
@@ -181,6 +199,14 @@ async function load(){
     const own=owners.find(o=>o.venue===vid);
     const row=document.createElement('div');row.className='row';
     row.innerHTML=`<div class="info"><div class="t">${esc(info.name||info)} <span class="tag" style="font-size:11px;background:rgba(59,130,246,.2);border-radius:4px;padding:2px 6px">${esc(vid)}</span></div><div class="a">👤 ${esc(own?own.username:'—')} · ${info.tables||0} mesas · <a href="/?v=${encodeURIComponent(vid)}" target="_blank" class="small">Ver app</a></div></div>`;
+    const rb=document.createElement('button');rb.className='btn ghost sm';rb.textContent='🔑 Resetear clave';
+    rb.onclick=()=>resetOwnerPassword(vid,info.name||vid,own?own.username:'');
+    row.appendChild(rb);
+    const blocked=own?own.blocked:false;
+    const bb=document.createElement('button');bb.className='btn '+(blocked?'green':'red')+' sm';bb.style.marginLeft='6px';
+    bb.textContent=blocked?'✅ Desbloquear':'🚫 Bloquear';
+    bb.onclick=()=>toggleBlockVenue(vid,info.name||vid,blocked);
+    row.appendChild(bb);
     vl.appendChild(row);
   });
   // Popula selector de local en historial
@@ -189,15 +215,31 @@ async function load(){
   venues.forEach(([vid,info])=>{const o=document.createElement('option');o.value=vid;o.textContent=info.name||vid;sel.appendChild(o);});
   loadTymLog();
 }
+async function resetOwnerPassword(vid,venueName,username){
+  const np=prompt('Nueva contraseña para "'+venueName+'"'+(username?' (usuario: '+username+')':'')+' — mínimo 8 caracteres:');
+  if(np===null)return; // cancelado
+  if(np.trim().length<8){alert('La contraseña debe tener al menos 8 caracteres.');return;}
+  const r=await fetch('/api/tym/reset_password',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({vid,new_pass:np.trim()})});
+  const j=await r.json();
+  alert(j.ok?('Contraseña actualizada para '+venueName+'.'):(j.error||'Error'));
+}
+async function toggleBlockVenue(vid,venueName,blocked){
+  if(!confirm((blocked?'¿Desbloquear "':'¿Bloquear "')+venueName+'"'+(blocked?'':' (no podrá iniciar sesión, ej. por falta de pago)')+'?'))return;
+  const r=await fetch('/api/tym/toggle_block',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({vid})});
+  const j=await r.json();
+  if(j.ok)load();else alert(j.error||'Error');
+}
 async function createVenue(){
   const vid=$('nVid').value.trim(),name=$('nName').value.trim();
-  const username=$('nUser').value.trim(),password=$('nPass').value;
+  const username=$('nUser').value.trim(),password=$('nPass').value,email=$('nEmail').value.trim();
   $('nErr').textContent='';
-  if(!vid||!name||!username||!password){$('nErr').textContent='Completa todos los campos';return;}
+  if(!vid||!name||!username||!password||!email){$('nErr').textContent='Completa todos los campos';return;}
   const r=await fetch('/api/tym/create_venue',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({vid,name,username,password})});
+    body:JSON.stringify({vid,name,username,password,email})});
   const j=await r.json();
-  if(j.ok){$('nVid').value='';$('nName').value='';$('nUser').value='';$('nPass').value='';load();}
+  if(j.ok){$('nVid').value='';$('nName').value='';$('nUser').value='';$('nPass').value='';$('nEmail').value='';load();}
   else $('nErr').textContent=j.error||'Error';
 }
 load();setInterval(load,4000);

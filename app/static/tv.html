@@ -168,6 +168,7 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
     <input id="lgPass" type="password" placeholder="Contraseña" style="width:100%;padding:13px;border-radius:12px;border:1px solid #2a3550;background:#1b2435;color:#fff;font-size:16px;margin-top:8px">
     <button onclick="doLogin()" style="width:100%;margin-top:12px;padding:13px;border:none;border-radius:12px;background:#3b82f6;color:#fff;font-weight:700;font-size:16px;cursor:pointer">Entrar</button>
     <div id="lgErr" style="color:#ef4444;margin-top:8px;min-height:16px;font-size:13px"></div>
+    <div style="margin-top:6px;font-size:13px"><a href="#" onclick="forgotPassword();return false" style="color:#3b82f6">¿Olvidaste tu contraseña?</a></div>
     <div style="margin-top:14px;color:#9aa7c2;font-size:13px">Demo: bardemo / tym1234</div>
   </div>
 </div>
@@ -176,7 +177,7 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 
 <div class="panel" id="brand">
   <img id="tymLogo" class="logoimg" style="display:none;height:42px" alt="">
-  <div class="logo" id="tymText">TY<b>M</b> Music</div>
+  <div class="logo" id="tymText" style="display:none">TY<b>M</b> Music</div>
   <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
     <img id="venueLogo" class="logoimg" style="display:none;height:50px;border-radius:8px" alt="">
     <div class="venue" id="venueTop">…</div>
@@ -386,8 +387,19 @@ function renderAssists(assists){
 async function doLogin(){
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({user:document.getElementById('lgUser').value.trim(),pass:document.getElementById('lgPass').value})});
-  if(r.ok)location.reload();
-  else document.getElementById('lgErr').textContent='Usuario o contraseña incorrectos';
+  if(r.ok){location.reload();return;}
+  $('lgErr').style.color='#ef4444';
+  if(r.status===403){const j=await r.json().catch(()=>({}));$('lgErr').textContent=j.error||'Cuenta bloqueada.';}
+  else $('lgErr').textContent='Usuario o contraseña incorrectos';
+}
+async function forgotPassword(){
+  const u=($('lgUser').value||'').trim();
+  if(!u){$('lgErr').textContent='Escribe tu usuario arriba primero.';return;}
+  if(!confirm('¿Enviar un correo con una nueva contraseña a la dirección registrada de "'+u+'"?'))return;
+  const r=await fetch('/api/forgot_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:u})});
+  const j=await r.json().catch(()=>({}));
+  $('lgErr').style.color='#22c55e';
+  $('lgErr').textContent=j.message||j.error||'Si el usuario existe, en unos minutos llegará un correo.';
 }
 (async()=>{const me=await fetch('/api/me');if(!me.ok){document.getElementById('loginGate').style.display='flex';return;}authok=true;if(ready)tick();})();
 
@@ -641,8 +653,10 @@ function applyBrand(set){
   applyTheme(set.theme);
   $('venue').textContent=set.venue_name;$('venueTop').textContent=set.venue_name;
   const tl=set.tym_logo,vl=set.venue_logo;
-  if(tl){$('tymLogo').src=tl;$('tymLogo').style.display='';$('tymText').style.display='none';}
-  else{$('tymLogo').style.display='none';$('tymText').style.display='';}
+  // Marca TYM: apagada por defecto (tema legal) — cada local la activa desde Ajustes si quiere.
+  if(set.show_tym_brand&&tl){$('tymLogo').src=tl;$('tymLogo').style.display='';$('tymText').style.display='none';}
+  else if(set.show_tym_brand){$('tymLogo').style.display='none';$('tymText').style.display='';}
+  else{$('tymLogo').style.display='none';$('tymText').style.display='none';}
   if(vl){$('venueLogo').src=vl;$('venueLogo').style.display='';}else{$('venueLogo').style.display='none';}
 }
 function paintNext(q,count){

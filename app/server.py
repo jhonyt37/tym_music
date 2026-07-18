@@ -7,7 +7,8 @@ Novedades: sesion de mesa por PIN, paquetes (creditos + pase), progreso de
 reproduccion, recomendadas (mas pedido / del local / populares / genero).
 """
 import json, os, re, socket, threading, time, random, datetime, struct, zlib
-import hashlib, hmac, secrets
+import hashlib, hmac, secrets, smtplib
+from email.mime.text import MIMEText
 import urllib.request, urllib.parse
 from zoneinfo import ZoneInfo, available_timezones
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -117,6 +118,36 @@ def verify_password(p, stored):
 
 _DUMMY_PASS_HASH = hash_password(secrets.token_hex(8))  # costo decoy para usuarios inexistentes (evita timing leak)
 
+# ---- Envio de correo (recuperar clave) — stdlib puro, sin dependencias nuevas ----
+# Config vía variables de entorno (nunca hardcodeadas): SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS.
+# SMTP_USER en Gmail necesita una "contraseña de aplicación" (Cuenta Google → Seguridad →
+# Verificación en 2 pasos → Contraseñas de aplicaciones), NO la contraseña normal de la cuenta.
+# Sin esas variables configuradas (ej. en dev local), el correo queda solo en el log del
+# servidor en vez de enviarse de verdad — así el flujo completo se puede probar sin credenciales.
+SMTP_HOST = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))
+SMTP_USER = os.environ.get("SMTP_USER", "")
+SMTP_PASS = os.environ.get("SMTP_PASS", "")
+
+def send_email(to_addr, subject, body):
+    if not to_addr:
+        return False
+    if not (SMTP_USER and SMTP_PASS):
+        print(f"✉️  [correo simulado — falta SMTP_USER/SMTP_PASS] Para: {to_addr} | Asunto: {subject}\n{body}", flush=True)
+        return True
+    try:
+        msg = MIMEText(body, "plain", "utf-8")
+        msg["Subject"] = subject
+        msg["From"] = SMTP_USER
+        msg["To"] = to_addr
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=10) as s:
+            s.login(SMTP_USER, SMTP_PASS)
+            s.sendmail(SMTP_USER, [to_addr], msg.as_string())
+        return True
+    except Exception as e:
+        print(f"✉️  Error enviando correo a {to_addr}:", e, flush=True)
+        return False
+
 def _ensure_owner_passwords():
     """Primer arranque sin data.json: asigna contraseñas iniciales.
     Si existe TYM_OWNER_<USER>_PASS se usa ese valor (útil en CI/tests).
@@ -193,6 +224,7 @@ _RATE_LIMITS = {
     "request": (6,  60),
     "social":  (30, 60),
     "search":  (20, 60),
+    "forgot":  (3,  300),
 }
 
 _LOCALHOST = {"127.0.0.1", "::1", "localhost"}
@@ -262,6 +294,7 @@ def make_venue(name):
             "timezone": DEFAULT_TZ,         # zona horaria IANA del local (ej: "America/Bogota")
             "prepaid_mode": False,     # ON: saldo prepago por cliente en vez de cuenta de mesa
             "min_direct_pay": 700,     # piso para pago directo sin wallet (evita que la pasarela se coma el monto)
+            "show_tym_brand": False,   # mostrar el logo/texto "TYM Music" en /tv (off por defecto, tema legal)
         },
         "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4} for i in range(1, 6)],  # PINs 1111..5555
         "stations": [],   # ["Caja 1","Silla 2",...] — opcional, sin PIN; vacío = no aplica (modo prepago)
@@ -308,9 +341,9 @@ TYM = {
     "tym_logo": "",
     "subscribers": [],         # {email, table, venue, ts}
     "owners": {                # login de cada cliente TYM (dueño de bar). "*" = TYM master
-        "bardemo": {"pass_hash": None, "venue": "bardemo"},
-        "lazona":  {"pass_hash": None, "venue": "lazona"},
-        "tym":     {"pass_hash": None, "venue": "*"},
+        "bardemo": {"pass_hash": None, "venue": "bardemo", "email": "jhonyt37@gmail.com", "blocked": False},
+        "lazona":  {"pass_hash": None, "venue": "lazona", "email": "jhonyt37@gmail.com", "blocked": False},
+        "tym":     {"pass_hash": None, "venue": "*", "email": "jhonyt37@gmail.com", "blocked": False},
     },
     "events": [],              # analítica: {venue, table, account, ts, ev, ...}
     "accounts": {},            # token -> {id,venue,table,opened_at,closed_at,total,orders_free,orders_premium}
@@ -406,7 +439,8 @@ def tym_analytics():
     accts = sorted(TYM["accounts"].values(), key=lambda a: -a["opened_at"])[:200]
     venues_info = {vid: {"name": VENUES[vid]["settings"]["venue_name"],
                          "tables": len(VENUES[vid]["tables"])} for vid in VENUES}
-    owners_info = [{"username": k, "venue": v["venue"], "venue_name": VENUES[v["venue"]]["settings"]["venue_name"]}
+    owners_info = [{"username": k, "venue": v["venue"], "venue_name": VENUES[v["venue"]]["settings"]["venue_name"],
+                     "blocked": v.get("blocked", False)}
                    for k, v in TYM["owners"].items() if v.get("venue") != "*" and v.get("venue") in VENUES]
     return {"facturacion_por_local": fact_local, "facturacion_total": total,
             "orders_free": free, "orders_premium": prem,
@@ -1220,7 +1254,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "venue_logo", "max_priority_queue_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
-                                       "schedule", "timezone", "prepaid_mode", "min_direct_pay")},
+                                       "schedule", "timezone", "prepaid_mode", "min_direct_pay",
+                                       "show_tym_brand")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
@@ -1295,6 +1330,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
         out["all_dedicas"] = list(reversed(STATE.get("dedicas", [])))[:30]
         out["all_announcements"] = list(reversed(STATE.get("announcements", [])))
         out["customers"] = sorted(STATE["customers"].values(), key=lambda c: -c.get("balance", 0))[:100]
+        own = next((o for o in TYM["owners"].values() if o.get("venue") == CUR_VID), None)
+        out["owner_email"] = (own or {}).get("email", "")
     return out
 
 def _pad(lst, n=6, genre=None):
@@ -1578,6 +1615,8 @@ class H(BaseHTTPRequestHandler):
             ok, needs_rehash = verify_password(pwd, o.get("pass_hash") if o else _DUMMY_PASS_HASH)
             if not o or not ok:
                 return self._send(401, {"error": "Usuario o contraseña incorrectos"})
+            if o.get("blocked"):
+                return self._send(403, {"error": "Esta cuenta está bloqueada. Contacta a TYM."})
             if needs_rehash:
                 o["pass_hash"] = hash_password(pwd)
                 save_state()
@@ -1592,6 +1631,24 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/logout":
             AUTH.pop(self.get_cookie("tymauth"), None)
             return self._send(200, {"ok": True})
+        if path == "/api/forgot_password":
+            ip = self.client_address[0]
+            if not _rate_ok(ip, "forgot"):
+                return self._send(429, {"error": "Demasiados intentos. Espera unos minutos."})
+            u = (d.get("user") or "").strip()
+            generic_msg = "Si el usuario existe, en unos minutos llegará un correo con instrucciones."
+            with LOCK:
+                o = TYM["owners"].get(u)
+                if o and not o.get("blocked") and o.get("email"):
+                    new_pass = secrets.token_urlsafe(9)
+                    o["pass_hash"] = hash_password(new_pass)
+                    save_state()
+                    send_email(o["email"], "TYM Music — tu nueva contraseña",
+                               f"Hola,\n\nSe generó una nueva contraseña para el usuario \"{u}\":\n\n"
+                               f"{new_pass}\n\nInicia sesión con esta clave y cámbiala desde el panel "
+                               f"(Ajustes → Cuenta y seguridad) apenas puedas.\n\n— TYM Music")
+            # Mismo mensaje exista o no el usuario — evita revelar qué cuentas existen.
+            return self._send(200, {"ok": True, "message": generic_msg})
 
         # ---- Endpoints que requieren dueño logueado ----
         ADMIN_PATHS = ("/api/advance", "/api/progress", "/api/admin/approve", "/api/admin/reject",
@@ -2147,7 +2204,7 @@ class H(BaseHTTPRequestHandler):
                     if k in d:
                         try: s[k] = max(0, int(d[k]))
                         except Exception: pass
-                for k in ("fallback_shuffle", "prepaid_mode"):
+                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand"):
                     if k in d:
                         s[k] = bool(d[k])
                 if "min_direct_pay" in d:
@@ -2603,6 +2660,23 @@ class H(BaseHTTPRequestHandler):
                 save_state()
                 return self._send(200, {"ok": True})
 
+            # ---- Admin: actualizar el email registrado (a donde llega la recuperación de clave) ----
+            if path == "/api/admin/update_email":
+                av = self.authed_venue()
+                email = (d.get("email") or "").strip()[:120]
+                if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+                    return self._send(400, {"error": "Correo inválido."})
+                updated = False
+                for uname, odata in TYM["owners"].items():
+                    if odata.get("venue") == av:
+                        odata["email"] = email
+                        updated = True
+                        break
+                if not updated:
+                    return self._send(400, {"error": "No se encontró el usuario."})
+                save_state()
+                return self._send(200, {"ok": True, "email": email})
+
             # ---- Admin: eliminar dedicatoria ----
             if path == "/api/admin/dedica/delete":
                 ded_id = d.get("id")
@@ -2610,6 +2684,40 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "Falta el id."})
                 STATE["dedicas"] = [dd for dd in STATE.get("dedicas", []) if dd["id"] != ded_id]
                 return self._send(200, {"ok": True})
+
+        # ---- TYM Master: resetear la contraseña del dueño de un local ----
+        if path == "/api/tym/reset_password":
+            if self.authed_venue() != "*":
+                return self._send(403, {"error": "Solo TYM master"})
+            vid = (d.get("vid") or "").strip()
+            new_pass = (d.get("new_pass") or "").strip()
+            if len(new_pass) < 8:
+                return self._send(400, {"error": "La contraseña debe tener al menos 8 caracteres."})
+            with LOCK:
+                updated = False
+                for uname, odata in TYM["owners"].items():
+                    if odata.get("venue") == vid:
+                        odata["pass_hash"] = hash_password(new_pass)
+                        updated = True
+                        break
+                if not updated:
+                    return self._send(400, {"error": "No se encontró el dueño de ese local."})
+                save_state()
+            return self._send(200, {"ok": True})
+
+        # ---- TYM Master: bloquear/desbloquear el login de un local (ej. moroso) ----
+        if path == "/api/tym/toggle_block":
+            if self.authed_venue() != "*":
+                return self._send(403, {"error": "Solo TYM master"})
+            vid = (d.get("vid") or "").strip()
+            with LOCK:
+                own = next((o for o in TYM["owners"].values() if o.get("venue") == vid), None)
+                if not own:
+                    return self._send(400, {"error": "No se encontró el dueño de ese local."})
+                own["blocked"] = not own.get("blocked")
+                save_state()
+                blocked = own["blocked"]
+            return self._send(200, {"ok": True, "blocked": blocked})
 
         # ---- TYM Master: gestión de locales ----
         if path == "/api/tym/create_venue":
@@ -2619,15 +2727,19 @@ class H(BaseHTTPRequestHandler):
             name = str(d.get("name") or "").strip()[:60]
             username = re.sub(r"\s+", "", str(d.get("username") or "").strip())[:32]
             password = str(d.get("password") or "").strip()[:64]
-            if not vid or not name or not username or not password:
+            email = str(d.get("email") or "").strip()[:120]
+            if not vid or not name or not username or not password or not email:
                 return self._send(400, {"error": "Completa todos los campos"})
+            if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+                return self._send(400, {"error": "Correo inválido."})
             with LOCK:
                 if vid in VENUES:
                     return self._send(400, {"error": f"El ID '{vid}' ya existe"})
                 if username in TYM["owners"]:
                     return self._send(400, {"error": f"El usuario '{username}' ya existe"})
                 VENUES[vid] = make_venue(name)
-                TYM["owners"][username] = {"pass_hash": hash_password(password), "venue": vid}
+                TYM["owners"][username] = {"pass_hash": hash_password(password), "venue": vid,
+                                            "email": email, "blocked": False}
                 save_state()
             return self._send(200, {"ok": True, "vid": vid, "name": name})
 
@@ -2783,6 +2895,9 @@ def load_state():
                 if "pass" in od and "pass_hash" not in od:
                     od["pass_hash"] = hash_password(od.pop("pass"))
                 od.pop("pass", None)
+                # Migra owners de antes de "recuperar clave por email" (sin email/blocked)
+                od.setdefault("email", "jhonyt37@gmail.com")
+                od.setdefault("blocked", False)
                 TYM["owners"][uname] = od
         for vid, snap in d.get("venues", {}).items():
             tvid = "bardemo" if vid == "default" else vid          # migra venue v2 "default"
