@@ -170,6 +170,12 @@
 
         <!-- Anuncios para TV -->
         <div class="card">
+          <p class="sec">📱 QR en pantalla</p>
+          <div class="small" style="color:var(--mut);margin-bottom:10px">El QR aparece solo, por ciclos — si quieres que salga YA (ej. justo cuando arrancas una votación o duelo), fuérzalo aquí.</div>
+          <button class="btn block" onclick="showQrNow()">📲 Mostrar QR ya</button>
+        </div>
+
+        <div class="card">
           <p class="sec">📢 Anuncios para el TV</p>
           <div class="small" style="color:var(--mut);margin-bottom:10px">Aparecen como banner en la pantalla del bar. Actívalos/desactívalos en tiempo real.</div>
           <div id="announcementList" style="margin-bottom:10px"></div>
@@ -1467,6 +1473,10 @@ function addScheduleSlot(){
 }
 
 // ---------- Anuncios TV ----------
+async function showQrNow(){
+  const j=await post('/api/admin/show_qr',{});
+  toast(j.ok?'QR forzado en la TV por 30s':(j.error||'Error'),j.ok?'ok':'err');
+}
 async function createAnnouncement(){
   const text=($('annText').value||'').trim();
   const color=$('annColor')&&$('annColor').value||'#f59e0b';

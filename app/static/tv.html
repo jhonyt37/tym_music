@@ -468,6 +468,11 @@ function renderPollTV(poll){
   const panel=$('pollPanel');if(!panel)return;
   if(!poll||!poll.active){panel.style.display='none';_tvPollEndsAt=null;clearTimeout(_tvPollRaf);return;}
   panel.style.display='block';
+  // Forzar el QR visible mientras la votacion este activa — antes dependia del ciclo
+  // independiente de banners (90s, QR solo 30s de eso) y podia no aparecer NUNCA durante
+  // una votacion corta. burst() se llama de nuevo cada poll (~2s) mientras siga activa,
+  // as' el timeout de 30s nunca alcanza a vencer y el QR queda mostrado todo el tiempo.
+  burst($('qr'),30000);
   _tvPollEndsAt=poll.ends_at||null;
   _tvPollDur=poll.duration||120;
   clearTimeout(_tvPollRaf);_tvPollTick();
@@ -497,6 +502,8 @@ function renderDueloTV(duelo){
   const panel=$('dueloPanel');if(!panel)return;
   if(!duelo||!duelo.active){panel.style.display='none';_tvDueloEndsAt=null;clearTimeout(_tvDueloRaf);return;}
   panel.style.display='block';
+  // Forzar el QR visible mientras el duelo este activo — ver comentario igual en renderPollTV.
+  burst($('qr'),30000);
   _tvDueloEndsAt=duelo.ends_at||null;_tvDueloDur=duelo.duration||60;
   clearTimeout(_tvDueloRaf);_tvDueloTick();
   const teams=duelo.teams||[];const votes=duelo.votes||{};
@@ -823,6 +830,7 @@ setInterval(async()=>{
     renderPollTV(s.poll);
     renderDueloTV(s.duelo);
     renderAnnouncementsTV(s.announcements||[]);
+    if(s.qr_force)burst($('qr'),30000); // botón "Mostrar QR ya" del admin
 
     // Vibe indicator
     renderVibeTV(s.vibe);

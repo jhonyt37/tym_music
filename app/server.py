@@ -317,6 +317,7 @@ def make_venue(name):
         "assists": [],             # {id, table, ts, resolved, resolve_ts, token}
         "tv_lastseen": 0,          # timestamp del último ping de la TV activa
         "tv_owner": None,          # {"id": device_id, "last_seen": ts} — dueño actual de la TV (anti 2 TVs a la vez)
+        "qr_force_until": 0,       # timestamp: si es futuro, /tv fuerza el QR visible (botón "Mostrar QR ya")
         "dedicas": [],             # [{id, from_table, to_table, message, ts, shown_tv}]
         "bis_votes": {},           # {yt: set(tokens)} — votos de bis por canción
         "poll": None,              # {options, votes, active, created_at, ends_at, triggered_by_np_id, auto}
@@ -1268,6 +1269,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         "priority_queue_min": int(sum(i.get("duration", DEFAULT_DUR)
                                       for i in queue_view() if i.get("priority")) // 60),
         "tv_active": (time.time() - STATE.get("tv_lastseen", 0)) < 15,
+        "qr_force": time.time() < STATE.get("qr_force_until", 0),
         "active_sessions": len({se["table"] for se in STATE.get("sessions", {}).values()
                                if time.time() - se.get("created", 0) < 7200}),
         "assists": [a for a in STATE.get("assists", []) if not a.get("resolved")],
@@ -1661,8 +1663,8 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move", "/api/admin/reorder",
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
                        "/api/admin/duelo", "/api/admin/duelo/close",
-                       "/api/admin/announcement",
-                       "/api/admin/dedica/delete", "/api/admin/change_password")
+                       "/api/admin/announcement", "/api/admin/show_qr",
+                       "/api/admin/dedica/delete", "/api/admin/change_password", "/api/admin/update_email")
         vid = self.resolve_vid(d)
         if path in ADMIN_PATHS:
             av = self.authed_venue()
@@ -2279,6 +2281,11 @@ class H(BaseHTTPRequestHandler):
                                               if a["id"] != aid]
                 return self._send(200, {"ok": True,
                                         "announcements": STATE.get("announcements", [])})
+
+            # ---- Forzar el QR visible en /tv ya mismo (botón "Mostrar QR ya" del admin) ----
+            if path == "/api/admin/show_qr":
+                STATE["qr_force_until"] = time.time() + 30
+                return self._send(200, {"ok": True})
 
             if path == "/api/admin/tables":
                 act = d.get("action")
