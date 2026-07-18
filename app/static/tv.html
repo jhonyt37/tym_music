@@ -141,7 +141,7 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #fsBtn{right:26px}
 #resetBtn{right:210px;border-color:rgba(239,68,68,.5);color:#fca5a5}
 /* Overlay de activación de audio (pantalla completa, siempre reemplaza el "toca para iniciar") */
-#audioOverlay{position:fixed;inset:0;background:rgba(5,8,14,.93);display:flex;flex-direction:column;
+#audioOverlay{position:fixed;inset:0;background:rgba(5,8,14,.93);flex-direction:column;
   align-items:center;justify-content:center;z-index:30;cursor:pointer;text-align:center;padding:30px}
 #audioOverlay .ao-icon{font-size:80px;margin-bottom:20px}
 #audioOverlay .ao-title{font-size:38px;font-weight:800}
@@ -173,8 +173,8 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   <div style="max-width:340px;width:100%;text-align:center">
     <div style="font-size:30px;font-weight:800">TY<b style="color:#3b82f6">M</b> Music</div>
     <h2 style="margin:10px 0;font-weight:700">Ingreso del local (TV)</h2>
-    <input id="lgUser" placeholder="Usuario" style="width:100%;padding:13px;border-radius:12px;border:1px solid #2a3550;background:#1b2435;color:#fff;font-size:16px">
-    <input id="lgPass" type="password" placeholder="Contraseña" style="width:100%;padding:13px;border-radius:12px;border:1px solid #2a3550;background:#1b2435;color:#fff;font-size:16px;margin-top:8px">
+    <input id="lgUser" placeholder="Usuario" style="width:100%;padding:13px;border-radius:12px;border:1px solid #2a3550;background:#1b2435;color:#fff;font-size:16px" onkeydown="if(event.key==='Enter')doLogin()">
+    <input id="lgPass" type="password" placeholder="Contraseña" style="width:100%;padding:13px;border-radius:12px;border:1px solid #2a3550;background:#1b2435;color:#fff;font-size:16px;margin-top:8px" onkeydown="if(event.key==='Enter')doLogin()">
     <button onclick="doLogin()" style="width:100%;margin-top:12px;padding:13px;border:none;border-radius:12px;background:#3b82f6;color:#fff;font-weight:700;font-size:16px;cursor:pointer">Entrar</button>
     <div id="lgErr" style="color:#ef4444;margin-top:8px;min-height:16px;font-size:13px"></div>
     <div style="margin-top:6px;font-size:13px"><a href="#" onclick="forgotPassword();return false" style="color:#3b82f6">¿Olvidaste tu contraseña?</a></div>
@@ -213,8 +213,11 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 <button class="ctrl" id="fsBtn" title="Pantalla completa (F)">⛶ Pantalla completa</button>
 <button class="ctrl" id="resetBtn" title="Forzar reinicio del reproductor">🔄 Reiniciar video</button>
 
-<!-- Overlay de activación — siempre un toque, siempre captura el gesto del usuario -->
-<div id="audioOverlay">
+<!-- Overlay de activación — siempre un toque, siempre captura el gesto del usuario.
+     Oculto por defecto: si no está logueado (loginGate) no debe ser clickeable — antes
+     quedaba visible por CSS mientras la verificación de /api/me todavía estaba en vuelo,
+     dejando entrar a pantalla completa sin pasar el login. Se muestra solo tras auth ok. -->
+<div id="audioOverlay" style="display:none">
   <div class="ao-icon" id="aoIcon">▶</div>
   <div class="ao-title" id="aoTitle">Toca para iniciar</div>
   <div class="ao-sub" id="aoSub">Activa el sonido y entra en pantalla completa</div>
@@ -414,7 +417,7 @@ async function forgotPassword(){
   $('lgErr').style.color='#22c55e';
   $('lgErr').textContent=j.message||j.error||'Si el usuario existe, en unos minutos llegará un correo.';
 }
-(async()=>{const me=await fetch('/api/me');if(!me.ok){document.getElementById('loginGate').style.display='flex';return;}authok=true;if(ready)tick();})();
+(async()=>{const me=await fetch('/api/me');if(!me.ok){document.getElementById('loginGate').style.display='flex';return;}authok=true;$('audioOverlay').style.display='flex';if(ready)tick();})();
 
 const EMO=['❤️','🔥','👍'];
 function spawnReact(emoji,table){
@@ -642,6 +645,7 @@ function load(np){
 // eso este bug no se notaba ahi. El mute-state del player persiste entre canciones, asi que
 // una vez desmutado aqui, las canciones siguientes (cargadas por tick()/watchdog) ya suenan.
 async function activateAudio(){
+  if(!authok)return; // defensa extra — el overlay ya está oculto hasta pasar login
   wantAudio=true;
   try{sessionStorage.setItem('tym_tv_started','1');}catch(e){}
   $('audioOverlay').style.display='none';
@@ -655,6 +659,7 @@ async function activateAudio(){
 
 // ---- Forzar reinicio del reproductor ----
 async function forceRestart(){
+  if(!authok)return;
   wantAudio=true;
   try{sessionStorage.setItem('tym_tv_started','1');}catch(e){}
   $('audioOverlay').style.display='none';

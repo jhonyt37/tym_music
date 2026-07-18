@@ -64,8 +64,8 @@
   <div style="max-width:340px;width:100%;text-align:center">
     <div class="logo" style="font-size:30px">TY<b>M</b> Music</div>
     <h2 style="margin:10px 0">Ingreso del local</h2>
-    <input class="field" id="lgUser" placeholder="Usuario" autocomplete="username">
-    <input class="field" id="lgPass" type="password" placeholder="Contraseña" style="margin-top:8px" autocomplete="current-password">
+    <input class="field" id="lgUser" placeholder="Usuario" autocomplete="username" onkeydown="if(event.key==='Enter')doLogin()">
+    <input class="field" id="lgPass" type="password" placeholder="Contraseña" style="margin-top:8px" autocomplete="current-password" onkeydown="if(event.key==='Enter')doLogin()">
     <button class="btn block" style="margin-top:12px" onclick="doLogin()">Entrar</button>
     <div class="small" id="lgErr" style="color:var(--red);margin-top:8px;min-height:16px"></div>
     <div class="small" style="margin-top:6px"><a href="#" onclick="forgotPassword();return false" style="color:var(--pri)">¿Olvidaste tu contraseña?</a></div>
