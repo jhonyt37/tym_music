@@ -22,7 +22,7 @@ Al iniciar imprime las URLs. **El servidor ya está corriendo en esta sesión.**
 | 📺 **TV (pantalla grande)** | `http://localhost:8000/tv` | **Laptop conectado por HDMI al TV**: video a pantalla completa + QR para que la gente pida. Toca una vez "iniciar" para activar el sonido. **Debe ser localhost.** |
 | 🛠️ **Panel del dueño** | `http://localhost:8000/admin` | **En tu laptop**: aprobar/rechazar, precio, estilo, **ver los cobros a la cuenta**. |
 | 🎵 **Cliente** | `http://192.168.1.186:8000/` | El **celular del cliente** (mismo WiFi). Es lo que abres al validar. |
-| 🔳 **QR del local** | `http://192.168.1.186:8000/qr.png` | QR que apunta a la vista de cliente (imprímelo y simula el "escanea en la mesa"). |
+| 🔳 **QR del local** | `http://192.168.1.186:8000/api/qr?v=bardemo` | QR que apunta a la vista de cliente de ESE local (imprímelo y simula el "escanea en la mesa"). También aparece solo en `/tv`. |
 
 > Si cambias de red WiFi, la IP cambia (la del cliente). Vuelve a correr el servidor: imprime la IP nueva, o mira tu IP con `ipconfig getifaddr en0`. La pantalla/panel siguen en `localhost`.
 
@@ -90,6 +90,5 @@ app/
     player.html        # pantalla del local
     admin.html         # panel del dueño
     style.css          # estilos (mobile-first, tema oscuro)
-    qr.png             # QR generado al iniciar
   README_MVP.md
 ```

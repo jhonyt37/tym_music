@@ -1411,10 +1411,8 @@ class H(BaseHTTPRequestHandler):
             return self._file(routes[path], "text/html; charset=utf-8")
         if path == "/style.css":
             return self._file("style.css", "text/css; charset=utf-8")
-        if path == "/qr.png":
-            return self._file("qr.png", "image/png")
         if path == "/api/qr":
-            vid = self._q("v", DEFAULT_VID)
+            vid = self.resolve_vid()
             base = PUBLIC_URL.rstrip("/") if PUBLIC_URL else f"http://{lan_ip()}:{PORT}"
             url = f"{base}/?v={vid}"
             try:
@@ -2820,13 +2818,6 @@ def lan_ip():
     except Exception:
         return "127.0.0.1"
 
-def make_qr(url):
-    try:
-        import qrcode
-        qrcode.make(url).save(os.path.join(STATIC, "qr.png"))
-    except Exception as e:
-        print("QR no generado:", e)
-
 if __name__ == "__main__":
     load_state()
     _ensure_owner_passwords()
@@ -2834,7 +2825,6 @@ if __name__ == "__main__":
     threading.Thread(target=autosave_loop, daemon=True).start()
     ip = lan_ip()
     url = PUBLIC_URL.rstrip("/") + "/" if PUBLIC_URL else f"http://{ip}:{PORT}/"
-    make_qr(url)
     base = url.rstrip("/")
     print("=" * 64)
     print("  TYM MUSIC — MVP multi-bar corriendo")
