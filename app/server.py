@@ -1191,7 +1191,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
             for t in pub_tables:
                 if t not in a["tables"]:
                     a["tables"].append(t)
-    top_loved = sorted(agg.values(), key=lambda x: -x["total"])[:5]
+    top_loved = sorted(agg.values(), key=lambda x: -x["total"])[:10]
     req_songs = {}
     for e in STATE.get("request_log", []):
         yt = e.get("yt", "")
