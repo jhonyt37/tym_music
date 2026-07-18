@@ -19,6 +19,18 @@ if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 <link rel="stylesheet" href="/style.css">
 <style>
 
+/* Confirmacion visual al pedir cancion — mas notoria que el toast chiquito de abajo */
+#reqFlash{position:fixed;inset:0;z-index:65;display:flex;align-items:center;justify-content:center;
+  pointer-events:none;opacity:0;transition:opacity .25s ease}
+#reqFlash.show{opacity:1}
+#reqFlash .card{background:var(--card);border:2px solid var(--pri);border-radius:20px;padding:28px 34px;
+  text-align:center;max-width:280px;box-shadow:0 12px 40px rgba(0,0,0,.5);
+  transform:scale(.85);transition:transform .3s cubic-bezier(.34,1.56,.64,1)}
+#reqFlash.show .card{transform:scale(1)}
+#reqFlash .icon{font-size:52px;margin-bottom:8px}
+#reqFlash .msg{font-size:19px;font-weight:800;color:var(--txt)}
+#reqFlash .song{font-size:14px;color:var(--mut);margin-top:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 .chips{display:flex;gap:8px;overflow-x:auto;padding-bottom:6px;margin-bottom:8px;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
 .chipt{white-space:nowrap;padding:7px 12px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--mut);font-size:13px;font-weight:600;cursor:pointer;flex-shrink:0}
@@ -355,6 +367,9 @@ body{padding-bottom:80px}
       <button class="btn gold block" style="margin-top:10px" onclick="openTopup()">🔋 Recargar saldo</button>
       <div class="list" id="walletHistList" style="margin-top:10px"><div class="empty">Sin movimientos todavía.</div></div>
     </div>
+    <div class="card">
+      <button class="btn block" style="background:var(--bg2);color:var(--mut)" onclick="changeTable()">🔁 Cambiar de mesa / salir</button>
+    </div>
   </section>
 </div>
 
@@ -473,6 +488,7 @@ body{padding-bottom:80px}
 </div>
 
 <div class="toast" id="toast"></div>
+<div id="reqFlash"><div class="card"><div class="icon" id="reqFlashIcon">🎶</div><div class="msg" id="reqFlashMsg">¡Pedida!</div><div class="song" id="reqFlashSong"></div></div></div>
 <div id="fx"></div>
 
 <script>
@@ -480,6 +496,9 @@ const THEMES={
   azul:   {pri:'#3b82f6',pri2:'#2563eb',bg:'#0e1320',bg2:'#161d2e',card:'#1b2435',line:'#2a3550'},
   purpura:{pri:'#a855f7',pri2:'#9333ea',bg:'#0e0b1e',bg2:'#16112e',card:'#1d163c',line:'#2e2252'},
   verde:  {pri:'#10b981',pri2:'#059669',bg:'#081411',bg2:'#0e1e19',card:'#132820',line:'#1a3d2c'},
+  rojo:   {pri:'#ef4444',pri2:'#dc2626',bg:'#1a0e0e',bg2:'#2e1616',card:'#3c1d1d',line:'#552626'},
+  dorado: {pri:'#f59e0b',pri2:'#d97706',bg:'#1a1408',bg2:'#2e2410',card:'#3c2f14',line:'#54421c'},
+  rosa:   {pri:'#ec4899',pri2:'#db2777',bg:'#1a0e16',bg2:'#2e1626',card:'#3c1d31',line:'#552646'},
 };
 function applyTheme(t){
   const th=THEMES[t]||THEMES.azul,r=document.documentElement.style;
@@ -577,6 +596,21 @@ async function enterRegister(){
     poll();
     if(pendingRetry){const r2=pendingRetry;pendingRetry=null;r2();}
   }else{$('regErr').textContent=j.error||'No se pudo registrar';}
+}
+
+// Antes no había forma de volver a mostrar el gate una vez que ya existía una sesión
+// válida — si el cliente se cambiaba de mesa física no podía entrar con un PIN distinto.
+// Limpia la sesión local y deja que el siguiente poll() abra el gate correcto (PIN o
+// registro silencioso), reusando la misma lógica que ya decide cuál mostrar.
+function changeTable(){
+  const now=Date.now()/1000;
+  const loseCredits=!prepaidMode&&sess&&((sess.credits||0)>0||sess.pass_until>now);
+  const msg='Vas a salir de tu sesión actual'+(sess&&sess.table?' ('+esc(sess.table)+')':'')+' para entrar con otro código de mesa.'
+    +(loseCredits?' <b>Perderás los créditos/pase de prioridad de este dispositivo</b> (no viajan a la mesa nueva).':'');
+  confirmModal('Cambiar de mesa 🔁',msg,()=>{
+    token='';sess=null;localStorage.removeItem('tym_token_'+VENUE);
+    poll();
+  },{yesLabel:'Sí, cambiar',noLabel:'Cancelar'});
 }
 
 // ---------- Recomendadas ----------
@@ -768,7 +802,9 @@ async function doReq(payMethod){
     const r=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const j=await r.json();
     if(j.ok){if(j.session)sess=j.session;
-      toast(mode==='super'?'⏫ ¡Tu canción al frente!':(mode==='pri'?'⚡ ¡Pedida con prioridad!':'¡Canción pedida!'),'ok');
+      showReqFlash(mode==='super'?'⏫':(mode==='pri'?'⚡':'🎶'),
+        mode==='super'?'¡Al frente!':(mode==='pri'?'¡Con prioridad!':'¡Pedida!'),
+        chosen.title);
       // Mantiene la búsqueda/lista visible (no la resetea) para poder seguir pidiendo
       // más canciones del mismo artista/búsqueda sin tener que escribir de nuevo.
       if(chosen.yt)_queueYts.add(chosen.yt);
@@ -799,6 +835,14 @@ function toast(t,type){
   e.style.bottom=nav?(nav.offsetHeight+16)+'px':'80px';
   e.textContent=t;e.className='toast'+(type?' '+type:'');e.classList.add('show');
   setTimeout(()=>e.classList.remove('show'),2200);
+}
+let _reqFlashT=null;
+function showReqFlash(icon,msg,songTitle){
+  const el=$('reqFlash');
+  $('reqFlashIcon').textContent=icon;$('reqFlashMsg').textContent=msg;$('reqFlashSong').textContent=songTitle||'';
+  clearTimeout(_reqFlashT);
+  el.classList.add('show');
+  _reqFlashT=setTimeout(()=>el.classList.remove('show'),1600);
 }
 
 // ---------- Campana flotante: drag + tap corto + tap largo ----------

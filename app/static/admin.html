@@ -322,10 +322,13 @@
       <details class="settingsSection">
         <summary><span class="sec">Tema de color</span><span class="chev">▸</span></summary>
         <div class="secBody">
-      <div style="display:flex;gap:8px;margin:8px 0" id="themeRow">
-        <div onclick="pickTheme('azul')" data-t="azul" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #3b82f6;background:#0e1320;color:#3b82f6">Azul</div>
-        <div onclick="pickTheme('purpura')" data-t="purpura" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #a855f7;background:#0e0b1e;color:#a855f7">Púrpura</div>
-        <div onclick="pickTheme('verde')" data-t="verde" style="flex:1;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #10b981;background:#081411;color:#10b981">Verde</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0" id="themeRow">
+        <div onclick="pickTheme('azul')" data-t="azul" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #3b82f6;background:#0e1320;color:#3b82f6">Azul</div>
+        <div onclick="pickTheme('purpura')" data-t="purpura" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #a855f7;background:#0e0b1e;color:#a855f7">Púrpura</div>
+        <div onclick="pickTheme('verde')" data-t="verde" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #10b981;background:#081411;color:#10b981">Verde</div>
+        <div onclick="pickTheme('rojo')" data-t="rojo" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #ef4444;background:#1a0e0e;color:#ef4444">Rojo</div>
+        <div onclick="pickTheme('dorado')" data-t="dorado" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #f59e0b;background:#1a1408;color:#f59e0b">Dorado</div>
+        <div onclick="pickTheme('rosa')" data-t="rosa" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #ec4899;background:#1a0e16;color:#ec4899">Rosa</div>
       </div>
         </div>
       </details>
@@ -639,6 +642,9 @@ const THEMES={
   azul:   {pri:'#3b82f6',pri2:'#2563eb',bg:'#0e1320',bg2:'#161d2e',card:'#1b2435',line:'#2a3550'},
   purpura:{pri:'#a855f7',pri2:'#9333ea',bg:'#0e0b1e',bg2:'#16112e',card:'#1d163c',line:'#2e2252'},
   verde:  {pri:'#10b981',pri2:'#059669',bg:'#081411',bg2:'#0e1e19',card:'#132820',line:'#1a3d2c'},
+  rojo:   {pri:'#ef4444',pri2:'#dc2626',bg:'#1a0e0e',bg2:'#2e1616',card:'#3c1d1d',line:'#552626'},
+  dorado: {pri:'#f59e0b',pri2:'#d97706',bg:'#1a1408',bg2:'#2e2410',card:'#3c2f14',line:'#54421c'},
+  rosa:   {pri:'#ec4899',pri2:'#db2777',bg:'#1a0e16',bg2:'#2e1626',card:'#3c1d31',line:'#552646'},
 };
 function applyTheme(t){
   const th=THEMES[t]||THEMES.azul,r=document.documentElement.style;
@@ -1537,7 +1543,8 @@ async function forgotPassword(){
   const r=await fetch('/api/forgot_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:u})});
   const j=await r.json().catch(()=>({}));
   $('lgErr').style.color='var(--green)';
-  $('lgErr').textContent=j.message||j.error||'Si el usuario existe, en unos minutos llegará un correo.';
+  $('lgErr').textContent=(j.message||j.error||'Si el usuario existe, en unos minutos llegará un correo.')
+    +(j.email_hint?' Enviado a '+j.email_hint+'.':'');
 }
 async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
 

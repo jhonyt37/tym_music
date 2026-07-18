@@ -118,11 +118,20 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   border:1px solid rgba(239,68,68,.4);border-radius:12px;padding:8px 14px;font-size:14px;
   font-weight:700;color:#fca5a5;display:none;backdrop-filter:blur(6px);gap:8px;align-items:center}
 
-/* Banner de anuncios TV */
-#annBanner{position:fixed;top:0;left:0;right:0;z-index:35;padding:14px 28px;
-  font-size:18px;font-weight:800;text-align:center;color:#000;
-  display:none;letter-spacing:.3px;animation:bannerIn .5s ease}
-@keyframes bannerIn{from{transform:translateY(-100%)}to{transform:translateY(0)}}
+/* Banner de anuncios TV — card central con brillo, no franja delgada arriba (se perdia) */
+#annBanner{position:fixed;top:36px;left:50%;transform:translateX(-50%);z-index:35;
+  padding:16px 34px;border-radius:16px;font-size:22px;font-weight:800;text-align:center;color:#000;
+  display:none;letter-spacing:.2px;animation:alertIn .4s cubic-bezier(.34,1.56,.64,1);
+  box-shadow:0 0 0 3px rgba(255,255,255,.15),0 10px 40px rgba(0,0,0,.5);max-width:80vw}
+@keyframes alertIn{from{transform:translateX(-50%) scale(.7);opacity:0}to{transform:translateX(-50%) scale(1);opacity:1}}
+
+/* Notificacion de "alguien pidio una cancion" — mismo lenguaje visual, icono distinto */
+#newReqBanner{position:fixed;top:36px;left:50%;transform:translateX(-50%);z-index:34;
+  padding:14px 30px;border-radius:16px;font-size:20px;font-weight:800;text-align:center;color:#fff;
+  background:rgba(20,26,40,.92);border:2px solid var(--pri,#3b82f6);
+  display:none;letter-spacing:.2px;box-shadow:0 10px 40px rgba(0,0,0,.5);max-width:80vw}
+#newReqBanner.show{display:block;animation:alertIn .4s cubic-bezier(.34,1.56,.64,1)}
+#newReqBanner .nr-song{font-size:15px;color:#c3ccdd;font-weight:600;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 /* Botones de control (aparecen con movimiento del mouse) */
 .ctrl{position:fixed;bottom:24px;z-index:25;background:rgba(10,14,22,.85);color:#fff;
@@ -281,6 +290,9 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 <!-- Banner de anuncios del local -->
 <div id="annBanner"></div>
 
+<!-- Notificación de pedido nuevo -->
+<div id="newReqBanner">🎶 <span id="nrMsg">¡Nueva canción pedida!</span><div class="nr-song" id="nrSong"></div></div>
+
 <!-- Indicador de skip votes -->
 <div id="skipVoteBar" style="display:none;position:fixed;top:18px;right:22px;z-index:21;background:rgba(10,14,22,.85);border:1px solid rgba(239,68,68,.4);border-radius:12px;padding:8px 14px;font-size:14px;font-weight:700;color:#fca5a5;backdrop-filter:blur(6px);display:none;align-items:center;gap:8px">
   <span>⏭</span><span id="skipVoteText"></span>
@@ -323,7 +335,8 @@ function rejectDeviceTakeover(){
   tvDeviceDecided=true;
   $('tvLockConfirm').style.display='none';$('tvLockOverlay').style.display='flex';
 }
-const THEMES={azul:{pri:'#3b82f6',bg:'#000'},purpura:{pri:'#a855f7',bg:'#050208'},verde:{pri:'#10b981',bg:'#020d07'}};
+const THEMES={azul:{pri:'#3b82f6',bg:'#000'},purpura:{pri:'#a855f7',bg:'#050208'},verde:{pri:'#10b981',bg:'#020d07'},
+  rojo:{pri:'#ef4444',bg:'#0a0202'},dorado:{pri:'#f59e0b',bg:'#0a0602'},rosa:{pri:'#ec4899',bg:'#0a0207'}};
 function applyTheme(t){const th=THEMES[t]||THEMES.azul,r=document.documentElement.style;r.setProperty('--pri',th.pri);document.body.style.background=th.bg;}
 $('qrImg').src='/api/qr'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
 
@@ -673,6 +686,25 @@ function paintNext(q,count){
   $('upChips').innerHTML=q.slice(0,3).map(it=>`<span class="chip${it.priority?' p':''}">${it.priority?'⚡ ':''}${esc(it.title)}</span>`).join('')+(count>3?`<span class="chip">+${count-3} más</span>`:'');
 }
 
+// ---- Notificación de pedido nuevo ----
+// _seenQIds arranca en null: la primera vez que llega la cola (al abrir/recargar la TV)
+// no se avisa de nada, solo se toma como línea base — si no, al cargar con 5 canciones
+// ya en cola se dispararían 5 banners de golpe.
+let _seenQIds=null,_nrTimer=null;
+function checkNewRequests(q){
+  const ids=new Set((q||[]).map(it=>it.id));
+  if(_seenQIds===null){_seenQIds=ids;return;}
+  const newest=(q||[]).find(it=>!_seenQIds.has(it.id));
+  _seenQIds=ids;
+  if(newest)showNewReqBanner(newest);
+}
+function showNewReqBanner(it){
+  const el=$('newReqBanner');if(!el)return;
+  $('nrSong').textContent=(it.title||'')+(it.table?' · '+it.table:'');
+  el.classList.remove('show');void el.offsetWidth;el.classList.add('show');
+  clearTimeout(_nrTimer);_nrTimer=setTimeout(()=>el.classList.remove('show'),4000);
+}
+
 // ---- Apariciones escalonadas ----
 function burst(el,dur){el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),dur);}
 function burstNow(){burst($('brand'),13000);burst($('now'),13000);burst($('bar'),13000);}
@@ -805,6 +837,7 @@ setInterval(async()=>{
     topLoved=s.top_loved||[];
     $('lovedItems').innerHTML=topLoved.slice(0,3).map((it,i)=>`<div class="it">${i+1}. ${esc(it.title)}<span class="love">❤️ ${it.total}</span></div>`).join('');
     paintNext(s.queue,s.queue_count);
+    checkNewRequests(s.queue);
     renderAssists(s.assists||[]);
 
     // Dedicatorias standalone

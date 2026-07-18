@@ -40,6 +40,21 @@ Otras opciones si se quiere disco persistente real:
 - Migrar `data.json` a una base de datos (Postgres free de Render/Railway/Supabase). La estructura
   `{version, venues:{...}}` ya está pensada para ese salto y para **multi-bar**.
 
+## Correo de "olvidé mi contraseña"
+El botón "¿Olvidaste tu contraseña?" (en `/admin`, `/tv`, `/player`, `/tym`) necesita SMTP configurado
+para enviar el correo de verdad. **Sin estas variables, el endpoint sigue respondiendo "ok" pero el
+correo NUNCA sale — solo queda en el log del servidor** (así se puede probar el flujo en local sin
+credenciales, pero en producción hay que configurarlas o el botón parece funcionar y no llega nada).
+1. En Render → Settings → Environment, agrega:
+   - `SMTP_HOST` (default `smtp.gmail.com`, no hace falta si usas Gmail)
+   - `SMTP_PORT` (default `465`, no hace falta si usas Gmail)
+   - `SMTP_USER` = tu correo de Gmail
+   - `SMTP_PASS` = una **contraseña de aplicación** (Cuenta Google → Seguridad → Verificación en
+     2 pasos → Contraseñas de aplicaciones) — **no** la contraseña normal de la cuenta, Gmail la rechaza.
+2. Redeploy. Prueba el flujo y revisa los logs de Render si sigue sin llegar (`✉️ Error enviando
+   correo a...` indica credenciales/SMTP mal configurados; el mensaje `[correo simulado]` indica
+   que las variables no están puestas).
+
 ## Para producción (pendiente)
 - Formalizar la **fuente de música** (catálogo licenciado para uso comercial) + Sayco-Acinpro.
 - Mover el estado a base de datos (multi-bar).

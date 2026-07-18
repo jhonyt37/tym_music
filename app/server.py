@@ -129,6 +129,15 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
 
+def mask_email(email):
+    """Oculta la mayoría del usuario del correo pero deja el dominio visible completo,
+    para que el dueño confirme a cuál dirección le llegó el correo sin exponerla entera."""
+    local, _, domain = email.partition("@")
+    if not domain:
+        return email
+    keep = min(3, max(1, len(local) - 1))
+    return local[:keep] + "***@" + domain
+
 def send_email(to_addr, subject, body):
     if not to_addr:
         return False
@@ -284,7 +293,7 @@ def make_venue(name):
             "venue_logo": "",          # logo del BAR
             "max_priority_queue_min": 0,   # bloquear nuevas prioridades si cola premium > N min (0=off)
             "fallback_shuffle": True,       # lista del local en orden aleatorio
-            "theme": "azul",               # tema de color: azul | purpura | verde
+            "theme": "azul",               # tema de color: azul | purpura | verde | rojo | dorado | rosa
             "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
             "allowed_keywords": [],        # si hay entradas, la canción DEBE tener al menos una
             "allow_skip_vote": False,      # permite que las mesas voten para saltar la canción
@@ -798,6 +807,14 @@ def itunes_genre(artist, title):
 def get_session(token):
     return STATE["sessions"].get(token) if token else None
 
+def active_persons_count():
+    """Cuenta sesiones (personas) activas en las últimas 2h — NO mesas distintas.
+    Usado para el umbral de skip-vote; debe ser la única fuente de verdad para que
+    el número mostrado al cliente coincida con el que realmente decide el salto."""
+    now = time.time()
+    return sum(1 for se in STATE.get("sessions", {}).values()
+               if now - se.get("created", 0) < 7200)
+
 def get_customer(sess):
     phone = sess and sess.get("phone")
     return STATE["customers"].get(phone) if phone else None
@@ -1291,12 +1308,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         "duelo": duelo_state,
         "vibe": vibe_state,
         "skip_votes_count": len(STATE.get("skip_votes", set())),
-        # Umbral en base a PERSONAS activas (sesiones), no mesas distintas — consistente con
-        # skip_votes_count, que tambien cuenta por persona/token. Antes usaba mesas distintas:
-        # con una mesa de 4 personas y otra de 1, el umbral solo veia "2 mesas" en vez de
-        # "5 personas", dejando el voto de saltar demasiado facil de alcanzar para la mesa grande.
-        "skip_threshold": max(2, -(-sum(1 for se in STATE.get("sessions", {}).values()
-                                        if time.time() - se.get("created", 0) < 7200) // 2)),
+        "skip_threshold": max(2, -(-active_persons_count() // 2)),
         "my_skip_vote": bool(token and token in STATE.get("skip_votes", set())),
         "session": (session_public(sess) if sess else None),
     }
@@ -1643,9 +1655,11 @@ class H(BaseHTTPRequestHandler):
                 return self._send(429, {"error": "Demasiados intentos. Espera unos minutos."})
             u = (d.get("user") or "").strip()
             generic_msg = "Si el usuario existe, en unos minutos llegará un correo con instrucciones."
+            email_hint = None
             with LOCK:
                 o = TYM["owners"].get(u)
                 if o and not o.get("blocked") and o.get("email"):
+                    email_hint = mask_email(o["email"])
                     new_pass = secrets.token_urlsafe(9)
                     o["pass_hash"] = hash_password(new_pass)
                     save_state()
@@ -1654,7 +1668,9 @@ class H(BaseHTTPRequestHandler):
                                f"{new_pass}\n\nInicia sesión con esta clave y cámbiala desde el panel "
                                f"(Ajustes → Cuenta y seguridad) apenas puedas.\n\n— TYM Music")
             # Mismo mensaje exista o no el usuario — evita revelar qué cuentas existen.
-            return self._send(200, {"ok": True, "message": generic_msg})
+            # email_hint solo viaja si sí existe y tiene correo; ayuda al dueño a confirmar a
+            # cuál dirección le llegó sin exponerla completa.
+            return self._send(200, {"ok": True, "message": generic_msg, "email_hint": email_hint})
 
         # ---- Endpoints que requieren dueño logueado ----
         ADMIN_PATHS = ("/api/advance", "/api/progress", "/api/admin/approve", "/api/admin/reject",
@@ -2216,7 +2232,7 @@ class H(BaseHTTPRequestHandler):
                 if "min_direct_pay" in d:
                     try: s["min_direct_pay"] = max(0, int(d["min_direct_pay"]))
                     except Exception: pass
-                if "theme" in d and d["theme"] in ("azul", "purpura", "verde"):
+                if "theme" in d and d["theme"] in ("azul", "purpura", "verde", "rojo", "dorado", "rosa"):
                     s["theme"] = d["theme"]
                 if "timezone" in d and str(d["timezone"]) in available_timezones():
                     s["timezone"] = str(d["timezone"])
@@ -2560,9 +2576,7 @@ class H(BaseHTTPRequestHandler):
                 else:
                     sv.add(tok)
                     my_vote = True
-                active_tables = len({se["table"] for se in STATE.get("sessions", {}).values()
-                                     if time.time() - se.get("created", 0) < 7200})
-                threshold = max(2, -(-active_tables // 2))
+                threshold = max(2, -(-active_persons_count() // 2))
                 skipped = False
                 if len(sv) >= threshold:
                     promote_next(manual=True)
