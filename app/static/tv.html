@@ -133,13 +133,31 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #newReqBanner.show{display:block;animation:alertIn .4s cubic-bezier(.34,1.56,.64,1)}
 #newReqBanner .nr-song{font-size:15px;color:#c3ccdd;font-weight:600;margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-/* Botones de control (aparecen con movimiento del mouse) */
+/* Intercepta toques sueltos sobre el video (evita el play/pausa nativo del iframe de
+   YouTube al hacer click en cualquier parte de la pantalla) — un tap aquí solo revela
+   los controles, igual que mover el mouse. Sin fondo: invisible, solo capta el click. */
+#clickCatcher{position:fixed;inset:0;z-index:20;cursor:pointer}
+
+/* Botones de control — solo ícono, sin texto, con tooltip nativo (title). Aparecen con
+   movimiento del mouse o un tap en la pantalla. */
 .ctrl{position:fixed;bottom:24px;z-index:25;background:rgba(10,14,22,.85);color:#fff;
-  border:1px solid #2a3550;border-radius:12px;padding:12px 16px;font-size:16px;font-weight:700;
+  border:1px solid #2a3550;border-radius:12px;width:44px;height:44px;font-size:19px;
+  display:flex;align-items:center;justify-content:center;
   cursor:pointer;opacity:0;transition:opacity .3s;pointer-events:none}
 .ctrl.show{opacity:1;pointer-events:auto}
 #fsBtn{right:26px}
-#resetBtn{right:210px;border-color:rgba(239,68,68,.5);color:#fca5a5}
+#resetBtn{right:80px;border-color:rgba(239,68,68,.5);color:#fca5a5}
+#playPauseBtn{right:134px}
+
+/* Botón central de play/pausa — la única forma de pausar tocando el video, en vez de
+   cualquier click en la pantalla (comportamiento nativo del iframe que se bloquea con
+   #clickCatcher). Mismo patrón de aparecer solo con movimiento/tap. */
+.ctrl-center{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:25;
+  background:rgba(10,14,22,.75);color:#fff;border:2px solid rgba(255,255,255,.35);
+  border-radius:50%;width:84px;height:84px;font-size:34px;
+  display:flex;align-items:center;justify-content:center;
+  cursor:pointer;opacity:0;transition:opacity .3s;pointer-events:none}
+.ctrl-center.show{opacity:1;pointer-events:auto}
 /* Overlay de activación de audio (pantalla completa, siempre reemplaza el "toca para iniciar") */
 #audioOverlay{position:fixed;inset:0;background:rgba(5,8,14,.93);flex-direction:column;
   align-items:center;justify-content:center;z-index:30;cursor:pointer;text-align:center;padding:30px}
@@ -182,6 +200,11 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   </div>
 </div>
 <div id="yt"></div>
+<!-- Intercepta toques sueltos sobre el video para que no disparen el play/pausa nativo del
+     iframe de YouTube (pasaba con cualquier click en la pantalla) — un toque aquí solo
+     revela los controles, igual que mover el mouse. -->
+<div id="clickCatcher"></div>
+<button class="ctrl-center" id="centerPlayBtn" title="Pausar / reanudar (Espacio)">⏸</button>
 <div id="fx"></div>
 
 <div class="panel" id="brand">
@@ -210,8 +233,9 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 <div class="panel" id="loved"><div class="h">❤️ Lo más querido de hoy</div><div id="lovedItems"></div></div>
 <div id="bar"><div class="fill" id="fill"></div></div>
 
-<button class="ctrl" id="fsBtn" title="Pantalla completa (F)">⛶ Pantalla completa</button>
-<button class="ctrl" id="resetBtn" title="Forzar reinicio del reproductor">🔄 Reiniciar video</button>
+<button class="ctrl" id="playPauseBtn" title="Pausar / reanudar (Espacio)">⏸</button>
+<button class="ctrl" id="fsBtn" title="Pantalla completa (F)">⛶</button>
+<button class="ctrl" id="resetBtn" title="Forzar reinicio del reproductor (R)">🔄</button>
 
 <!-- Overlay de activación — siempre un toque, siempre captura el gesto del usuario.
      Oculto por defecto: si no está logueado (loginGate) no debe ser clickeable — antes
@@ -576,6 +600,7 @@ function onYouTubeIframeAPIReady(){
         // tv_takeover, que pausa una pestaña secundaria a propósito (isPrimary ya false).
         if(e.data===YT.PlayerState.PAUSED&&isPrimary)manualPause=true;
         if(e.data===YT.PlayerState.PLAYING){manualPause=false;_errBurst=[];}
+        if(e.data===YT.PlayerState.PAUSED||e.data===YT.PlayerState.PLAYING)_syncPlayPauseIcon(e.data===YT.PlayerState.PLAYING);
       },
       onError:()=>{
         if(isRawIP&&!isLocal)return;
@@ -763,15 +788,36 @@ function toggleFs(){
   else{Promise.resolve((document.exitFullscreen||document.webkitExitFullscreen||function(){}).call(document)).catch(()=>{});}
 }
 $('fsBtn').onclick=toggleFs;
+
+// ---- Play/pausa manual (botón central + botón de esquina, mismo efecto) ----
+function togglePlayPause(){
+  if(!player||!ready||!authok)return;
+  try{
+    const ps=player.getPlayerState();
+    if(ps===YT.PlayerState.PLAYING){player.pauseVideo();manualPause=true;}
+    else{player.playVideo();manualPause=false;}
+  }catch(e){}
+}
+function _syncPlayPauseIcon(playing){
+  const icon=playing?'⏸':'▶';
+  $('playPauseBtn').textContent=icon;$('centerPlayBtn').textContent=icon;
+}
+$('playPauseBtn').onclick=togglePlayPause;
+$('centerPlayBtn').onclick=togglePlayPause;
+
 document.addEventListener('keydown',e=>{
   if(e.key==='f'||e.key==='F')toggleFs();
   if(e.key==='r'||e.key==='R')forceRestart();
+  if(e.key===' '){e.preventDefault();togglePlayPause();}
 });
+const _ctrlIds=['fsBtn','resetBtn','playPauseBtn','centerPlayBtn'];
 let mvT;
-document.addEventListener('mousemove',()=>{
-  $('fsBtn').classList.add('show');$('resetBtn').classList.add('show');
-  clearTimeout(mvT);mvT=setTimeout(()=>{$('fsBtn').classList.remove('show');$('resetBtn').classList.remove('show');},3000);
-});
+function _revealControls(){
+  _ctrlIds.forEach(id=>$(id).classList.add('show'));
+  clearTimeout(mvT);mvT=setTimeout(()=>{_ctrlIds.forEach(id=>$(id).classList.remove('show'));},3000);
+}
+document.addEventListener('mousemove',_revealControls);
+$('clickCatcher').onclick=_revealControls;
 
 // ---- Estado / poll ----
 async function tick(){
