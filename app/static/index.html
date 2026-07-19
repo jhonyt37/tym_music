@@ -510,6 +510,13 @@ function applyTheme(t){
 let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0;
 let prepaidMode=false, walletBalance=0, insufRetry=null, insufNeed=0, pendingRetry=null;
 let registerGateOpen=false, _anonBusy=false;
+// Si el navegador restaura esta página desde el bfcache (back/forward) en vez de cargarla de
+// cero, event.persisted viene true — pasa típicamente al escanear el QR de OTRO local y luego
+// darle "atrás": el navegador puede mostrar instantáneamente el estado viejo (sesión/token del
+// local anterior) sin volver a ejecutar el arranque, dejando al cliente interactuando con el
+// bar equivocado. Forzar una recarga real aquí garantiza que VENUE/token siempre se re-lean de
+// la URL/localStorage actuales y el estado se valide de nuevo contra el servidor.
+window.addEventListener('pageshow',e=>{if(e.persisted)location.reload();});
 const VENUE=new URLSearchParams(location.search).get('v')||'';
 let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], pass_obj={minutes:30,price:5000};
 let VENUE_TZ='America/Bogota';
@@ -891,7 +898,11 @@ function initBellDrag(){
       const edgeX=(curX+el.offsetWidth/2<window.innerWidth/2)?MARGIN:(window.innerWidth-el.offsetWidth-MARGIN);
       snapTo(edgeX,curY,true);
     }else if(longPress&&assistActive){
-      cancelAssist();
+      // Antes cancelaba directo con solo 500ms de toque sostenido, sin confirmar — muy fácil
+      // de disparar sin querer (ej. el dedo se queda un instante de más al tocar en un bar
+      // oscuro/ruidoso), dejando al personal esperando una notificación que desaparecía sola
+      // sin que nadie la resolviera de verdad.
+      confirmModal('¿Cancelar la llamada? 🔕','Le avisaremos al personal que ya no necesitas ayuda.',cancelAssist,{yesLabel:'Sí, cancelar',noLabel:'No'});
     }else{
       toggleAssist();
     }

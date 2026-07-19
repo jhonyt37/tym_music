@@ -987,9 +987,14 @@ async function tick(){
     if(assists.length){
       ac.style.display='';al.innerHTML='';
       assists.forEach(a=>{
+        // Antes usaba el mismo tamaño de texto que cualquier fila normal de la lista — poco
+        // notorio para algo urgente. Ahora: mesa en grande+negrita, minutos de espera en vez
+        // de solo la hora (transmite mejor la urgencia), pulso rojo si lleva ≥2 min.
         const r=document.createElement('div');r.className='row';r.style.borderLeft='4px solid #dc2626';r.style.paddingLeft='10px';
-        const ts=new Date(a.ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:VENUE_TZ});
-        r.innerHTML=`<div class="info"><div class="t">${esc(a.table)}</div><div class="a">${esc(ts)}</div></div>`;
+        const waitMin=Math.floor((Date.now()/1000-a.ts)/60);
+        const waitTxt=waitMin<1?'recién':(waitMin+' min esperando');
+        const urgent=waitMin>=2;
+        r.innerHTML=`<span class="pulse" style="background:#dc2626${urgent?'':';opacity:.35;animation:none'}"></span><div class="info"><div class="t" style="font-size:18px;font-weight:800">${esc(a.table)}</div><div class="a" style="color:${urgent?'#f87171':'var(--mut)'};font-weight:${urgent?'700':'400'}">🔔 ${esc(waitTxt)}${a.buzz_count>1?' · '+a.buzz_count+' avisos':''}</div></div>`;
         const b=document.createElement('button');b.className='btn green sm';b.textContent='✓ Resolver';b.onclick=()=>resolveAssist(a.id);
         r.appendChild(b);al.appendChild(r);
       });
