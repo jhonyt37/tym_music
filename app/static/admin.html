@@ -883,6 +883,13 @@ async function loadTables(){
       cb.onclick=()=>closeTable(m.name,m.tab_total);
       r.appendChild(cb);
     }
+    const ap=document.createElement('button');ap.className='btn ghost sm';ap.textContent='+ Código';
+    ap.title='Generar un código individual para otra persona de esta mesa (misma cuenta, identidad separada)';
+    ap.onclick=async()=>{
+      const j=await post('/api/admin/tables',{action:'add_pin',name:m.name});
+      if(j.new_pin)alert('✅ Código nuevo para '+m.name+':\n\n'+j.new_pin+'\n\nPásaselo a la persona — entra igual que el PIN de mesa, pero como identidad propia (los cobros siguen siendo de la mesa).');
+      loadTables();
+    };
     const mb=document.createElement('button');mb.className='btn sm';mb.textContent=blocked?'🔊':'🔇';
     mb.title=blocked?'Reactivar mensajes/dedicatorias de esta mesa':'Bloquear mensajes/dedicatorias de esta mesa';
     mb.onclick=async()=>{await post('/api/admin/tables',{action:'toggle_msg_block',name:m.name});loadTables();};
@@ -890,7 +897,20 @@ async function loadTables(){
     rg.onclick=async()=>{await post('/api/admin/tables',{action:'regen',name:m.name});loadTables();};
     const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';
     rm.onclick=async()=>{await post('/api/admin/tables',{action:'remove',name:m.name});loadTables();};
-    r.appendChild(mb);r.appendChild(rg);r.appendChild(rm);box.appendChild(r);
+    r.appendChild(ap);r.appendChild(mb);r.appendChild(rg);r.appendChild(rm);
+    const extraPins=m.extra_pins||[];
+    if(extraPins.length){
+      const ep=document.createElement('div');ep.style.cssText='flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;margin-top:4px';
+      extraPins.forEach(p=>{
+        const chip=document.createElement('span');
+        chip.style.cssText='display:inline-flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700;color:var(--gold)';
+        chip.innerHTML=esc(p)+' <span style="cursor:pointer;color:var(--mut)" title="Quitar este código">✕</span>';
+        chip.querySelector('span').onclick=async()=>{await post('/api/admin/tables',{action:'remove_pin',name:m.name,pin:p});loadTables();};
+        ep.appendChild(chip);
+      });
+      box.appendChild(r);box.appendChild(ep);return;
+    }
+    box.appendChild(r);
   });
 }
 async function addTable(){await post('/api/admin/tables',{action:'add'});loadTables();}

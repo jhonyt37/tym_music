@@ -87,6 +87,17 @@ def nid():
 def gen_pin():
     return f"{secrets.randbelow(10000):04d}"
 
+def gen_unique_pin():
+    """PIN de 4 dígitos que no choca con ningún código ya asignado en el local (ni el PIN
+    principal de una mesa ni los códigos extra por persona) — usado al agregar una mesa o un
+    código adicional para una mesa que ya tiene gente."""
+    used = {t["pin"] for t in STATE["tables"]} | {p for t in STATE["tables"] for p in t.get("extra_pins", [])}
+    for _ in range(200):
+        p = gen_pin()
+        if p not in used:
+            return p
+    return gen_pin()  # fallback extremo, prácticamente imposible de alcanzar
+
 def gen_token():
     return secrets.token_hex(16)
 
@@ -336,7 +347,7 @@ def make_venue(name):
             "min_direct_pay": 700,     # piso para pago directo sin wallet (evita que la pasarela se coma el monto)
             "show_tym_brand": False,   # mostrar el logo/texto "TYM Music" en /tv (off por defecto, tema legal)
         },
-        "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4} for i in range(1, 6)],  # PINs 1111..5555
+        "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4, "extra_pins": []} for i in range(1, 6)],  # PINs 1111..5555
         "stations": [],   # ["Caja 1","Silla 2",...] — opcional, sin PIN; vacío = no aplica (modo prepago)
         "customers": {},  # celular normalizado -> {name, email, phone, balance, wallet_history}
         "sessions": {},
@@ -935,9 +946,13 @@ def customer_label(name, station):
     return f"{name} · {station}" if station else name
 
 def find_table_by_pin(pin):
+    """El PIN principal de la mesa y cualquier código extra emitido para una persona de esa
+    mesa (ver settings de Mesas → "+ Código") identifican la MISMA mesa para cobro/límites —
+    solo dan una identidad de sesión distinta para que un código filtrado no comprometa a
+    todos los que comparten mesa."""
     pin = (pin or "").strip()
     for t in STATE["tables"]:
-        if t["pin"] == pin:
+        if t["pin"] == pin or pin in t.get("extra_pins", []):
             return t["name"]
     return None
 
@@ -2601,20 +2616,35 @@ class H(BaseHTTPRequestHandler):
 
             if path == "/api/admin/tables":
                 act = d.get("action")
+                new_pin = None
                 if act == "add":
                     n = len(STATE["tables"]) + 1
-                    STATE["tables"].append({"name": d.get("name") or f"Mesa {n}", "pin": gen_pin()})
+                    STATE["tables"].append({"name": d.get("name") or f"Mesa {n}", "pin": gen_unique_pin(), "extra_pins": []})
                 elif act == "remove":
                     STATE["tables"] = [t for t in STATE["tables"] if t["name"] != d.get("name")]
                 elif act == "regen":
                     for t in STATE["tables"]:
                         if t["name"] == d.get("name"):
-                            t["pin"] = gen_pin()
+                            t["pin"] = gen_unique_pin()
                 elif act == "toggle_msg_block":
                     for t in STATE["tables"]:
                         if t["name"] == d.get("name"):
                             t["msg_blocked"] = not t.get("msg_blocked", False)
-                return self._send(200, {"ok": True, "tables": STATE["tables"]})
+                elif act == "add_pin":
+                    # Código individual adicional para otra persona de la misma mesa — evita que
+                    # todos tengan que compartir el mismo PIN (menos exposición si uno se filtra)
+                    # sin tocar cobros/límites, que siguen siendo por mesa. Un click, sin formulario.
+                    for t in STATE["tables"]:
+                        if t["name"] == d.get("name"):
+                            new_pin = gen_unique_pin()
+                            t.setdefault("extra_pins", []).append(new_pin)
+                            break
+                elif act == "remove_pin":
+                    for t in STATE["tables"]:
+                        if t["name"] == d.get("name"):
+                            t["extra_pins"] = [p for p in t.get("extra_pins", []) if p != d.get("pin")]
+                            break
+                return self._send(200, {"ok": True, "tables": STATE["tables"], "new_pin": new_pin})
 
             if path == "/api/admin/stations":
                 act = d.get("action")
