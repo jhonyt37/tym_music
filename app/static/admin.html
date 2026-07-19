@@ -532,6 +532,22 @@
       <div class="list" id="subList"><div class="empty">Aún no hay correos.</div></div>
     </div>
 
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <p class="sec" style="margin:0">📋 Pedidos</p>
+        <select class="field" id="histTableFilter" style="margin:0;width:150px;padding:6px 8px" onchange="renderHistoryList()">
+          <option value="">Todas las mesas</option>
+        </select>
+        <div style="display:flex;gap:6px;margin-left:auto">
+          <button class="btn sm ghost" onclick="loadHistory(1)" id="hbtn1">Hoy</button>
+          <button class="btn sm ghost" onclick="loadHistory(2)" id="hbtn2">2 días</button>
+          <button class="btn sm ghost active" onclick="loadHistory(3)" id="hbtn3">3 días</button>
+        </div>
+        <span class="small" id="histCount" style="color:var(--mut)"></span>
+      </div>
+      <div class="list" id="histList"><div class="empty">Cargando…</div></div>
+    </div>
+
   </div>
 </div>
 
@@ -631,26 +647,6 @@
       <div id="songMsgList"></div>
     </div>
 
-  </div>
-</div>
-
-<div id="tab-history" class="tabpanel">
-  <div class="wrap wide">
-    <div class="card">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-        <p class="sec" style="margin:0">📋 Historial de pedidos</p>
-        <select class="field" id="histTableFilter" style="margin:0;width:150px;padding:6px 8px" onchange="renderHistoryList()">
-          <option value="">Todas las mesas</option>
-        </select>
-        <div style="display:flex;gap:6px;margin-left:auto">
-          <button class="btn sm ghost" onclick="loadHistory(1)" id="hbtn1">Hoy</button>
-          <button class="btn sm ghost" onclick="loadHistory(2)" id="hbtn2">2 días</button>
-          <button class="btn sm ghost active" onclick="loadHistory(3)" id="hbtn3">3 días</button>
-        </div>
-        <span class="small" id="histCount" style="color:var(--mut)"></span>
-      </div>
-      <div class="list" id="histList"><div class="empty">Cargando…</div></div>
-    </div>
   </div>
 </div>
 
