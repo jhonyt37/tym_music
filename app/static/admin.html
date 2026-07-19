@@ -92,11 +92,10 @@
     🎭 Social
     <span class="tabBadge" id="socialBadge"></span>
   </button>
-  <button class="tabBtn" onclick="showTab('settings')" id="tbtn-settings">⚙️ Ajustes</button>
   <button class="tabBtn" onclick="showTab('tables')" id="tbtn-tables">🍽️ Mesas</button>
+  <button class="tabBtn" onclick="showTab('caja')" id="tbtn-caja">💰 Caja</button>
   <button class="tabBtn" onclick="showTab('content')" id="tbtn-content">🎵 Contenido</button>
-  <button class="tabBtn" onclick="showTab('reports')" id="tbtn-reports">📊 Informes</button>
-  <button class="tabBtn" onclick="showTab('history')" id="tbtn-history">📋 Historial</button>
+  <button class="tabBtn" onclick="showTab('settings')" id="tbtn-settings">⚙️ Ajustes</button>
 </nav>
 
 <!-- ============================================================
@@ -108,9 +107,10 @@
     <!-- Strip resumen de hoy -->
     <div id="todayStrip" class="kpis" style="margin-bottom:14px;display:none"></div>
 
-    <!-- Filtrar por mesa: revisar consumo/actividad de una sola mesa -->
+    <!-- Enfocar la cola/pendientes en una sola mesa. El dinero de cada mesa (cobros, cuánto
+         debe) vive en la pestaña Mesas — no hace falta duplicarlo aquí. -->
     <div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span class="small" style="color:var(--mut)">🔍 Revisar mesa</span>
+      <span class="small" style="color:var(--mut)">🔍 Enfocar mesa</span>
       <select class="field" id="liveMesaFilter" style="margin:0;width:170px;padding:6px 8px" onchange="_liveMesaFilter=this.value;tick()">
         <option value="">Todas las mesas</option>
       </select>
@@ -277,7 +277,7 @@
       <div class="pkgrow"><span class="small" style="flex:1">Cortar últimos seg del video (silencios)</span><input class="field" id="trimEnd" type="number"></div>
       <label class="opt" style="margin-top:12px">
         <div><b>Lista del local en orden aleatorio</b><div class="small">Si está apagado, sigue el orden en que añadiste las canciones</div></div>
-        <input type="checkbox" id="fbShuffle" style="width:22px;height:22px">
+        <input type="checkbox" id="fbShuffle" style="width:22px;height:22px" onchange="post('/api/admin/settings',{fallback_shuffle:$('fbShuffle').checked}).then(()=>toast('Guardado','ok'))">
       </label>
         </div>
       </details>
@@ -305,16 +305,16 @@
 
       <label class="opt" style="margin-top:12px">
         <div><b>Permitir skip democrático ⏭</b><div class="small">Las mesas pueden votar para saltar la canción actual (mayoría simple)</div></div>
-        <input type="checkbox" id="allowSkipVote" style="width:22px;height:22px">
+        <input type="checkbox" id="allowSkipVote" style="width:22px;height:22px" onchange="post('/api/admin/settings',{allow_skip_vote:$('allowSkipVote').checked}).then(()=>toast('Guardado','ok'))">
       </label>
 
       <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">⏱ Duración de la votación (segundos)</label>
       <div class="small" style="color:var(--mut);margin-bottom:6px">La votación se cierra automáticamente después de este tiempo. Default: 120 (2 min).</div>
-      <input class="field" id="pollDurationSecs" type="number" min="30" max="600" step="10" placeholder="120" style="max-width:140px">
+      <input class="field" id="pollDurationSecs" type="number" min="30" max="600" step="10" placeholder="120" style="max-width:140px" onchange="post('/api/admin/settings',{poll_duration_secs:parseInt($('pollDurationSecs').value||120)}).then(()=>toast('Guardado','ok'))">
 
       <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">⚔️ Duración del duelo (segundos)</label>
       <div class="small" style="color:var(--mut);margin-bottom:6px">Tiempo para votar en un duelo de canciones. Default: 60 (1 min).</div>
-      <input class="field" id="dueloDurationSecs" type="number" min="20" max="300" step="10" placeholder="60" style="max-width:140px">
+      <input class="field" id="dueloDurationSecs" type="number" min="20" max="300" step="10" placeholder="60" style="max-width:140px" onchange="post('/api/admin/settings',{duelo_duration_secs:parseInt($('dueloDurationSecs').value||60)}).then(()=>toast('Guardado','ok'))">
         </div>
       </details>
 
@@ -330,7 +330,7 @@
 
       <label class="opt" style="margin-bottom:14px">
         <div><b>Moderar mensaje al pedir canción 💌</b><div class="small">Separado de la moderación de dedicatorias mesa a mesa. Si un cliente escribe un mensaje al pedir su canción y queda marcado, la canción suena igual pero el mensaje no aparece en TV hasta que lo apruebes abajo, en Social.</div></div>
-        <input type="checkbox" id="songMessageModeration" style="width:22px;height:22px">
+        <input type="checkbox" id="songMessageModeration" style="width:22px;height:22px" onchange="post('/api/admin/settings',{song_message_moderation:$('songMessageModeration').checked}).then(()=>toast('Guardado','ok'))">
       </label>
 
       <label class="small" style="display:block;margin-bottom:4px">🚫 Palabras BLOQUEADAS (ej: metal, trap, reggaetón)</label>
@@ -354,12 +354,12 @@
         <summary><span class="sec">Tema de color</span><span class="chev">▸</span></summary>
         <div class="secBody">
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0" id="themeRow">
-        <div onclick="pickTheme('azul')" data-t="azul" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #3b82f6;background:#0e1320;color:#3b82f6">Azul</div>
-        <div onclick="pickTheme('purpura')" data-t="purpura" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #a855f7;background:#0e0b1e;color:#a855f7">Púrpura</div>
-        <div onclick="pickTheme('verde')" data-t="verde" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #10b981;background:#081411;color:#10b981">Verde</div>
-        <div onclick="pickTheme('rojo')" data-t="rojo" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #ef4444;background:#1a0e0e;color:#ef4444">Rojo</div>
-        <div onclick="pickTheme('dorado')" data-t="dorado" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #f59e0b;background:#1a1408;color:#f59e0b">Dorado</div>
-        <div onclick="pickTheme('rosa')" data-t="rosa" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #ec4899;background:#1a0e16;color:#ec4899">Rosa</div>
+        <div onclick="pickThemeAndSave('azul')" data-t="azul" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #3b82f6;background:#0e1320;color:#3b82f6">Azul</div>
+        <div onclick="pickThemeAndSave('purpura')" data-t="purpura" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #a855f7;background:#0e0b1e;color:#a855f7">Púrpura</div>
+        <div onclick="pickThemeAndSave('verde')" data-t="verde" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #10b981;background:#081411;color:#10b981">Verde</div>
+        <div onclick="pickThemeAndSave('rojo')" data-t="rojo" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #ef4444;background:#1a0e0e;color:#ef4444">Rojo</div>
+        <div onclick="pickThemeAndSave('dorado')" data-t="dorado" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #f59e0b;background:#1a1408;color:#f59e0b">Dorado</div>
+        <div onclick="pickThemeAndSave('rosa')" data-t="rosa" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #ec4899;background:#1a0e16;color:#ec4899">Rosa</div>
       </div>
         </div>
       </details>
@@ -488,7 +488,7 @@
 <!-- ============================================================
      TAB 5: INFORMES
      ============================================================ -->
-<div id="tab-reports" class="tabpanel">
+<div id="tab-caja" class="tabpanel">
   <div class="wrap wide">
 
     <!-- Dashboard transaccional de hoy -->
@@ -690,7 +690,7 @@ function showTab(id){
   document.getElementById('tab-'+id).classList.add('active');
   document.getElementById('tbtn-'+id).classList.add('active');
   try{sessionStorage.setItem('adminTab',id);}catch(e){}
-  if(id==='history')loadHistory(3);
+  if(id==='caja')loadHistory(3);
 }
 
 const THEMES={
@@ -714,6 +714,14 @@ function pickTheme(t){
     el.style.outline=el.dataset.t===t?'3px solid rgba(255,255,255,.6)':'none';
     el.style.outlineOffset='2px';
   });
+}
+// pickTheme() por sí sola NO guarda — también se usa para sincronizar los swatches con el
+// tema ya guardado al cargar la página (línea con pickTheme(s.settings.theme...)), y guardar
+// ahí generaría un POST de sobra en cada carga. Los swatches clicables llaman a esta función
+// en cambio, que sí persiste de una vez (mismo patrón que dedicaModeration).
+function pickThemeAndSave(t){
+  pickTheme(t);
+  post('/api/admin/settings',{theme:t}).then(()=>toast('Guardado','ok'));
 }
 
 let tymLogoData=null, venueLogoData=null, curSettings={};
@@ -1111,10 +1119,11 @@ async function tick(){
     }else{ac.style.display='none';}
 
     // Filtro "Revisar mesa": repuebla el select con las mesas del local (preservando la
-    // selección) y arma el texto de ayuda. El filtro se aplica abajo a cobros/movimientos y
-    // pendientes (listas simples); la cola NO se filtra fuera del DOM — solo se atenúan las
-    // filas de otras mesas — porque el drag&drop de reordenar depende de tener SIEMPRE la
-    // lista completa (_qSnapshot), filtrarla rompería el reorder mientras el filtro está activo.
+    // selección) y arma el texto de ayuda. Solo atenúa filas de cola/pendientes de otras
+    // mesas — el dinero (cobros/movimientos) ya no se filtra aquí, vive en Mesas/Caja, que
+    // muestran el estado de cada mesa sin necesidad de este selector. La cola NO se filtra
+    // fuera del DOM — solo se atenúan las filas — porque el drag&drop de reordenar depende de
+    // tener SIEMPRE la lista completa (_qSnapshot), filtrarla rompería el reorder.
     const lmf=$('liveMesaFilter');
     if(lmf){
       const tbls=s.tables||[];
@@ -1124,7 +1133,7 @@ async function tick(){
       }
       lmf.value=_liveMesaFilter;
       const hintEl=$('liveMesaFilterHint');
-      if(hintEl)hintEl.textContent=_liveMesaFilter?'Mostrando cobros y pendientes de '+_liveMesaFilter+' · la cola se atenúa para las demás':'';
+      if(hintEl)hintEl.textContent=_liveMesaFilter?'Mostrando pendientes de '+_liveMesaFilter+' · la cola se atenúa para las demás':'';
     }
 
     // Ledger / cobros
@@ -1137,14 +1146,13 @@ async function tick(){
       $('total').textContent=cop(s.ledger_total);
       const byT={};(s.ledger||[]).forEach(l=>{byT[l.table]=(byT[l.table]||0)+l.amount;});
       bt.innerHTML='';
-      Object.entries(byT).filter(([t])=>!_liveMesaFilter||t===_liveMesaFilter).forEach(([t,v])=>{
+      Object.entries(byT).forEach(([t,v])=>{
         const d=document.createElement('div');d.className='grp';
         d.innerHTML=`<span style="flex:1">${esc(t)}</span><span class="price" style="color:var(--gold)">${cop(v)}</span>`;
         const b=document.createElement('button');b.className='btn red sm';b.textContent='Cerrar cuenta';b.style.marginLeft='10px';
         b.onclick=()=>closeTable(t,v);d.appendChild(b);bt.appendChild(d);
       });
-      if(_liveMesaFilter&&!(_liveMesaFilter in byT))bt.innerHTML='<div class="empty">'+esc(_liveMesaFilter)+' no tiene cobros este turno.</div>';
-      const lg=(s.ledger||[]).filter(x=>!_liveMesaFilter||x.table===_liveMesaFilter);
+      const lg=s.ledger||[];
       if(!lg.length)L.innerHTML='<div class="empty">Sin cobros aún.</div>';
       else{L.innerHTML='';lg.forEach(x=>{const r=document.createElement('div');r.className='row';
         r.innerHTML=`<div class="info"><div class="t">${esc(x.table)} · <span class="small">${esc(x.kind)}</span></div><div class="a">${esc(x.title)}${x.ts?' · '+hm3(x.ts):''}</div></div><div class="chip pri">${cop(x.amount)}</div>`;
@@ -1307,6 +1315,11 @@ async function tick(){
     // Notificaciones unificadas clicables: avisa de cosas nuevas que requieren atención del
     // admin y no está viendo, con un toast que lo lleva directo a la pestaña correspondiente.
     _checkNewAlerts(pend,assists,dedsPending,songMsgsPending,pollClosing,dueloClosing);
+
+    // Mesas: antes loadTables() solo se llamaba al cargar la página y tras una acción en ese
+    // mismo tab — el estado "activa ahora"/"debe $X" quedaba desactualizado si el admin estaba
+    // viendo otro tab. Ahora entra en el mismo ciclo de 2.5s que todo lo demás.
+    loadTables();
   }catch(e){}
 }
 
