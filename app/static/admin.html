@@ -677,12 +677,19 @@ document.addEventListener('focusout',()=>setTimeout(()=>editing=false,500));
 
 async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})})).json();}
 let _toastT=null;
-function toast(t,type,ms){const e=$('toast');e.textContent=t;e.classList.add('show');clearTimeout(_toastT);_toastT=setTimeout(()=>e.classList.remove('show'),ms||2000);}
+function toast(t,type,ms){const e=$('toast');e.textContent=t;e.classList.add('show');clearTimeout(_toastT);_toastT=setTimeout(()=>e.classList.remove('show'),ms||3800);}
 
 async function approve(id){await post('/api/admin/approve',{id});tick();}
 async function reject(id){await post('/api/admin/reject',{id});tick();}
 async function remove(id){await post('/api/admin/remove',{id});tick();}
-async function skip(){await post('/api/advance',{});tick();}
+async function skip(){
+  if(!confirm('¿Saltar esta canción? Pasa a la siguiente en la cola (o a la lista del local si está vacía).'))return;
+  // manual:true es obligatorio: sin esto el servidor trata el salto como "¿sonó lo
+  // suficiente?" (heurística pensada para el auto-recovery, no para un salto deliberado del
+  // dueño) y RE-ENCOLA la misma canción si no llegó al 50% — el botón parecía no hacer nada y
+  // había que presionarlo 3 veces seguidas para que de verdad saltara. Bug reportado en vivo.
+  await post('/api/advance',{manual:true});tick();
+}
 async function moveItem(id,dir){await post('/api/admin/move',{id,dir});tick();}
 
 // ---- Drag & drop estado ----
@@ -801,12 +808,16 @@ async function loadTables(){
   const box=$('tables');box.innerHTML='';
   t.forEach(m=>{
     const r=document.createElement('div');r.className='pinrow';
-    r.innerHTML=`<div class="name">${esc(m.name)}</div><div class="pin">${esc(m.pin)}</div>`;
+    const blocked=!!m.msg_blocked;
+    r.innerHTML=`<div class="name">${esc(m.name)}${blocked?' <span style="color:var(--red);font-size:11px;font-weight:700">🚫 mensajes bloqueados</span>':''}</div><div class="pin">${esc(m.pin)}</div>`;
+    const mb=document.createElement('button');mb.className='btn sm';mb.textContent=blocked?'🔊':'🔇';
+    mb.title=blocked?'Reactivar mensajes/dedicatorias de esta mesa':'Bloquear mensajes/dedicatorias de esta mesa';
+    mb.onclick=async()=>{await post('/api/admin/tables',{action:'toggle_msg_block',name:m.name});loadTables();};
     const rg=document.createElement('button');rg.className='btn ghost sm';rg.textContent='↻';rg.title='Nuevo PIN';
     rg.onclick=async()=>{await post('/api/admin/tables',{action:'regen',name:m.name});loadTables();};
     const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';
     rm.onclick=async()=>{await post('/api/admin/tables',{action:'remove',name:m.name});loadTables();};
-    r.appendChild(rg);r.appendChild(rm);box.appendChild(r);
+    r.appendChild(mb);r.appendChild(rg);r.appendChild(rm);box.appendChild(r);
   });
 }
 async function addTable(){await post('/api/admin/tables',{action:'add'});loadTables();}
@@ -1109,8 +1120,21 @@ async function tick(){
           d.innerHTML=`<span style="flex:1;font-weight:600">${esc(t)}</span><span class="small" style="color:var(--mut)">${parts.join(' · ')}</span>`;
           anList.appendChild(d);
         });
-        if(s.poll&&s.poll.active){const d=document.createElement('div');d.className='grp';d.innerHTML=`<span>🗳️ Votación activa</span><span class="small" style="color:var(--pri)">${Object.values(s.poll.votes||{}).reduce((a,n)=>a+n,0)} votos</span>`;anList.appendChild(d);}
-        if(s.duelo&&s.duelo.active){const d=document.createElement('div');d.className='grp';d.innerHTML=`<span>⚔️ Duelo activo</span><span class="small" style="color:#f59e0b">${Object.values(s.duelo.votes||{}).reduce((a,n)=>a+n,0)} votos</span>`;anList.appendChild(d);}
+        // Botón "Cerrar ya" aquí mismo (no solo en el tab Social): el dueño mira el progreso
+        // de la canción actual en este tab "En vivo" — para anticiparse al final y concluir
+        // la votación/duelo justo a tiempo, antes tenía que cambiar de tab a medio del apuro.
+        if(s.poll&&s.poll.active){
+          const d=document.createElement('div');d.className='grp';
+          d.innerHTML=`<span>🗳️ Votación activa</span><span class="small" style="color:var(--pri)">${Object.values(s.poll.votes||{}).reduce((a,n)=>a+n,0)} votos</span>`;
+          const cb=document.createElement('button');cb.className='btn ghost sm';cb.textContent='Cerrar ya';cb.style.marginLeft='8px';cb.onclick=closePoll;
+          d.appendChild(cb);anList.appendChild(d);
+        }
+        if(s.duelo&&s.duelo.active){
+          const d=document.createElement('div');d.className='grp';
+          d.innerHTML=`<span>⚔️ Duelo activo</span><span class="small" style="color:#f59e0b">${Object.values(s.duelo.votes||{}).reduce((a,n)=>a+n,0)} votos</span>`;
+          const cb=document.createElement('button');cb.className='btn ghost sm';cb.textContent='Cerrar ya';cb.style.marginLeft='8px';cb.onclick=closeDuelo;
+          d.appendChild(cb);anList.appendChild(d);
+        }
       }else anCard.style.display='none';
     }
     // Historial reciente con toggle de repetición

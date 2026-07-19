@@ -2424,6 +2424,10 @@ class H(BaseHTTPRequestHandler):
                     for t in STATE["tables"]:
                         if t["name"] == d.get("name"):
                             t["pin"] = gen_pin()
+                elif act == "toggle_msg_block":
+                    for t in STATE["tables"]:
+                        if t["name"] == d.get("name"):
+                            t["msg_blocked"] = not t.get("msg_blocked", False)
                 return self._send(200, {"ok": True, "tables": STATE["tables"]})
 
             if path == "/api/admin/stations":
@@ -2563,6 +2567,8 @@ class H(BaseHTTPRequestHandler):
                 sess = get_session(d.get("token"))
                 if not sess:
                     return self._send(400, {"error": "Ingresa el código de tu mesa primero."})
+                if any(t.get("msg_blocked") and t["name"] == sess["table"] for t in STATE["tables"]):
+                    return self._send(400, {"error": "El local desactivó los mensajes para tu mesa."})
                 to_table = (d.get("to_table") or "").strip()
                 message = (d.get("message") or "").strip()
                 valid_tables = [t["name"] for t in STATE["tables"]]
