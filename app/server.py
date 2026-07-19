@@ -1539,7 +1539,14 @@ class H(BaseHTTPRequestHandler):
                 data = buf.getvalue()
                 self.send_response(200)
                 self.send_header("Content-Type", "image/png")
-                self.send_header("Cache-Control", "max-age=3600")
+                # NUNCA cachear: la venue se resuelve del lado del servidor (cookie de sesión
+                # o ?v=), no viaja siempre en la URL — con /tv abierto sin "?v=" (el caso
+                # normal, solo con login) la URL de esta petición es literalmente "/api/qr"
+                # para CUALQUIER local. Con cache habilitado, el navegador de un dispositivo
+                # ya usado antes con otro local servía el PNG viejo cacheado sin ni siquiera
+                # volver a preguntarle al servidor — bug grave reportado en vivo: mostraba el
+                # QR de un local distinto, enviando clientes/pagos al local equivocado.
+                self.send_header("Cache-Control", "no-store")
                 self.end_headers()
                 self.wfile.write(data)
             except Exception as e:
