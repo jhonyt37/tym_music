@@ -312,19 +312,6 @@
       <div class="pkgrow"><span class="small" style="flex:1">...cada (minutos)</span><input class="field" id="freeWin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Bloquear nuevas prioridades si la cola supera (minutos, 0=sin límite)</span><input class="field" id="maxPrioMin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Duración máxima de una canción pedida (minutos, 0=sin límite)</span><input class="field" id="maxSongDurationMin" type="number"></div>
-
-      <label class="opt" style="margin-top:12px">
-        <div><b>Permitir skip democrático ⏭</b><div class="small">Las mesas pueden votar para saltar la canción actual (mayoría simple)</div></div>
-        <input type="checkbox" id="allowSkipVote" style="width:22px;height:22px" onchange="post('/api/admin/settings',{allow_skip_vote:$('allowSkipVote').checked}).then(()=>toast('Guardado','ok'))">
-      </label>
-
-      <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">⏱ Duración de la votación (segundos)</label>
-      <div class="small" style="color:var(--mut);margin-bottom:6px">La votación se cierra automáticamente después de este tiempo. Default: 120 (2 min).</div>
-      <input class="field" id="pollDurationSecs" type="number" min="30" max="600" step="10" placeholder="120" style="max-width:140px" onchange="post('/api/admin/settings',{poll_duration_secs:parseInt($('pollDurationSecs').value||120)}).then(()=>toast('Guardado','ok'))">
-
-      <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">⚔️ Duración del duelo (segundos)</label>
-      <div class="small" style="color:var(--mut);margin-bottom:6px">Tiempo para votar en un duelo de canciones. Default: 60 (1 min).</div>
-      <input class="field" id="dueloDurationSecs" type="number" min="20" max="300" step="10" placeholder="60" style="max-width:140px" onchange="post('/api/admin/settings',{duelo_duration_secs:parseInt($('dueloDurationSecs').value||60)}).then(()=>toast('Guardado','ok'))">
         </div>
       </details>
 
@@ -562,6 +549,10 @@
         <button class="btn block" style="margin-top:10px" onclick="createPoll()">🗳️ Crear votación</button>
       </div>
       <button class="btn ghost block sm" id="closePollBtn" style="margin-top:10px;display:none" onclick="closePoll()">✕ Cerrar votación (encola ganador)</button>
+
+      <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">⏱ Duración de la votación (segundos)</label>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">La votación se cierra automáticamente después de este tiempo. Default: 120 (2 min).</div>
+      <input class="field" id="pollDurationSecs" type="number" min="30" max="600" step="10" placeholder="120" style="max-width:140px" onchange="post('/api/admin/settings',{poll_duration_secs:parseInt($('pollDurationSecs').value||120)}).then(()=>toast('Guardado','ok'))">
     </div>
 
     <!-- Duelo de canciones -->
@@ -585,6 +576,19 @@
         <button class="btn block" onclick="createDuelo()">⚔️ ¡Iniciar duelo!</button>
       </div>
       <button class="btn ghost block sm" id="closeDueloBtn" style="margin-top:8px;display:none" onclick="closeDuelo()">✕ Cerrar duelo (encola ganador)</button>
+
+      <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">⚔️ Duración del duelo (segundos)</label>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">Tiempo para votar en un duelo de canciones. Default: 60 (1 min).</div>
+      <input class="field" id="dueloDurationSecs" type="number" min="20" max="300" step="10" placeholder="60" style="max-width:140px" onchange="post('/api/admin/settings',{duelo_duration_secs:parseInt($('dueloDurationSecs').value||60)}).then(()=>toast('Guardado','ok'))">
+    </div>
+
+    <!-- Skip democrático: 3er mecanismo de votación, junto a Votación y Duelo -->
+    <div class="card" style="margin-bottom:14px">
+      <p class="sec">⏭ Skip democrático</p>
+      <label class="opt">
+        <div><b>Permitir skip democrático</b><div class="small">Las mesas pueden votar para saltar la canción actual (mayoría simple)</div></div>
+        <input type="checkbox" id="allowSkipVote" style="width:22px;height:22px" onchange="post('/api/admin/settings',{allow_skip_vote:$('allowSkipVote').checked}).then(()=>toast('Guardado','ok'))">
+      </label>
     </div>
 
     <!-- Vibe -->
