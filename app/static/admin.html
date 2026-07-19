@@ -208,6 +208,13 @@
             </select>
             <button class="btn sm" onclick="createAnnouncement()">+ Agregar</button>
           </div>
+
+          <details class="settingsSection" style="margin-top:14px">
+            <summary><span class="sec">Historial de anuncios enviados</span><span class="chev">▸</span></summary>
+            <div class="secBody">
+          <div class="list" id="histAnnList"><div class="empty">Sin anuncios enviados aún.</div></div>
+            </div>
+          </details>
         </div>
 
         <div class="card">
@@ -643,12 +650,6 @@
         <span class="small" id="histCount" style="color:var(--mut)"></span>
       </div>
       <div class="list" id="histList"><div class="empty">Cargando…</div></div>
-    </div>
-
-    <div class="card">
-      <p class="sec">📢 Anuncios enviados por el admin</p>
-      <div class="small" style="color:var(--mut);margin-bottom:10px">Qué ha comunicado el local en la TV, para auditar.</div>
-      <div class="list" id="histAnnList"><div class="empty">Sin anuncios enviados aún.</div></div>
     </div>
   </div>
 </div>
