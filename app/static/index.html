@@ -509,7 +509,7 @@ function applyTheme(t){
 }
 let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0;
 let prepaidMode=false, walletBalance=0, insufRetry=null, insufNeed=0, pendingRetry=null;
-let registerGateOpen=false, _anonBusy=false;
+let registerGateOpen=false, _anonBusy=false, pendingTabConfirm=false;
 // Si el navegador restaura esta página desde el bfcache (back/forward) en vez de cargarla de
 // cero, event.persisted viene true — pasa típicamente al escanear el QR de OTRO local y luego
 // darle "atrás": el navegador puede mostrar instantáneamente el estado viejo (sesión/token del
@@ -584,12 +584,20 @@ async function enterPin(){
     // refrescaba la página mientras el modal seguía abierto (sin haber elegido nada), el
     // siguiente load encontraba el token ya en localStorage y la metía directo a la cuenta
     // de la mesa sin haber confirmado nada — bug reportado en vivo.
-    const enter=()=>{token=j.token;localStorage.setItem('tym_token_'+VENUE,token);sess=j.session;$('gate').style.display='none';poll();};
+    const enter=()=>{token=j.token;localStorage.setItem('tym_token_'+VENUE,token);sess=j.session;pendingTabConfirm=false;$('gate').style.display='none';poll();};
     if((j.existing_tab||0)>0){
+      // El gate (.gate, z-index:50) tapa el modal de confirmación (#confirmBg, z-index:30) —
+      // hay que ocultarlo ANTES de abrir el modal. Antes esto se resolvía solo porque el token
+      // ya estaba guardado y poll() (cada 2s) terminaba ocultando el gate por su cuenta; ahora
+      // que el token no se guarda hasta confirmar, sess sigue null y poll() lo vuelve a mostrar
+      // en cada tick — sin este flag, el gate nunca cede y el modal queda inclicable (bug
+      // reportado en vivo: "a veces no hace nada dándole click").
+      pendingTabConfirm=true;
+      $('gate').style.display='none';
       confirmModal('⚠ Cuenta pendiente en esta mesa',
         'Esta mesa tiene una cuenta activa de <b>'+cop(j.existing_tab)+'</b> de un cliente anterior.<br><br>Si eres el mismo cliente, continúa. Si no, cancela e intenta con otro código, o pide al personal que cierre la cuenta.',
         enter,
-        {noLabel:'Cancelar',noCb:()=>{$('pinInput').value='';},yesLabel:'Soy yo, continuar'});
+        {noLabel:'Cancelar',noCb:()=>{pendingTabConfirm=false;$('pinInput').value='';$('gate').style.display='flex';},yesLabel:'Soy yo, continuar'});
     }else enter();
   }else{$('pinErr').textContent=j.error||'Código incorrecto';}
 }
@@ -1377,7 +1385,10 @@ function boost(id, isMine){
 async function doBoost(id,payMethod){
   const body={token,id};if(payMethod)body.pay_method=payMethod;
   const j=await (await fetch('/api/boost',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
-  if(j.ok){if(j.session)sess=j.session;toast(j.already?'Ya tiene prioridad':'⚡ ¡Impulsada!','ok');refreshBal();poll();}
+  if(j.ok){if(j.session)sess=j.session;
+    toast(j.already?'Ya tiene prioridad':'⚡ ¡Impulsada!','ok');
+    if(j.priority_abuse_mult>1)toast('💸 Cobrando x'+j.priority_abuse_mult+' por pedidos de prioridad seguidos','warn',4500);
+    refreshBal();poll();}
   else if(j.needs_registration){showNeedsRegistration(()=>doBoost(id));}
   else if(j.insufficient_balance){showInsufficient(j,()=>doBoost(id,'direct'));}
   else toast(j.error||'Error','err');
@@ -1576,8 +1587,9 @@ async function poll(){
         }
       }else stSel.style.display='none';
     }
-    if(registerGateOpen){
-      // completando un registro pedido a mitad de un pago — no tocar el gate
+    if(registerGateOpen||pendingTabConfirm){
+      // completando un registro a mitad de pago, o esperando que el cliente confirme el modal
+      // de "cuenta pendiente en esta mesa" — no tocar el gate (ver enterPin())
     }else if(!sess){
       if(prepaidMode){$('gate').style.display='none';ensureAnonSession();}
       else{$('gate').style.display='flex';$('gatePin').style.display='';$('gateRegister').style.display='none';}

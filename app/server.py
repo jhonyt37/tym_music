@@ -2179,9 +2179,23 @@ class H(BaseHTTPRequestHandler):
                 if target.get("priority"):
                     return self._send(200, {"ok": True, "already": True,
                                             "session": session_public(sess)})
+                # Mismas reglas de negocio que una prioridad comprada por /api/request — antes
+                # "impulsar" era una puerta de atrás: se saltaba el tope de cola premium y el
+                # anti-abuso de prioridad, y además el impulsado conservaba su ts original de
+                # cuando se pidió como canción normal, colándose antes de prioridades pagadas
+                # legítimamente después — bug reportado en vivo ("se saltaba turnos").
+                mqm = int(STATE["settings"].get("max_priority_queue_min", 0))
+                if mqm > 0:
+                    pq_secs = sum(i.get("duration", DEFAULT_DUR) for i in queue_view() if i.get("priority"))
+                    if pq_secs // 60 >= mqm:
+                        return self._send(400, {"error": f"La cola tiene más de {mqm} min de prioridades. Intenta en un rato 🎶",
+                                                "priority_queue_full": True,
+                                                "priority_queue_min": int(pq_secs // 60)})
                 now = time.time()
                 free = sess["pass_until"] > now or sess["credits"] > 0
                 price = 0 if free else STATE["settings"]["price_priority"]
+                abuse_mult = priority_abuse_multiplier(sess["table"], now) if price > 0 else 1
+                price = price * abuse_mult
                 charge_via, paid_amount = None, 0
                 if price > 0 and STATE["settings"].get("prepaid_mode"):
                     ok, via, err = try_charge_prepaid(sess, price, "impulso", target["title"],
@@ -2190,7 +2204,10 @@ class H(BaseHTTPRequestHandler):
                     if not ok:
                         return self._send(400, err)
                     charge_via, paid_amount = via, price
+                if price > 0:
+                    record_priority_purchase(sess["table"], now)
                 target["priority"] = True
+                target["ts"] = now   # toma su lugar en la cola de prioridad desde AHORA, no desde que se pidió como normal
                 target["charge_table"] = sess["table"]
                 target["charge_kind"] = "impulso"
                 target["charge_via"] = charge_via
@@ -2201,7 +2218,8 @@ class H(BaseHTTPRequestHandler):
                     target["charge_on_play"] = 0
                 else:
                     target["charge_on_play"] = 0 if charge_via else price
-                return self._send(200, {"ok": True, "session": session_public(sess)})
+                return self._send(200, {"ok": True, "priority_abuse_mult": abuse_mult,
+                                        "session": session_public(sess)})
 
             # ---- Saltar al #1 (premium, 1 por canción, primera mesa que lo hace) ----
             if path == "/api/jump":
