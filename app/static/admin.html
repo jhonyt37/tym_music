@@ -88,7 +88,10 @@
     🎚️ En vivo
     <span class="tabBadge" id="liveBadge"></span>
   </button>
-  <button class="tabBtn" onclick="showTab('social')" id="tbtn-social">🎭 Social</button>
+  <button class="tabBtn" onclick="showTab('social')" id="tbtn-social">
+    🎭 Social
+    <span class="tabBadge" id="socialBadge"></span>
+  </button>
   <button class="tabBtn" onclick="showTab('settings')" id="tbtn-settings">⚙️ Ajustes</button>
   <button class="tabBtn" onclick="showTab('tables')" id="tbtn-tables">🍽️ Mesas</button>
   <button class="tabBtn" onclick="showTab('content')" id="tbtn-content">🎵 Contenido</button>
@@ -179,13 +182,20 @@
           <p class="sec">📢 Anuncios para el TV</p>
           <div class="small" style="color:var(--mut);margin-bottom:10px">Aparecen como banner en la pantalla del bar. Actívalos/desactívalos en tiempo real.</div>
           <div id="announcementList" style="margin-bottom:10px"></div>
-          <div style="display:flex;gap:6px">
-            <input class="field" id="annText" placeholder="Ej: 2x1 en mojitos hasta las 10pm" style="margin:0;flex:1">
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <input class="field" id="annText" placeholder="Ej: 2x1 en mojitos hasta las 10pm" style="margin:0;flex:1;min-width:160px">
             <select class="field" id="annColor" style="margin:0;width:90px;padding:6px 8px">
               <option value="#f59e0b">🟡 Ámbar</option>
               <option value="#3b82f6">🔵 Azul</option>
               <option value="#10b981">🟢 Verde</option>
               <option value="#ef4444">🔴 Rojo</option>
+            </select>
+            <select class="field" id="annDuration" style="margin:0;width:110px;padding:6px 8px">
+              <option value="60">1 min</option>
+              <option value="120" selected>2 min</option>
+              <option value="300">5 min</option>
+              <option value="600">10 min</option>
+              <option value="1800">30 min</option>
             </select>
             <button class="btn sm" onclick="createAnnouncement()">+ Agregar</button>
           </div>
@@ -281,6 +291,7 @@
       <div class="pkgrow"><span class="small" style="flex:1">...cada (minutos)</span><input class="field" id="freeWin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (× precio)</span><input class="field" id="jumpMult" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Bloquear nuevas prioridades si la cola supera (minutos, 0=sin límite)</span><input class="field" id="maxPrioMin" type="number"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">Duración máxima de una canción pedida (minutos, 0=sin límite)</span><input class="field" id="maxSongDurationMin" type="number"></div>
 
       <label class="opt" style="margin-top:12px">
         <div><b>Permitir skip democrático ⏭</b><div class="small">Las mesas pueden votar para saltar la canción actual (mayoría simple)</div></div>
@@ -574,6 +585,9 @@
     <div class="card">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
         <p class="sec" style="margin:0">📋 Historial de pedidos</p>
+        <select class="field" id="histTableFilter" style="margin:0;width:150px;padding:6px 8px" onchange="renderHistoryList()">
+          <option value="">Todas las mesas</option>
+        </select>
         <div style="display:flex;gap:6px;margin-left:auto">
           <button class="btn sm ghost" onclick="loadHistory(1)" id="hbtn1">Hoy</button>
           <button class="btn sm ghost" onclick="loadHistory(2)" id="hbtn2">2 días</button>
@@ -582,6 +596,12 @@
         <span class="small" id="histCount" style="color:var(--mut)"></span>
       </div>
       <div class="list" id="histList"><div class="empty">Cargando…</div></div>
+    </div>
+
+    <div class="card">
+      <p class="sec">📢 Anuncios enviados por el admin</p>
+      <div class="small" style="color:var(--mut);margin-bottom:10px">Qué ha comunicado el local en la TV, para auditar.</div>
+      <div class="list" id="histAnnList"><div class="empty">Sin anuncios enviados aún.</div></div>
     </div>
   </div>
 </div>
@@ -677,7 +697,12 @@ document.addEventListener('focusout',()=>setTimeout(()=>editing=false,500));
 
 async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})})).json();}
 let _toastT=null;
-function toast(t,type,ms){const e=$('toast');e.textContent=t;e.classList.add('show');clearTimeout(_toastT);_toastT=setTimeout(()=>e.classList.remove('show'),ms||3800);}
+function toast(t,type,ms,onClick){
+  const e=$('toast');e.textContent=t;e.classList.add('show');
+  clearTimeout(_toastT);_toastT=setTimeout(()=>e.classList.remove('show'),ms||3800);
+  e.onclick=onClick?(()=>{onClick();e.classList.remove('show');clearTimeout(_toastT);}):null;
+  e.style.cursor=onClick?'pointer':'';
+}
 
 async function approve(id){await post('/api/admin/approve',{id});tick();}
 async function reject(id){await post('/api/admin/reject',{id});tick();}
@@ -773,6 +798,7 @@ async function save(){
     free_per_window:parseInt($('freeN').value||0),free_window_min:parseInt($('freeWin').value||0),
     jump_multiplier:parseInt($('jumpMult').value||0),
     max_priority_queue_min:parseInt($('maxPrioMin').value||0),
+    max_song_duration_min:parseInt($('maxSongDurationMin').value||0),
     fallback_shuffle:$('fbShuffle').checked,
     prepaid_mode:$('prepaid').checked, min_direct_pay:parseInt($('minDirectPay').value||0),
     show_tym_brand:$('showTymBrand').checked,
@@ -947,6 +973,7 @@ async function tick(){
       $('freeN').value=s.settings.free_per_window;$('freeWin').value=s.settings.free_window_min;
       $('jumpMult').value=s.settings.jump_multiplier;
       $('maxPrioMin').value=s.settings.max_priority_queue_min||0;
+      $('maxSongDurationMin').value=s.settings.max_song_duration_min||0;
       $('fbShuffle').checked=s.settings.fallback_shuffle!==false;
       $('prepaid').checked=s.settings.prepaid_mode||false;
       $('minDirectPay').value=s.settings.min_direct_pay||700;
@@ -980,6 +1007,7 @@ async function tick(){
 
     // Anuncios
     renderAnnouncements(s.all_announcements||[]);
+    renderHistoryAnnouncements(s.all_announcements||[]);
 
     // Correos
     const subs=s.subscribers||[];$('subCount').textContent=subs.length;
@@ -1164,15 +1192,56 @@ async function tick(){
       tickify(HL);
     }else HC.style.display='none';
 
-    // Badge de alertas en el tab "En vivo"
-    const badgeN=pend.length+assists.length;
+    // Badge de alertas en el tab "En vivo": pedidos pendientes + auxilios + votación/duelo por cerrar
+    const pollClosing=!!(s.poll&&s.poll.active&&s.poll.ends_at&&(s.poll.ends_at-Date.now()/1000)<=15);
+    const dueloClosing=!!(s.duelo&&s.duelo.active&&s.duelo.ends_at&&(s.duelo.ends_at-Date.now()/1000)<=15);
+    const badgeN=pend.length+assists.length+(pollClosing?1:0)+(dueloClosing?1:0);
     const badge=$('liveBadge');
     if(badgeN>0){badge.textContent=badgeN;badge.classList.add('show');}
     else{badge.classList.remove('show');}
 
+    // Badge de alertas en el tab "Social": dedicatorias pendientes de moderación
+    const dedsPending=(s.all_dedicas||[]).filter(dd=>dd.status==='pending');
+    const socialBadge=$('socialBadge');
+    if(dedsPending.length>0){socialBadge.textContent=dedsPending.length;socialBadge.classList.add('show');}
+    else{socialBadge.classList.remove('show');}
+
     // Social tab
     renderSocialAdmin(s);
+
+    // Notificaciones unificadas clicables: avisa de cosas nuevas que requieren atención del
+    // admin y no está viendo, con un toast que lo lleva directo a la pestaña correspondiente.
+    _checkNewAlerts(pend,assists,dedsPending,pollClosing,dueloClosing);
   }catch(e){}
+}
+
+// _seenAlertIds arranca en null: en el primer tick (recién cargada la página) no se avisa de
+// nada, solo se toma como línea base — si no, al abrir el panel con pedidos ya pendientes se
+// dispararían toasts de golpe por cosas que el admin ya sabía que estaban ahí.
+let _seenAlertIds=null,_seenPollClosing=false,_seenDueloClosing=false;
+function _checkNewAlerts(pend,assists,dedsPending,pollClosing,dueloClosing){
+  const ids=new Set([
+    ...pend.map(p=>'req:'+p.id),
+    ...assists.map(a=>'ast:'+a.id),
+    ...dedsPending.map(dd=>'ded:'+dd.id),
+  ]);
+  if(_seenAlertIds===null){_seenAlertIds=ids;_seenPollClosing=pollClosing;_seenDueloClosing=dueloClosing;return;}
+  const notifyIfNew=(items,prefix,tab,label)=>{
+    const fresh=items.find(it=>!_seenAlertIds.has(prefix+it.id));
+    if(fresh&&!document.getElementById('tab-'+tab).classList.contains('active')){
+      toast(label,'',5000,()=>showTab(tab));
+    }
+  };
+  notifyIfNew(pend,'req:','live','🎵 Nuevo pedido pendiente — click para revisar');
+  notifyIfNew(assists,'ast:','live','🔔 Una mesa pidió ayuda — click para atenderla');
+  notifyIfNew(dedsPending,'ded:','social','🛡️ Mensaje por moderar — click para revisar');
+  if(pollClosing&&!_seenPollClosing&&!document.getElementById('tab-social').classList.contains('active')){
+    toast('⏱ La votación está por cerrar — click para ver el resultado','',5000,()=>showTab('social'));
+  }
+  if(dueloClosing&&!_seenDueloClosing&&!document.getElementById('tab-social').classList.contains('active')){
+    toast('⏱ El duelo está por cerrar — click para ver el resultado','',5000,()=>showTab('social'));
+  }
+  _seenAlertIds=ids;_seenPollClosing=pollClosing;_seenDueloClosing=dueloClosing;
 }
 
 function renderPkgInputs(){
@@ -1279,30 +1348,54 @@ async function loadAnalytics(days){
 // ---------- Historial de pedidos ----------
 const MODE_LABEL={normal:'🆓 Gratis',credito:'⚡ Crédito',pase:'⚡ Pase',salto:'⏫ Salto',single:'💰 Cobrado'};
 const hm3=ts=>{const d=new Date(ts*1000);return d.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short',timeZone:VENUE_TZ});};
+let _histLog=[];
 async function loadHistory(days){
   ['hbtn1','hbtn2','hbtn3'].forEach(id=>$('btn'+id.slice(4))&&$('btn'+id.slice(4)).classList.remove('active'));
   // highlight active btn
   ['hbtn1','hbtn2','hbtn3'].forEach(id=>{const b=$(id);if(b)b.classList.toggle('active',id==='hbtn'+days);});
   try{
     const d=await(await fetch('/api/admin/request_log?days='+days)).json();
-    const list=d.log||[];
-    const box=$('histList');box.innerHTML='';
-    $('histCount').textContent=list.length+' pedidos';
-    if(!list.length){box.innerHTML='<div class="empty">Sin pedidos en este período.</div>';return;}
-    list.forEach(e=>{
-      const r=document.createElement('div');r.className='row';
-      const badge=MODE_LABEL[e.mode]||e.mode;
-      const price=e.charge>0?`<span class="chip pri" style="margin-left:4px">${cop(e.charge)}</span>`:'';
-      r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${e.yt}/mqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${e.yt}/hqdefault.jpg';this.onerror=null">
-        <div class="info">
-          <div class="t">${esc(e.title)}</div>
-          <div class="a">${e.artist?esc(e.artist)+' · ':''}<b>${esc(e.table||'—')}</b> · ${hm3(e.ts)}</div>
-        </div>
-        <span class="chip" style="white-space:nowrap">${esc(badge)}</span>${price}`;
-      box.appendChild(r);
-    });
-    tickify(box);
+    _histLog=d.log||[];
+    // Filtro de mesa: se repuebla con las mesas que realmente pidieron algo en este período,
+    // preservando la selección actual si sigue siendo válida.
+    const sel=$('histTableFilter');
+    const prev=sel.value;
+    const tablesInLog=[...new Set(_histLog.map(e=>e.table).filter(Boolean))].sort();
+    sel.innerHTML='<option value="">Todas las mesas</option>'+tablesInLog.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+    sel.value=tablesInLog.includes(prev)?prev:'';
+    renderHistoryList();
   }catch(err){$('histList').innerHTML='<div class="empty">Error cargando historial.</div>';}
+}
+function renderHistoryList(){
+  const filterTable=($('histTableFilter')&&$('histTableFilter').value)||'';
+  const list=filterTable?_histLog.filter(e=>e.table===filterTable):_histLog;
+  const box=$('histList');box.innerHTML='';
+  $('histCount').textContent=list.length+' pedido'+(list.length!==1?'s':'');
+  if(!list.length){box.innerHTML='<div class="empty">Sin pedidos en este período.</div>';return;}
+  list.forEach(e=>{
+    const r=document.createElement('div');r.className='row';
+    const badge=MODE_LABEL[e.mode]||e.mode;
+    const price=e.charge>0?`<span class="chip pri" style="margin-left:4px">${cop(e.charge)}</span>`:'';
+    r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${e.yt}/mqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${e.yt}/hqdefault.jpg';this.onerror=null">
+      <div class="info">
+        <div class="t">${esc(e.title)}</div>
+        <div class="a">${e.artist?esc(e.artist)+' · ':''}<b>${esc(e.table||'—')}</b> · ${hm3(e.ts)}</div>
+      </div>
+      <span class="chip" style="white-space:nowrap">${esc(badge)}</span>${price}`;
+    box.appendChild(r);
+  });
+  tickify(box);
+}
+function renderHistoryAnnouncements(list){
+  const box=$('histAnnList');if(!box)return;
+  if(!list||!list.length){box.innerHTML='<div class="empty">Sin anuncios enviados aún.</div>';return;}
+  box.innerHTML='';
+  list.forEach(a=>{
+    const r=document.createElement('div');r.className='row';
+    r.innerHTML=`<div style="width:10px;height:10px;border-radius:50%;background:${esc(a.color)};flex-shrink:0"></div>
+      <div class="info" style="flex:1"><div class="t">${esc(a.text)}</div><div class="a">${hm3(a.created_at)}${a.active?' · ● activo':' · ○ pausado/vencido'}</div></div>`;
+    box.appendChild(r);
+  });
 }
 
 $('tymLogoFile').onchange=e=>readImg(e.target.files[0],d=>{tymLogoData=d;renderLogoPrev();});
@@ -1493,15 +1586,29 @@ function renderSocialAdmin(s){
   if(!deds.length){dbox.innerHTML='<div class="empty">Sin dedicatorias aún.</div>';return;}
   dbox.innerHTML='';
   deds.forEach(dd=>{
+    const pending=dd.status==='pending';
+    const rejected=dd.status==='rejected';
     const d=document.createElement('div');d.className='row';
+    if(pending){d.style.borderLeft='4px solid #f59e0b';d.style.paddingLeft='10px';}
     const ts=new Date(dd.ts*1000).toLocaleTimeString('es-CO',{hour:'2-digit',minute:'2-digit',timeZone:VENUE_TZ});
-    d.innerHTML=`<div class="info" style="flex:1"><div class="t" style="font-size:13px">"${esc(dd.message)}"</div><div class="a">${esc(dd.from_table)} → ${esc(dd.to_table)} · ${ts}${dd.shown_tv?' · ✓ TV':''}</div></div><button class="btn sm red" onclick="deleteDedica(${dd.id})">✕</button>`;
+    const statusTxt=pending?' · ⏳ pendiente de moderación':rejected?' · ✕ rechazada':'';
+    const reasonTxt=dd.mod_reason?` · <span style="color:var(--mut)">${esc(dd.mod_reason)}</span>`:'';
+    const actions=pending
+      ?`<button class="btn sm green" onclick="moderateDedica(${dd.id},true)">✓ Aprobar</button><button class="btn sm red" onclick="moderateDedica(${dd.id},false)">✕ Rechazar</button>`
+      :`<button class="btn sm red" onclick="deleteDedica(${dd.id})">✕</button>`;
+    d.innerHTML=`${pending?'<span class="pulse" style="background:#f59e0b"></span>':''}<div class="info" style="flex:1"><div class="t" style="font-size:13px">"${esc(dd.message)}"</div><div class="a">${esc(dd.from_table)} → ${esc(dd.to_table)} · ${ts}${dd.shown_tv?' · ✓ TV':''}${statusTxt}${reasonTxt}</div></div><div style="display:flex;gap:6px;flex-shrink:0">${actions}</div>`;
     dbox.appendChild(d);
   });
 }
 
 async function deleteDedica(id){
   await post('/api/admin/dedica/delete',{id});
+  tick();
+}
+
+async function moderateDedica(id,approve){
+  await post(approve?'/api/admin/dedica/approve':'/api/admin/dedica/reject',{id});
+  toast(approve?'Dedicatoria aprobada ✓':'Dedicatoria rechazada','ok');
   tick();
 }
 
@@ -1538,8 +1645,9 @@ async function showQrNow(){
 async function createAnnouncement(){
   const text=($('annText').value||'').trim();
   const color=$('annColor')&&$('annColor').value||'#f59e0b';
+  const duration_secs=Number(($('annDuration')&&$('annDuration').value)||120);
   if(!text){toast('Escribe el texto del anuncio','err');return;}
-  const j=await post('/api/admin/announcement',{action:'create',text,color});
+  const j=await post('/api/admin/announcement',{action:'create',text,color,duration_secs});
   if(j.ok){$('annText').value='';renderAnnouncements(j.announcements);toast('Anuncio creado ✓','ok');}
   else toast(j.error||'Error','err');
 }
@@ -1555,11 +1663,19 @@ function renderAnnouncements(list){
   const box=$('announcementList');if(!box)return;
   if(!list||!list.length){box.innerHTML='<div class="empty" style="font-size:12px">Sin anuncios. Añade uno abajo.</div>';return;}
   box.innerHTML='';
+  const now=Date.now()/1000;
   list.forEach(a=>{
     const r=document.createElement('div');
     r.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:8px 10px;border-radius:10px;background:var(--bg2);border:1px solid var(--line)';
-    r.innerHTML=`<div style="width:10px;height:10px;border-radius:50%;background:${esc(a.color)};flex-shrink:0"></div>
-      <div style="flex:1;font-size:13px;font-weight:600">${esc(a.text)}</div>
+    const remaining=a.expires_at?Math.max(0,Math.round(a.expires_at-now)):null;
+    const live=a.active&&remaining!==null&&remaining>0;
+    let remainTxt='';
+    if(remaining!==null){
+      if(live)remainTxt=` · ${Math.floor(remaining/60)}:${String(remaining%60).padStart(2,'0')} restante`;
+      else if(a.active)remainTxt=' · expirado';
+    }
+    r.innerHTML=`${live?'<span class="pulse" style="background:'+esc(a.color)+'"></span>':`<div style="width:10px;height:10px;border-radius:50%;background:${esc(a.color)};flex-shrink:0"></div>`}
+      <div style="flex:1;font-size:13px;font-weight:600">${esc(a.text)}<span class="small" style="color:var(--mut);font-weight:400">${remainTxt}</span></div>
       <button class="btn sm" style="background:${a.active?'var(--pri)':'var(--bg2)'};color:${a.active?'#fff':'var(--mut)'}" onclick="toggleAnnouncement(${a.id})">${a.active?'● Activo':'○ Pausado'}</button>
       <button class="btn red sm" onclick="deleteAnnouncement(${a.id})">✕</button>`;
     box.appendChild(r);

@@ -456,7 +456,7 @@ function spawnReact(emoji,table){
 
 // ---- Dedicatoria overlay ----
 function showDedicaOverlay(ded){
-  $('dedicaFrom').textContent='💌 De '+ded.from_table;
+  $('dedicaFrom').innerHTML='<span class="pulse"></span>💌 De '+esc(ded.from_table);
   $('dedicaMsgTv').textContent=ded.message;
   $('dedicaToTv').textContent='Para '+ded.to_table;
   const ov=$('dedicaOverlay');ov.style.display='flex';
@@ -488,7 +488,8 @@ function renderAnnouncementsTV(anns){
   if(!anns||!anns.length){el.style.display='none';clearTimeout(_annTimer);return;}
   const show=()=>{
     const a=anns[_annIdx%anns.length];
-    el.style.display='block';el.style.background=a.color||'#f59e0b';el.textContent='📢 '+a.text;
+    el.style.display='block';el.style.background=a.color||'#f59e0b';
+    el.innerHTML='<span class="pulse" style="background:#fff"></span>📢 '+esc(a.text);
     clearTimeout(_annTimer);_annTimer=setTimeout(()=>{_annIdx++;show();},8000);
   };
   if(!_annTimer||el.style.display==='none'||el.style.display==='')show();

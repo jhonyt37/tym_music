@@ -136,6 +136,9 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
 
+# Moderación IA de dedicatorias (mesa a mesa) — ver _moderate_message() más abajo.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+
 def mask_email(email):
     """Oculta la mayoría del usuario del correo pero deja el dominio visible completo,
     para que el dueño confirme a cuál dirección le llegó el correo sin exponerla entera."""
@@ -318,6 +321,7 @@ def make_venue(name):
             "jump_multiplier": 3,
             "venue_logo": "",          # logo del BAR
             "max_priority_queue_min": 0,   # bloquear nuevas prioridades si cola premium > N min (0=off)
+            "max_song_duration_min": 0,    # rechazar pedidos de canciones más largas que N min (0=off)
             "fallback_shuffle": True,       # lista del local en orden aleatorio
             "theme": "azul",               # tema de color: azul | purpura | verde | rojo | dorado | rosa
             "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
@@ -846,6 +850,53 @@ def itunes_genre(artist, title):
             del _genre_cache[k]
     return genre
 
+_MODERATE_SYSTEM = (
+    "Moderas mensajes cortos que los clientes de un bar se mandan entre mesas (dedicatorias "
+    "públicas que se muestran en una pantalla compartida). Evalúa si el mensaje es apropiado "
+    "para mostrarse en público: rechaza insultos, acoso, contenido sexual explícito, amenazas, "
+    "datos de contacto/spam o publicidad. Permite bromas, piropos normales, saludos y mensajes "
+    "de celebración. Responde solo con el JSON pedido."
+)
+
+def _moderate_message(text):
+    """Evalúa una dedicatoria con IA antes de que pueda salir en la TV compartida.
+    Fail-safe: si falta la API key, o la llamada falla/da timeout, NUNCA se aprueba
+    automáticamente — el mensaje queda pendiente de revisión manual del admin. Se llama
+    SIEMPRE antes de tomar LOCK (llamada de red bloqueante), igual que itunes_genre()."""
+    if not ANTHROPIC_API_KEY:
+        return False, "Moderación no configurada (falta ANTHROPIC_API_KEY) — revisar manualmente."
+    payload = json.dumps({
+        "model": "claude-opus-4-8",
+        "max_tokens": 200,
+        "system": _MODERATE_SYSTEM,
+        "messages": [{"role": "user", "content": text[:200]}],
+        "output_config": {"format": {"type": "json_schema", "schema": {
+            "type": "object",
+            "properties": {"approved": {"type": "boolean"}, "reason": {"type": "string"}},
+            "required": ["approved", "reason"],
+            "additionalProperties": False,
+        }}},
+    }).encode("utf-8")
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=payload, method="POST",
+                                  headers={"x-api-key": ANTHROPIC_API_KEY,
+                                           "anthropic-version": "2023-06-01",
+                                           "Content-Type": "application/json",
+                                           # User-Agent explícito: el default de urllib queda bloqueado
+                                           # por Cloudflare en varias APIs (visto con Resend esta misma
+                                           # sesión) — se pone siempre por las dudas.
+                                           "User-Agent": "TYM-Music-Server/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            resp = json.loads(r.read())
+        block = next((b for b in resp.get("content", []) if b.get("type") == "text"), None)
+        if not block:
+            return False, "Respuesta de moderación inesperada — revisar manualmente."
+        parsed = json.loads(block["text"])
+        return bool(parsed.get("approved")), str(parsed.get("reason", ""))[:200]
+    except Exception as e:
+        print("🛡️  Error moderando dedicatoria (queda pendiente):", e, flush=True)
+        return False, "No se pudo verificar el mensaje — revisar manualmente."
+
 def get_session(token):
     return STATE["sessions"].get(token) if token else None
 
@@ -886,6 +937,25 @@ def queue_view():
 
 def pending_view():
     return [i for i in STATE["items"] if i["status"] == "pending"]
+
+# ---- Anti-abuso de prioridad ----
+# Mesas impulsivas que compran prioridad/salto al #1 una y otra vez acaparan la cola y
+# aburren a las demás mesas. En vez de bloquearlas (frustra a quien sí quiere pagar más),
+# cada compra pagada (salto o prioridad de un solo uso) de la MISMA mesa dentro de la
+# última hora encarece la siguiente: 1x la primera, 2x la segunda, 3x de ahí en adelante.
+# Pase de tiempo y créditos ya prepagados no cuentan — solo compras con cobro nuevo.
+PRIORITY_ABUSE_WINDOW_SECS = 3600
+
+def priority_abuse_multiplier(table, now):
+    hist = STATE.setdefault("priority_abuse", {})
+    times = [t for t in hist.get(table, []) if now - t < PRIORITY_ABUSE_WINDOW_SECS]
+    hist[table] = times
+    n = len(times)
+    return 1 if n == 0 else (2 if n == 1 else 3)
+
+def record_priority_purchase(table, now):
+    hist = STATE.setdefault("priority_abuse", {})
+    hist.setdefault(table, []).append(now)
 
 # ---- Gate + duración dinámica para votación/duelo (llamar bajo LOCK) ----
 # El ganador siempre se marca "super" para sonar inmediatamente después de la actual (ver
@@ -1249,7 +1319,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
             pass
     dedica_pending = None
     for ded in reversed(STATE.get("dedicas", [])):
-        if not ded.get("shown_tv"):
+        if not ded.get("shown_tv") and ded.get("status") == "approved":
             dedica_pending = ded
             break
 
@@ -1347,7 +1417,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "genre", "credit_packages", "time_pass",
                                        "repeat_block_min", "repeat_block_songs", "trim_end_secs",
                                        "free_per_window", "free_window_min", "jump_multiplier",
-                                       "venue_logo", "max_priority_queue_min", "fallback_shuffle",
+                                       "venue_logo", "max_priority_queue_min", "max_song_duration_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
@@ -1355,7 +1425,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
-        "announcements": [a for a in STATE.get("announcements", []) if a.get("active")],
+        "announcements": [a for a in STATE.get("announcements", [])
+                          if a.get("active") and time.time() < a.get("expires_at", float("inf"))],
         "tables": [t["name"] for t in STATE["tables"]],
         "stations": STATE.get("stations", []),
         "now_playing": np_pub,
@@ -1765,7 +1836,8 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
                        "/api/admin/duelo", "/api/admin/duelo/close",
                        "/api/admin/announcement", "/api/admin/show_qr",
-                       "/api/admin/dedica/delete", "/api/admin/change_password", "/api/admin/update_email")
+                       "/api/admin/dedica/delete", "/api/admin/dedica/approve", "/api/admin/dedica/reject",
+                       "/api/admin/change_password", "/api/admin/update_email")
         vid = self.resolve_vid(d)
         if path in ADMIN_PATHS:
             av = self.authed_venue()
@@ -1797,6 +1869,15 @@ class H(BaseHTTPRequestHandler):
                         d = dict(d); d["_genre"] = itunes_genre(_fartist, _ftitle) or ""
                     except Exception:
                         pass
+        # Moderación IA de dedicatorias — llamada de red bloqueante, igual motivo que arriba:
+        # se resuelve ANTES del LOCK global para no congelar todos los locales mientras la IA
+        # responde (~1-2s). Solo se llama con un mensaje con forma válida; si la validación
+        # de mesa/sesión falla después dentro del lock, el resultado simplemente se descarta.
+        if path == "/api/dedica":
+            _dmsg = (d.get("message") or "").strip()
+            if _dmsg and len(_dmsg) <= 80:
+                _approved, _reason = _moderate_message(_dmsg)
+                d = dict(d); d["_mod_approved"] = _approved; d["_mod_reason"] = _reason
         with LOCK:
             self.set_venue(vid)
             # ---- Sesion de mesa ----
@@ -1933,6 +2014,10 @@ class H(BaseHTTPRequestHandler):
                 sup = bool(d.get("super"))
                 priority = bool(d.get("priority")) or sup
                 dur = _parse_len(d.get("length")) or int(d.get("duration") or 0) or DEFAULT_DUR
+                _max_dur_min = int(STATE["settings"].get("max_song_duration_min", 0) or 0)
+                if _max_dur_min > 0 and dur > _max_dur_min * 60:
+                    return self._send(400, {"error": f"Esta canción dura más de {_max_dur_min} min, el máximo permitido en este local 🎵",
+                                            "too_long": True})
                 # yt/title/artist ya vienen resueltos si el pedido fue por link (se resolvió
                 # antes de tomar el LOCK — ver do_POST, para no bloquear el servidor con I/O de red)
                 yt = d.get("yt")
@@ -1993,6 +2078,10 @@ class H(BaseHTTPRequestHandler):
                         sess["credits"] -= 1; mode = "credito"
                     else:
                         mode = "single"; charge = STATE["settings"]["price_priority"]
+                # Anti-abuso: solo compras con cobro nuevo (salto o prioridad de un solo uso)
+                # escalan de precio — pase de tiempo y créditos ya prepagados quedan igual.
+                abuse_mult = priority_abuse_multiplier(table, now) if charge > 0 else 1
+                charge = charge * abuse_mult
                 charge_via, paid_amount = None, 0
                 if charge > 0 and STATE["settings"].get("prepaid_mode"):
                     ok, via, err = try_charge_prepaid(sess, charge, ckind, title,
@@ -2001,6 +2090,8 @@ class H(BaseHTTPRequestHandler):
                     if not ok:
                         return self._send(400, err)
                     charge_via, paid_amount, charge = via, charge, 0
+                if mode in ("salto", "single"):
+                    record_priority_purchase(table, now)
                 req_msg = (d.get("message") or "").strip()[:80]
                 item = {"id": nid(), "title": title, "artist": artist, "yt": yt,
                         "token": d.get("token"), "table": table, "priority": priority,
@@ -2027,7 +2118,7 @@ class H(BaseHTTPRequestHandler):
                     STATE["jump_used_for"] = STATE["now_playing"]["id"]
                 if STATE["now_playing"] is None and item["status"] == "approved":
                     promote_next()
-                return self._send(200, {"ok": True, "mode": mode,
+                return self._send(200, {"ok": True, "mode": mode, "priority_abuse_mult": abuse_mult,
                                         "session": session_public(sess)})
 
             # ---- Reaccionar (positivo) ----
@@ -2044,9 +2135,17 @@ class H(BaseHTTPRequestHandler):
                     item_id = None
                 if emoji not in EMOJIS or item_id is None:
                     return self._send(400, {"error": "Reacción inválida"})
+                tok = d.get("token")
+                # Anti-autolike: quien pidió la canción no puede reaccionarle a la suya propia —
+                # antes sí contaba, e inflaba "my_likes_total" haciéndole creer al cliente que
+                # OTRAS personas reaccionaron cuando en realidad se dio like a sí mismo.
+                _np_r = STATE["now_playing"]
+                _react_item = next((it for it in (([_np_r] if _np_r else []) + STATE["items"] + STATE["history"])
+                                     if it["id"] == item_id), None)
+                if _react_item and _react_item.get("token") == tok:
+                    return self._send(400, {"error": "No puedes reaccionar a tu propia canción."})
                 r = STATE["reactions"].setdefault(item_id, {e: set() for e in EMOJIS})
                 rp = STATE["reaction_pub"].setdefault(item_id, {e: set() for e in EMOJIS})
-                tok = d.get("token")
                 pub = bool(d.get("public", True))
                 if tok in r[emoji]:
                     r[emoji].discard(tok)
@@ -2332,11 +2431,12 @@ class H(BaseHTTPRequestHandler):
                     s["auto_approve"] = bool(d["auto_approve"])
                 for k in ("repeat_block_min", "repeat_block_songs", "trim_end_secs",
                           "free_per_window", "free_window_min", "jump_multiplier",
-                          "max_priority_queue_min", "poll_duration_secs", "duelo_duration_secs"):
+                          "max_priority_queue_min", "max_song_duration_min",
+                          "poll_duration_secs", "duelo_duration_secs"):
                     if k in d:
                         try: s[k] = max(0, int(d[k]))
                         except Exception: pass
-                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand"):
+                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote"):
                     if k in d:
                         s[k] = bool(d[k])
                 if "min_direct_pay" in d:
@@ -2392,15 +2492,25 @@ class H(BaseHTTPRequestHandler):
                     text = str(d.get("text", "")).strip()[:200]
                     if not text:
                         return self._send(400, {"error": "Texto requerido"})
+                    try:
+                        duration_secs = max(10, min(3600, int(d.get("duration_secs") or 120)))
+                    except Exception:
+                        duration_secs = 120
+                    now = time.time()
                     ann = {"id": nid(), "text": text,
                            "color": str(d.get("color", "#f59e0b"))[:20],
-                           "created_at": time.time(), "active": True}
+                           "created_at": now, "active": True,
+                           "duration_secs": duration_secs, "expires_at": now + duration_secs}
                     STATE.setdefault("announcements", []).append(ann)
                 elif act == "toggle":
                     aid = d.get("id")
                     for a in STATE.get("announcements", []):
                         if a["id"] == aid:
                             a["active"] = not a.get("active", True)
+                            if a["active"]:
+                                # Reactivar (ej. tras expirar) refresca el tiempo restante en
+                                # vez de mostrarlo ya vencido de nuevo.
+                                a["expires_at"] = time.time() + a.get("duration_secs", 120)
                 elif act == "delete":
                     aid = d.get("id")
                     STATE["announcements"] = [a for a in STATE.get("announcements", [])
@@ -2556,6 +2666,7 @@ class H(BaseHTTPRequestHandler):
                 STATE["announcements"] = []
                 STATE["vibe_votes"] = {}
                 STATE["skip_votes"] = set()
+                STATE["priority_abuse"] = {}
                 _id[0] = 0
                 FB_IDX[0] = 0
                 return self._send(200, {"ok": True})
@@ -2578,8 +2689,11 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "El mensaje no puede estar vacío."})
                 if len(message) > 80:
                     return self._send(400, {"error": "El mensaje no puede tener más de 80 caracteres."})
+                mod_approved = bool(d.get("_mod_approved"))
+                mod_reason = str(d.get("_mod_reason") or "")
                 ded = {"id": nid(), "from_table": sess["table"], "to_table": to_table,
-                       "message": message, "ts": time.time(), "shown_tv": False}
+                       "message": message, "ts": time.time(), "shown_tv": False,
+                       "status": "approved" if mod_approved else "pending", "mod_reason": mod_reason}
                 STATE.setdefault("dedicas", []).append(ded)
                 if len(STATE["dedicas"]) > 50:
                     STATE["dedicas"] = STATE["dedicas"][-50:]
@@ -2830,6 +2944,18 @@ class H(BaseHTTPRequestHandler):
                 if ded_id is None:
                     return self._send(400, {"error": "Falta el id."})
                 STATE["dedicas"] = [dd for dd in STATE.get("dedicas", []) if dd["id"] != ded_id]
+                return self._send(200, {"ok": True})
+
+            # ---- Admin: aprobar/rechazar dedicatoria pendiente de moderación ----
+            if path in ("/api/admin/dedica/approve", "/api/admin/dedica/reject"):
+                ded_id = d.get("id")
+                if ded_id is None:
+                    return self._send(400, {"error": "Falta el id."})
+                new_status = "approved" if path.endswith("approve") else "rejected"
+                for dd in STATE.get("dedicas", []):
+                    if dd["id"] == ded_id:
+                        dd["status"] = new_status
+                        break
                 return self._send(200, {"ok": True})
 
         # ---- TYM Master: resetear la contraseña del dueño de un local ----

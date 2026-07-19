@@ -579,13 +579,18 @@ async function enterPin(){
   const r=await fetch('/api/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin,v:VENUE})});
   const j=await r.json();
   if(j.ok){
-    token=j.token;localStorage.setItem('tym_token_'+VENUE,token);sess=j.session;
+    // token/sess NO se guardan todavía si hay una cuenta pendiente — se confirman solo si
+    // el cliente elige "Soy yo, continuar". Antes se guardaban de una, así que si la persona
+    // refrescaba la página mientras el modal seguía abierto (sin haber elegido nada), el
+    // siguiente load encontraba el token ya en localStorage y la metía directo a la cuenta
+    // de la mesa sin haber confirmado nada — bug reportado en vivo.
+    const enter=()=>{token=j.token;localStorage.setItem('tym_token_'+VENUE,token);sess=j.session;$('gate').style.display='none';poll();};
     if((j.existing_tab||0)>0){
       confirmModal('⚠ Cuenta pendiente en esta mesa',
-        'Esta mesa tiene una cuenta activa de <b>'+cop(j.existing_tab)+'</b> de un cliente anterior.<br><br>Si eres el mismo cliente, continúa. Si no, pide al personal que cierre la cuenta antes.',
-        ()=>{$('gate').style.display='none';poll();},
-        {noLabel:'Llamar asistencia',noCb:()=>{doAssist();$('gate').style.display='none';poll();},yesLabel:'Soy yo, continuar'});
-    }else{$('gate').style.display='none';poll();}
+        'Esta mesa tiene una cuenta activa de <b>'+cop(j.existing_tab)+'</b> de un cliente anterior.<br><br>Si eres el mismo cliente, continúa. Si no, cancela e intenta con otro código, o pide al personal que cierre la cuenta.',
+        enter,
+        {noLabel:'Cancelar',noCb:()=>{$('pinInput').value='';},yesLabel:'Soy yo, continuar'});
+    }else enter();
   }else{$('pinErr').textContent=j.error||'Código incorrecto';}
 }
 
@@ -812,6 +817,7 @@ async function doReq(payMethod){
       showReqFlash(mode==='super'?'⏫':(mode==='pri'?'⚡':'🎶'),
         mode==='super'?'¡Al frente!':(mode==='pri'?'¡Con prioridad!':'¡Pedida!'),
         chosen.title);
+      if(j.priority_abuse_mult>1)toast('💸 Cobrando x'+j.priority_abuse_mult+' por pedidos de prioridad seguidos','warn',4500);
       // Mantiene la búsqueda/lista visible (no la resetea) para poder seguir pidiendo
       // más canciones del mismo artista/búsqueda sin tener que escribir de nuevo.
       if(chosen.yt)_queueYts.add(chosen.yt);

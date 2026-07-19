@@ -76,6 +76,18 @@ que sí permitan SMTP saliente (o para correr en local).**
    correo a...` indica credenciales/SMTP mal configurados o el host bloqueando SMTP saliente; el
    mensaje `[correo simulado]` indica que ninguna variable está puesta).
 
+## Moderación IA de dedicatorias (mesa a mesa)
+Los mensajes que los clientes se mandan entre mesas (dedicatorias, se muestran en `/tv`) pasan
+primero por Claude (Anthropic) para detectar contenido ofensivo/spam antes de salir en la pantalla
+compartida del bar. **Sin `ANTHROPIC_API_KEY` configurada, todo mensaje queda pendiente de
+aprobación manual del admin** — nunca se auto-aprueba por falta de moderación (fail-safe), así
+que el sistema sigue funcionando sin la key, solo que el admin tiene que aprobar cada mensaje a mano.
+
+1. Crea/usa una API key de Anthropic en https://console.anthropic.com.
+2. En Render → Settings → Environment, agrega `ANTHROPIC_API_KEY` = tu API key.
+3. Redeploy. Con la key presente, los mensajes apropiados se aprueban solos (~1-2s de latencia
+   por mensaje) y solo los dudosos quedan pendientes de revisión en el panel admin (pestaña Social).
+
 ## Para producción (pendiente)
 - Formalizar la **fuente de música** (catálogo licenciado para uso comercial) + Sayco-Acinpro.
 - Mover el estado a base de datos (multi-bar).

@@ -357,6 +357,9 @@ class TestReactions(TYMTestCase):
         # Add a song and advance it to now_playing
         self._request_song(self.token, yt="reactSong00", title="React Song")
         self._post("/api/advance", {}, self.admin_cookie)
+        # Reacciones vienen de OTRA mesa: reaccionar a tu propia canción está bloqueado
+        # (anti-autolike) para que "a otros les gusta tu música" sea siempre cierto.
+        self.reactor_token = self._make_session("Mesa 2", "2222")
 
     def _react(self, emoji="❤️", public=True):
         s = self._state()
@@ -364,7 +367,7 @@ class TestReactions(TYMTestCase):
         if not np:
             return None, 400
         return self._post("/api/react",
-            {"token": self.token, "emoji": emoji, "id": np["id"], "public": public})
+            {"token": self.reactor_token, "emoji": emoji, "id": np["id"], "public": public})
 
     def test_react_increments_count(self):
         self._react("❤️")
