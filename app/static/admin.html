@@ -477,6 +477,17 @@
 <div id="tab-caja" class="tabpanel">
   <div class="wrap wide">
 
+    <!-- Enfocar mesa: filtra cobros/movimientos/cuentas/pedidos de esta pestaña a una sola
+         mesa, y muestra su consumo total (turno actual + cuentas cerradas). También se puede
+         clickear cualquier mesa en las listas de abajo para enfocarla directo. -->
+    <div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="small" style="color:var(--mut)">🔍 Enfocar mesa</span>
+      <select class="field" id="cajaMesaFilter" style="margin:0;width:170px;padding:6px 8px" onchange="_cajaMesaFilter=this.value;syncCajaMesaFilter();tick()">
+        <option value="">Todas las mesas</option>
+      </select>
+      <span class="small" id="cajaMesaFilterHint" style="color:var(--mut)"></span>
+    </div>
+
     <!-- Turno actual -->
     <p class="sec" style="margin-bottom:10px">🧾 Turno actual</p>
     <div class="grid2" style="align-items:start;margin-bottom:14px">
@@ -699,7 +710,42 @@ function tickify(parent){
 }
 let editing=false, formLoaded=false, curTimer=null, packages=[], pass_obj={minutes:30,price:5000}, curTheme='azul';
 let _liveMesaFilter='';
+let _cajaMesaFilter='';
+let _byTCache={},_acctsCache=[];
 let VENUE_TZ='America/Bogota';
+// El filtro "Enfocar mesa" de Caja también maneja el filtro de mesa de la sección Pedidos
+// (histTableFilter) para que toda la pestaña quede consistente con una sola selección.
+function syncCajaMesaFilter(){
+  const htf=$('histTableFilter');
+  if(htf&&[...htf.options].some(o=>o.value===_cajaMesaFilter)){htf.value=_cajaMesaFilter;renderHistoryList();}
+  renderAcctsList();
+}
+// Resumen de consumo: turno actual (ledger de hoy, en memoria) + cuentas ya cerradas de esa
+// mesa (histórico, viene de /api/admin/analytics) — dos fuentes distintas, se combinan aquí
+// para que el admin vea "cuánto ha dejado esta mesa en total" sin tener que sumar a mano.
+function updateCajaMesaHint(){
+  const hintEl=$('cajaMesaFilterHint');if(!hintEl)return;
+  if(!_cajaMesaFilter){hintEl.textContent='';return;}
+  const turno=_byTCache[_cajaMesaFilter]||0;
+  const closed=_acctsCache.filter(a=>a.table===_cajaMesaFilter);
+  const closedTotal=closed.reduce((s,a)=>s+(a.total||0),0);
+  hintEl.textContent='💰 Turno actual: '+cop(turno)+(closed.length?' · Cuentas cerradas ('+closed.length+'): '+cop(closedTotal):' · Sin cuentas cerradas en el período mostrado');
+}
+function renderAcctsList(){
+  const abox=$('analAccts');if(!abox)return;
+  const hm2=ts=>{if(!ts)return '—';const dt=new Date(ts*1000);return dt.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit',timeZone:VENUE_TZ});};
+  const cop2=n=>'$'+(n||0).toLocaleString('es-CO');
+  const list=_cajaMesaFilter?_acctsCache.filter(a=>a.table===_cajaMesaFilter):_acctsCache;
+  abox.innerHTML='';
+  if(!list.length){abox.innerHTML='<div class="empty">'+(_cajaMesaFilter?esc(_cajaMesaFilter)+' no tiene cuentas cerradas en este período.':'Sin cuentas aún.')+'</div>';}
+  else list.forEach(a=>{
+    const r=document.createElement('div');r.className='row';r.style.cursor='pointer';r.title='Ver el consumo de '+a.table;
+    r.innerHTML=`<div class="info"><div class="t">${esc(a.table)}</div><div class="a">Abrió ${hm2(a.opened_at)} · Cerró ${hm2(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop2(a.total)}</div>`;
+    r.onclick=()=>{_cajaMesaFilter=a.table;syncCajaMesaFilter();tick();};
+    abox.appendChild(r);
+  });
+  updateCajaMesaHint();
+}
 
 function showTab(id){
   document.querySelectorAll('.tabpanel').forEach(p=>p.classList.remove('active'));
@@ -1153,6 +1199,18 @@ async function tick(){
       if(hintEl)hintEl.textContent=_liveMesaFilter?'Mostrando pendientes de '+_liveMesaFilter+' · la cola se atenúa para las demás':'';
     }
 
+    // Enfocar mesa (Caja): repuebla el select con las mesas del local, preservando la
+    // selección, y filtra cobros del turno + movimientos + cuentas recientes a esa mesa.
+    const cmf=$('cajaMesaFilter');
+    if(cmf){
+      const tbls=s.tables||[];
+      if(cmf.dataset.count!=tbls.length){
+        cmf.innerHTML='<option value="">Todas las mesas</option>'+tbls.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+        cmf.dataset.count=tbls.length;
+      }
+      cmf.value=_cajaMesaFilter;
+    }
+
     // Ledger / cobros
     const bt=$('byTable'),L=$('ledger');
     if(s.settings.prepaid_mode){
@@ -1161,19 +1219,25 @@ async function tick(){
       L.innerHTML='<div class="empty">Este local usa saldo prepago — revisa "Informes del local" para ver ingresos.</div>';
     }else{
       $('total').textContent=cop(s.ledger_total);
-      const byT={};(s.ledger||[]).forEach(l=>{byT[l.table]=(byT[l.table]||0)+l.amount;});
+      _byTCache={};(s.ledger||[]).forEach(l=>{_byTCache[l.table]=(_byTCache[l.table]||0)+l.amount;});
       bt.innerHTML='';
-      Object.entries(byT).forEach(([t,v])=>{
-        const d=document.createElement('div');d.className='grp';
+      const byTRows=Object.entries(_byTCache).filter(([t])=>!_cajaMesaFilter||t===_cajaMesaFilter);
+      if(!byTRows.length)bt.innerHTML='<div class="empty">'+(_cajaMesaFilter?esc(_cajaMesaFilter)+' no tiene cobros este turno.':'Sin cobros aún.')+'</div>';
+      byTRows.forEach(([t,v])=>{
+        const d=document.createElement('div');d.className='grp';d.style.cursor='pointer';
+        d.title='Ver el consumo de '+t;
         d.innerHTML=`<span style="flex:1">${esc(t)}</span><span class="price" style="color:var(--gold)">${cop(v)}</span>`;
+        d.onclick=()=>{_cajaMesaFilter=t;syncCajaMesaFilter();tick();};
         const b=document.createElement('button');b.className='btn red sm';b.textContent='Cerrar cuenta';b.style.marginLeft='10px';
-        b.onclick=()=>closeTable(t,v);d.appendChild(b);bt.appendChild(d);
+        b.onclick=(ev)=>{ev.stopPropagation();closeTable(t,v);};d.appendChild(b);bt.appendChild(d);
       });
-      const lg=s.ledger||[];
-      if(!lg.length)L.innerHTML='<div class="empty">Sin cobros aún.</div>';
+      const lg=(s.ledger||[]).filter(x=>!_cajaMesaFilter||x.table===_cajaMesaFilter);
+      if(!lg.length)L.innerHTML='<div class="empty">'+(_cajaMesaFilter?esc(_cajaMesaFilter)+' no tiene movimientos este turno.':'Sin cobros aún.')+'</div>';
       else{L.innerHTML='';lg.forEach(x=>{const r=document.createElement('div');r.className='row';
         r.innerHTML=`<div class="info"><div class="t">${esc(x.table)} · <span class="small">${esc(x.kind)}</span></div><div class="a">${esc(x.title)}${x.ts?' · '+hm3(x.ts):''}</div></div><div class="chip pri">${cop(x.amount)}</div>`;
         L.appendChild(r);});}
+
+      updateCajaMesaHint();
     }
 
     // Pendientes de aprobación
@@ -1421,14 +1485,8 @@ async function loadAnalytics(days){
     });
     tickify(sbox);
     // Cuentas recientes
-    const abox=$('analAccts');const accts=d.cuentas_recientes||[];abox.innerHTML='';
-    const hm2=ts=>{if(!ts)return '—';const dt=new Date(ts*1000);return dt.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit',timeZone:VENUE_TZ});};
-    if(!accts.length)abox.innerHTML='<div class="empty">Sin cuentas aún.</div>';
-    accts.forEach(a=>{
-      const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<div class="info"><div class="t">${esc(a.table)}</div><div class="a">Abrió ${hm2(a.opened_at)} · Cerró ${hm2(a.closed_at)} · ${a.orders_free}🆓 ${a.orders_premium}⭐</div></div><div class="chip pri">${cop2(a.total)}</div>`;
-      abox.appendChild(r);
-    });
+    _acctsCache=d.cuentas_recientes||[];
+    renderAcctsList();
     // ---- Dashboard transaccional de hoy ----
     const tbox=$('tonightKpis');if(tbox){
       tbox.innerHTML='';
