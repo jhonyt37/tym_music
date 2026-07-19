@@ -322,6 +322,7 @@ def make_venue(name):
             "venue_logo": "",          # logo del BAR
             "max_priority_queue_min": 0,   # bloquear nuevas prioridades si cola premium > N min (0=off)
             "max_song_duration_min": 0,    # rechazar pedidos de canciones más largas que N min (0=off)
+            "music_only": False,           # rechazar pedidos que la IA clasifique como no-música
             "fallback_shuffle": True,       # lista del local en orden aleatorio
             "theme": "azul",               # tema de color: azul | purpura | verde | rojo | dorado | rosa
             "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
@@ -897,6 +898,64 @@ def _moderate_message(text):
         print("🛡️  Error moderando dedicatoria (queda pendiente):", e, flush=True)
         return False, "No se pudo verificar el mensaje — revisar manualmente."
 
+# ---- "Solo música": clasificación IA opcional (settings.music_only) para /api/request ----
+_MUSIC_CACHE = {}
+_MUSIC_CACHE_TTL = 7 * 24 * 3600  # la clasificación de un video no cambia — cache global de 1 semana
+
+_IS_MUSIC_SYSTEM = (
+    "Evalúas si un video de YouTube pedido para la cola de música de un bar es una canción "
+    "real (audio musical: canción, remix, versión en vivo, DJ set, instrumental). Responde "
+    "false para podcasts, tutoriales, vlogs, noticias, gameplay, comedia, ASMR, contenido "
+    "infantil no musical, o cualquier cosa que no sea principalmente música para escuchar o "
+    "bailar. Responde solo con el JSON pedido."
+)
+
+def is_music_content(yt, title, artist):
+    """Clasifica con IA si un video pedido es realmente música — solo se llama cuando el local
+    activó settings.music_only. Fail-open: sin ANTHROPIC_API_KEY, o si la llamada falla, se
+    PERMITE el pedido — bloquear TODOS los pedidos por una caída de la IA sería mucho peor
+    que dejar pasar ocasionalmente algo que no es música (a diferencia de la moderación de
+    dedicatorias, aquí un falso negativo no sale en una pantalla compartida sin revisar).
+    Cache global por yt id (no por local): el mismo video es la misma clasificación en
+    cualquier bar, así que se paga la llamada una sola vez por canción en todo el sistema."""
+    if not ANTHROPIC_API_KEY:
+        return True
+    now = time.time()
+    hit = _MUSIC_CACHE.get(yt)
+    if hit and now - hit[0] < _MUSIC_CACHE_TTL:
+        return hit[1]
+    payload = json.dumps({
+        "model": "claude-opus-4-8",
+        "max_tokens": 150,
+        "system": _IS_MUSIC_SYSTEM,
+        "messages": [{"role": "user", "content": f"Título: {title}\nArtista/canal: {artist or '(desconocido)'}"}],
+        "output_config": {"format": {"type": "json_schema", "schema": {
+            "type": "object",
+            "properties": {"is_music": {"type": "boolean"}, "reason": {"type": "string"}},
+            "required": ["is_music", "reason"],
+            "additionalProperties": False,
+        }}},
+    }).encode("utf-8")
+    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=payload, method="POST",
+                                  headers={"x-api-key": ANTHROPIC_API_KEY,
+                                           "anthropic-version": "2023-06-01",
+                                           "Content-Type": "application/json",
+                                           "User-Agent": "TYM-Music-Server/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as r:
+            resp = json.loads(r.read())
+        block = next((b for b in resp.get("content", []) if b.get("type") == "text"), None)
+        result = bool(json.loads(block["text"]).get("is_music", True)) if block else True
+    except Exception as e:
+        print("🎵 Error clasificando si es música (se permite el pedido):", e, flush=True)
+        result = True
+    _MUSIC_CACHE[yt] = (now, result)
+    if len(_MUSIC_CACHE) > 5000:
+        stale = [k for k, v in _MUSIC_CACHE.items() if now - v[0] > _MUSIC_CACHE_TTL]
+        for k in stale:
+            del _MUSIC_CACHE[k]
+    return result
+
 def get_session(token):
     return STATE["sessions"].get(token) if token else None
 
@@ -1421,7 +1480,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
-                                       "show_tym_brand")},
+                                       "show_tym_brand", "music_only")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
@@ -1687,7 +1746,18 @@ class H(BaseHTTPRequestHandler):
                 return self._send(401, {"error": "no auth"})
             with LOCK:
                 self.set_venue(av)
-                return self._send(200, STATE["tables"])
+                # Mismo dato que ve el cliente al entrar el PIN ("cuenta pendiente en esta
+                # mesa") — se expone aquí también para que el admin lo vea sin depender de que
+                # el cliente se lo cuente. active_now: alguien con sesión viva en esa mesa
+                # ahora mismo (mismo criterio de "activo" que active_persons_count()).
+                now = time.time()
+                out = []
+                for t in STATE["tables"]:
+                    tab_total = sum(l["amount"] for l in STATE["ledger"] if l["table"] == t["name"])
+                    active_now = any(se.get("table") == t["name"] and now - se.get("created", 0) < 7200
+                                     for se in STATE.get("sessions", {}).values())
+                    out.append({**t, "tab_total": tab_total, "active_now": active_now})
+                return self._send(200, out)
         if path == "/api/admin/analytics":
             av = self.authed_venue()
             if not av or av not in VENUES:
@@ -1869,6 +1939,19 @@ class H(BaseHTTPRequestHandler):
                         d = dict(d); d["_genre"] = itunes_genre(_fartist, _ftitle) or ""
                     except Exception:
                         pass
+        # "Solo música" (settings.music_only, opt-in por local): clasificación IA de si el video
+        # pedido es realmente una canción — misma razón para resolverla ANTES del LOCK (llamada
+        # de red bloqueante). Solo se llama si el local activó el ajuste, para no pagar latencia
+        # ni costo de IA en cada pedido de locales que no lo quieren.
+        if path == "/api/request":
+            _mv = VENUES.get(vid)
+            if _mv and _mv["settings"].get("music_only"):
+                _myt, _mtitle = d.get("yt") or "", d.get("title") or ""
+                if _myt and _mtitle:
+                    try:
+                        d = dict(d); d["_is_music"] = is_music_content(_myt, _mtitle, d.get("artist") or "")
+                    except Exception:
+                        pass
         # Moderación IA de dedicatorias — llamada de red bloqueante, igual motivo que arriba:
         # se resuelve ANTES del LOCK global para no congelar todos los locales mientras la IA
         # responde (~1-2s). Solo se llama con un mensaje con forma válida; si la validación
@@ -2026,6 +2109,13 @@ class H(BaseHTTPRequestHandler):
                 title = str(d.get("title") or "Canción")[:200]
                 artist = str(d.get("artist") or "")[:120]
                 now = time.time()
+                # "Solo música" (settings.music_only): rechaza si la IA clasificó el video como
+                # no-música (resuelto antes del LOCK arriba). d.get("_is_music") es None si el
+                # ajuste está apagado o la clasificación no se pudo resolver — solo se rechaza
+                # con un False explícito, nunca por ausencia del campo (fail-open).
+                if STATE["settings"].get("music_only") and d.get("_is_music") is False:
+                    return self._send(400, {"error": "Esto no parece ser una canción — este local solo permite música 🎵",
+                                            "not_music": True})
                 # Filtro de contenido: palabras bloqueadas / permitidas — compara contra
                 # título+artista+género real (resuelto antes del LOCK arriba, ver "_genre"),
                 # con alias para términos coloquiales que no coinciden con la etiqueta de
@@ -2454,7 +2544,7 @@ class H(BaseHTTPRequestHandler):
                     if k in d:
                         try: s[k] = max(0, int(d[k]))
                         except Exception: pass
-                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote"):
+                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote", "music_only"):
                     if k in d:
                         s[k] = bool(d[k])
                 if "min_direct_pay" in d:

@@ -88,6 +88,12 @@ que el sistema sigue funcionando sin la key, solo que el admin tiene que aprobar
 3. Redeploy. Con la key presente, los mensajes apropiados se aprueban solos (~1-2s de latencia
    por mensaje) y solo los dudosos quedan pendientes de revisión en el panel admin (pestaña Social).
 
+La misma `ANTHROPIC_API_KEY` también habilita el ajuste opcional **"Solo música (IA)"**
+(Ajustes → Filtro de contenido): rechaza pedidos que no parezcan una canción real (podcasts,
+tutoriales, gameplay, etc). Es opt-in por local (apagado por defecto) y **fail-open**: si falta
+la key o la llamada a la IA falla, el pedido se deja pasar igual — nunca se bloquea la cola
+completa por una caída de la IA.
+
 ## Para producción (pendiente)
 - Formalizar la **fuente de música** (catálogo licenciado para uso comercial) + Sayco-Acinpro.
 - Mover el estado a base de datos (multi-bar).

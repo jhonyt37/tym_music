@@ -313,6 +313,11 @@
         <div class="secBody">
       <div class="small" style="margin-bottom:10px">Controla qué canciones pueden pedir los clientes según el título, artista o género real de la canción (ej. "reggaeton" ahora sí bloquea canciones de ese género aunque la palabra no aparezca en el título).</div>
 
+      <label class="opt" style="margin-bottom:14px">
+        <div><b>Solo música (IA) 🎵</b><div class="small">Rechaza pedidos que no parezcan una canción real (podcasts, tutoriales, gameplay, etc). Requiere ANTHROPIC_API_KEY configurada en el servidor — sin eso, se deja pasar todo igual.</div></div>
+        <input type="checkbox" id="musicOnly" style="width:22px;height:22px">
+      </label>
+
       <label class="small" style="display:block;margin-bottom:4px">🚫 Palabras BLOQUEADAS (ej: metal, trap, reggaetón)</label>
       <div style="display:flex;gap:6px;margin-bottom:6px">
         <input class="field" id="blockedInput" placeholder="Agregar palabra..." style="margin:0;flex:1" onkeydown="if(event.key==='Enter'){addKeyword('blocked');event.preventDefault()}">
@@ -809,6 +814,7 @@ async function save(){
     credit_packages:readPackages(),
     time_pass:{minutes:parseInt($('passMin').value||30),price:parseInt($('passPrice').value||0)},
     allow_skip_vote:$('allowSkipVote').checked,
+    music_only:$('musicOnly').checked,
     poll_duration_secs:parseInt($('pollDurationSecs').value||120),
     duelo_duration_secs:parseInt($('dueloDurationSecs').value||60),
     schedule:_schedule};
@@ -833,9 +839,21 @@ async function loadTables(){
   const t=await (await fetch('/api/admin/tables')).json();
   const box=$('tables');box.innerHTML='';
   t.forEach(m=>{
-    const r=document.createElement('div');r.className='pinrow';
+    const r=document.createElement('div');r.className='pinrow';r.style.cssText='flex-wrap:wrap;row-gap:8px';
     const blocked=!!m.msg_blocked;
-    r.innerHTML=`<div class="name">${esc(m.name)}${blocked?' <span style="color:var(--red);font-size:11px;font-weight:700">🚫 mensajes bloqueados</span>':''}</div><div class="pin">${esc(m.pin)}</div>`;
+    const hasTab=(m.tab_total||0)>0;
+    const statusBits=[
+      blocked?'<span style="color:var(--red)">🚫 mensajes bloqueados</span>':'',
+      m.active_now?'<span style="color:var(--green)">🟢 activa ahora</span>':'',
+      hasTab?`<span style="color:var(--gold);display:inline-flex;align-items:center"><span class="pulse" style="background:var(--gold)"></span>💳 debe ${cop(m.tab_total)}</span>`:'',
+    ].filter(Boolean);
+    const statusHtml=statusBits.length?`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;font-size:11px;font-weight:700">${statusBits.join('')}</div>`:'';
+    r.innerHTML=`<div class="name">${esc(m.name)}${statusHtml}</div><div class="pin">${esc(m.pin)}</div>`;
+    if(hasTab){
+      const cb=document.createElement('button');cb.className='btn sm';cb.style.cssText='background:var(--gold);color:#1a1408';cb.textContent='💳 Cerrar cuenta';
+      cb.onclick=()=>closeTable(m.name,m.tab_total);
+      r.appendChild(cb);
+    }
     const mb=document.createElement('button');mb.className='btn sm';mb.textContent=blocked?'🔊':'🔇';
     mb.title=blocked?'Reactivar mensajes/dedicatorias de esta mesa':'Bloquear mensajes/dedicatorias de esta mesa';
     mb.onclick=async()=>{await post('/api/admin/tables',{action:'toggle_msg_block',name:m.name});loadTables();};
@@ -980,6 +998,7 @@ async function tick(){
       $('showTymBrand').checked=s.settings.show_tym_brand||false;
       $('ownerEmail').value=s.owner_email||'';
       if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;
+      if($('musicOnly'))$('musicOnly').checked=!!s.settings.music_only;
       if($('pollDurationSecs'))$('pollDurationSecs').value=s.settings.poll_duration_secs||120;
       if($('dueloDurationSecs'))$('dueloDurationSecs').value=s.settings.duelo_duration_secs||60;
       _schedule=Array.isArray(s.settings.schedule)?JSON.parse(JSON.stringify(s.settings.schedule)):[];
