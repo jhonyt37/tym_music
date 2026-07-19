@@ -77,16 +77,20 @@ que sí permitan SMTP saliente (o para correr en local).**
    mensaje `[correo simulado]` indica que ninguna variable está puesta).
 
 ## Moderación IA de dedicatorias (mesa a mesa)
-Los mensajes que los clientes se mandan entre mesas (dedicatorias, se muestran en `/tv`) pasan
-primero por Claude (Anthropic) para detectar contenido ofensivo/spam antes de salir en la pantalla
-compartida del bar. **Sin `ANTHROPIC_API_KEY` configurada, todo mensaje queda pendiente de
-aprobación manual del admin** — nunca se auto-aprueba por falta de moderación (fail-safe), así
-que el sistema sigue funcionando sin la key, solo que el admin tiene que aprobar cada mensaje a mano.
+Los mensajes que los clientes se mandan entre mesas (dedicatorias, se muestran en `/tv`) pueden
+pasar primero por Claude (Anthropic) para detectar contenido ofensivo/spam antes de salir en la
+pantalla compartida del bar. **Es opt-in por local — apagado por defecto** (Panel → Social →
+"Moderar con IA antes de mostrar en TV"): con el ajuste apagado los mensajes salen directo en TV
+sin revisión (igual que siempre). Si lo activas SIN `ANTHROPIC_API_KEY` configurada, todo mensaje
+queda pendiente de aprobación manual para siempre y nunca sale en TV — por eso el ajuste viene
+apagado por defecto (bug real: un local activó moderación sin la key y ningún mensaje volvió a
+aparecer en TV).
 
 1. Crea/usa una API key de Anthropic en https://console.anthropic.com.
 2. En Render → Settings → Environment, agrega `ANTHROPIC_API_KEY` = tu API key.
-3. Redeploy. Con la key presente, los mensajes apropiados se aprueban solos (~1-2s de latencia
-   por mensaje) y solo los dudosos quedan pendientes de revisión en el panel admin (pestaña Social).
+3. Activa el ajuste en el panel (Social → checkbox de moderación). Con la key presente, los
+   mensajes apropiados se aprueban solos (~1-2s de latencia por mensaje) y solo los dudosos
+   quedan pendientes de revisión ahí mismo.
 
 La misma `ANTHROPIC_API_KEY` también habilita el ajuste opcional **"Solo música (IA)"**
 (Ajustes → Filtro de contenido): rechaza pedidos que no parezcan una canción real (podcasts,

@@ -579,6 +579,10 @@
     <div class="card">
       <p class="sec">💌 Dedicatorias</p>
       <div class="small" style="color:var(--mut);margin-bottom:10px">Mensajes enviados entre mesas. Puedes eliminar los inapropiados.</div>
+      <label class="opt" style="margin-bottom:14px">
+        <div><b>Moderar con IA antes de mostrar en TV</b><div class="small">Si está apagado, los mensajes salen directo en TV sin revisión (como antes). Si lo activas, cada mensaje pasa primero por IA y los dudosos quedan pendientes de tu aprobación aquí abajo — <b>requiere ANTHROPIC_API_KEY configurada en el servidor</b>, si no, todo queda pendiente para siempre y nada sale en TV.</div></div>
+        <input type="checkbox" id="dedicaModeration" style="width:22px;height:22px" onchange="post('/api/admin/settings',{dedica_moderation:$('dedicaModeration').checked}).then(()=>toast('Guardado','ok'))">
+      </label>
       <div id="dedicaAdminList"><div class="empty">Sin dedicatorias aún.</div></div>
     </div>
 
@@ -999,6 +1003,7 @@ async function tick(){
       $('ownerEmail').value=s.owner_email||'';
       if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;
       if($('musicOnly'))$('musicOnly').checked=!!s.settings.music_only;
+      if($('dedicaModeration'))$('dedicaModeration').checked=!!s.settings.dedica_moderation;
       if($('pollDurationSecs'))$('pollDurationSecs').value=s.settings.poll_duration_secs||120;
       if($('dueloDurationSecs'))$('dueloDurationSecs').value=s.settings.duelo_duration_secs||60;
       _schedule=Array.isArray(s.settings.schedule)?JSON.parse(JSON.stringify(s.settings.schedule)):[];

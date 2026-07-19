@@ -323,6 +323,7 @@ def make_venue(name):
             "max_priority_queue_min": 0,   # bloquear nuevas prioridades si cola premium > N min (0=off)
             "max_song_duration_min": 0,    # rechazar pedidos de canciones más largas que N min (0=off)
             "music_only": False,           # rechazar pedidos que la IA clasifique como no-música
+            "dedica_moderation": False,    # moderar dedicatorias con IA antes de mostrarlas en TV (off=pasan directo)
             "fallback_shuffle": True,       # lista del local en orden aleatorio
             "theme": "azul",               # tema de color: azul | purpura | verde | rojo | dorado | rosa
             "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
@@ -1480,7 +1481,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
-                                       "show_tym_brand", "music_only")},
+                                       "show_tym_brand", "music_only", "dedica_moderation")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
@@ -1952,15 +1953,19 @@ class H(BaseHTTPRequestHandler):
                         d = dict(d); d["_is_music"] = is_music_content(_myt, _mtitle, d.get("artist") or "")
                     except Exception:
                         pass
-        # Moderación IA de dedicatorias — llamada de red bloqueante, igual motivo que arriba:
-        # se resuelve ANTES del LOCK global para no congelar todos los locales mientras la IA
-        # responde (~1-2s). Solo se llama con un mensaje con forma válida; si la validación
-        # de mesa/sesión falla después dentro del lock, el resultado simplemente se descarta.
+        # Moderación IA de dedicatorias — opt-in por local (settings.dedica_moderation, apagado
+        # por defecto). Llamada de red bloqueante, igual motivo que arriba: se resuelve ANTES
+        # del LOCK global para no congelar todos los locales mientras la IA responde (~1-2s).
+        # Con el ajuste apagado, los mensajes pasan directo (comportamiento original) — sin esto
+        # un local sin ANTHROPIC_API_KEY configurada veía TODAS sus dedicatorias atascadas en
+        # "pendiente" para siempre, sin salir nunca en /tv (bug reportado en vivo).
         if path == "/api/dedica":
-            _dmsg = (d.get("message") or "").strip()
-            if _dmsg and len(_dmsg) <= 80:
-                _approved, _reason = _moderate_message(_dmsg)
-                d = dict(d); d["_mod_approved"] = _approved; d["_mod_reason"] = _reason
+            _dv = VENUES.get(vid)
+            if _dv and _dv["settings"].get("dedica_moderation"):
+                _dmsg = (d.get("message") or "").strip()
+                if _dmsg and len(_dmsg) <= 80:
+                    _approved, _reason = _moderate_message(_dmsg)
+                    d = dict(d); d["_mod_approved"] = _approved; d["_mod_reason"] = _reason
         with LOCK:
             self.set_venue(vid)
             # ---- Sesion de mesa ----
@@ -2544,7 +2549,7 @@ class H(BaseHTTPRequestHandler):
                     if k in d:
                         try: s[k] = max(0, int(d[k]))
                         except Exception: pass
-                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote", "music_only"):
+                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote", "music_only", "dedica_moderation"):
                     if k in d:
                         s[k] = bool(d[k])
                 if "min_direct_pay" in d:
@@ -2797,11 +2802,14 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "El mensaje no puede estar vacío."})
                 if len(message) > 80:
                     return self._send(400, {"error": "El mensaje no puede tener más de 80 caracteres."})
-                mod_approved = bool(d.get("_mod_approved"))
-                mod_reason = str(d.get("_mod_reason") or "")
+                if STATE["settings"].get("dedica_moderation"):
+                    status = "approved" if bool(d.get("_mod_approved")) else "pending"
+                    mod_reason = str(d.get("_mod_reason") or "")
+                else:
+                    status, mod_reason = "approved", ""
                 ded = {"id": nid(), "from_table": sess["table"], "to_table": to_table,
                        "message": message, "ts": time.time(), "shown_tv": False,
-                       "status": "approved" if mod_approved else "pending", "mod_reason": mod_reason}
+                       "status": status, "mod_reason": mod_reason}
                 STATE.setdefault("dedicas", []).append(ded)
                 if len(STATE["dedicas"]) > 50:
                     STATE["dedicas"] = STATE["dedicas"][-50:]
