@@ -239,8 +239,6 @@
         <div class="secBody">
       <label class="small">Nombre del local</label>
       <input class="field" id="venue">
-      <label class="small">Precio por prioridad (COP)</label>
-      <input class="field" id="price" type="number" step="100">
       <label class="small">Estilo / mensaje al cliente</label>
       <input class="field" id="style">
       <label class="small">Género (para recomendadas)</label>
@@ -270,6 +268,25 @@
       </details>
 
       <details class="settingsSection">
+        <summary><span class="sec">Precios y paquetes 💲</span><span class="chev">▸</span></summary>
+        <div class="secBody">
+      <label class="small">Precio por prioridad (COP)</label>
+      <input class="field" id="price" type="number" step="100">
+      <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (× precio)</span><input class="field" id="jumpMult" type="number"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">💌 Cargo extra por dedicatoria al pedir (COP, 0=gratis)</span><input class="field" id="dedicaPrice" type="number" step="100"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">Monto mínimo para "pagar directo" (COP)</span><input class="field" id="minDirectPay" type="number" step="100"></div>
+
+      <p class="sec" style="margin-top:16px">Paquetes de prioridades</p>
+      <div id="pkgs"></div>
+      <div class="pkgrow">
+        <span class="small" style="flex:1">Pase de tiempo (min / precio)</span>
+        <input class="field" id="passMin" type="number">
+        <input class="field" id="passPrice" type="number" step="100">
+      </div>
+        </div>
+      </details>
+
+      <details class="settingsSection">
         <summary><span class="sec">Reproducción y restricciones</span><span class="chev">▸</span></summary>
         <div class="secBody">
       <div class="pkgrow"><span class="small" style="flex:1">No repetir la misma en (minutos, 0=sin límite)</span><input class="field" id="repMin" type="number"></div>
@@ -285,7 +302,6 @@
         <div><b>Modo saldo prepago</b><div class="small">Para locales sin cuenta abierta (gimnasios, cafés de mostrador, barberías): cada cliente recarga saldo en vez de abrir cuenta de mesa.</div></div>
         <input type="checkbox" id="prepaid" style="width:22px;height:22px">
       </label>
-      <div class="pkgrow"><span class="small" style="flex:1">Monto mínimo para "pagar directo" (COP)</span><input class="field" id="minDirectPay" type="number" step="100"></div>
         </div>
       </details>
 
@@ -294,10 +310,8 @@
         <div class="secBody">
       <div class="pkgrow"><span class="small" style="flex:1">Canciones gratis por mesa</span><input class="field" id="freeN" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">...cada (minutos)</span><input class="field" id="freeWin" type="number"></div>
-      <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (× precio)</span><input class="field" id="jumpMult" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Bloquear nuevas prioridades si la cola supera (minutos, 0=sin límite)</span><input class="field" id="maxPrioMin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Duración máxima de una canción pedida (minutos, 0=sin límite)</span><input class="field" id="maxSongDurationMin" type="number"></div>
-      <div class="pkgrow"><span class="small" style="flex:1">💌 Cargo extra por dedicatoria al pedir (COP, 0=gratis)</span><input class="field" id="dedicaPrice" type="number" step="100"></div>
 
       <label class="opt" style="margin-top:12px">
         <div><b>Permitir skip democrático ⏭</b><div class="small">Las mesas pueden votar para saltar la canción actual (mayoría simple)</div></div>
@@ -468,17 +482,6 @@
           </div>
             </div>
           </details>
-        </div>
-
-        <div class="card">
-          <p class="sec">Paquetes de prioridades</p>
-          <div id="pkgs"></div>
-          <div class="pkgrow">
-            <span class="small" style="flex:1">Pase de tiempo (min / precio)</span>
-            <input class="field" id="passMin" type="number">
-            <input class="field" id="passPrice" type="number" step="100">
-          </div>
-          <button class="btn block" style="margin-top:12px" onclick="save()">Guardar</button>
         </div>
 
       </div>
