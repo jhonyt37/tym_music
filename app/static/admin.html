@@ -314,7 +314,7 @@
       <div class="small" style="margin-bottom:10px">Controla qué canciones pueden pedir los clientes según el título, artista o género real de la canción (ej. "reggaeton" ahora sí bloquea canciones de ese género aunque la palabra no aparezca en el título).</div>
 
       <label class="opt" style="margin-bottom:14px">
-        <div><b>Solo música (IA) 🎵</b><div class="small">Rechaza pedidos que no parezcan una canción real (podcasts, tutoriales, gameplay, etc). Requiere ANTHROPIC_API_KEY configurada en el servidor — sin eso, se deja pasar todo igual.</div></div>
+        <div><b>Solo música 🎵</b><div class="small">Rechaza pedidos que no parezcan una canción real (podcasts, tutoriales, gameplay, etc) por título/duración. No es infalible — puede colar algo raro o bloquear un título inusual.</div></div>
         <input type="checkbox" id="musicOnly" style="width:22px;height:22px">
       </label>
 
@@ -580,7 +580,7 @@
       <p class="sec">💌 Dedicatorias</p>
       <div class="small" style="color:var(--mut);margin-bottom:10px">Mensajes enviados entre mesas. Puedes eliminar los inapropiados.</div>
       <label class="opt" style="margin-bottom:14px">
-        <div><b>Moderar con IA antes de mostrar en TV</b><div class="small">Si está apagado, los mensajes salen directo en TV sin revisión (como antes). Si lo activas, cada mensaje pasa primero por IA y los dudosos quedan pendientes de tu aprobación aquí abajo — <b>requiere ANTHROPIC_API_KEY configurada en el servidor</b>, si no, todo queda pendiente para siempre y nada sale en TV.</div></div>
+        <div><b>Moderar antes de mostrar en TV</b><div class="small">Si está apagado, los mensajes salen directo en TV sin revisión (como antes). Si lo activas, se filtran por palabras clave y los marcados quedan pendientes de tu aprobación aquí abajo.</div></div>
         <input type="checkbox" id="dedicaModeration" style="width:22px;height:22px" onchange="post('/api/admin/settings',{dedica_moderation:$('dedicaModeration').checked}).then(()=>toast('Guardado','ok'))">
       </label>
       <div id="dedicaAdminList"><div class="empty">Sin dedicatorias aún.</div></div>

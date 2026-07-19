@@ -76,27 +76,21 @@ que sí permitan SMTP saliente (o para correr en local).**
    correo a...` indica credenciales/SMTP mal configurados o el host bloqueando SMTP saliente; el
    mensaje `[correo simulado]` indica que ninguna variable está puesta).
 
-## Moderación IA de dedicatorias (mesa a mesa)
-Los mensajes que los clientes se mandan entre mesas (dedicatorias, se muestran en `/tv`) pueden
-pasar primero por Claude (Anthropic) para detectar contenido ofensivo/spam antes de salir en la
-pantalla compartida del bar. **Es opt-in por local — apagado por defecto** (Panel → Social →
-"Moderar con IA antes de mostrar en TV"): con el ajuste apagado los mensajes salen directo en TV
-sin revisión (igual que siempre). Si lo activas SIN `ANTHROPIC_API_KEY` configurada, todo mensaje
-queda pendiente de aprobación manual para siempre y nunca sale en TV — por eso el ajuste viene
-apagado por defecto (bug real: un local activó moderación sin la key y ningún mensaje volvió a
-aparecer en TV).
+## Moderación de dedicatorias y "solo música" (heurística, sin IA)
+Dos ajustes opcionales, apagados por defecto, que funcionan por palabras clave/duración —
+sin llamadas a servicios externos, sin costo, sin variables de entorno que configurar:
 
-1. Crea/usa una API key de Anthropic en https://console.anthropic.com.
-2. En Render → Settings → Environment, agrega `ANTHROPIC_API_KEY` = tu API key.
-3. Activa el ajuste en el panel (Social → checkbox de moderación). Con la key presente, los
-   mensajes apropiados se aprueban solos (~1-2s de latencia por mensaje) y solo los dudosos
-   quedan pendientes de revisión ahí mismo.
+- **Panel → Social → "Moderar antes de mostrar en TV"**: los mensajes que los clientes se
+  mandan entre mesas (dedicatorias) se revisan contra una lista de palabras/patrones (groserías,
+  spam, links, números de teléfono) antes de salir en `/tv`. Con el ajuste apagado, salen directo
+  sin revisión (comportamiento original). Los marcados quedan pendientes de aprobación manual del
+  admin, nunca se rechazan solos.
+- **Panel → Ajustes → Filtro de contenido → "Solo música"**: rechaza pedidos cuyo título/canal
+  contenga palabras típicas de contenido no-musical (podcast, tutorial, gameplay, etc) o que
+  superen 20 minutos de duración sin otro indicio.
 
-La misma `ANTHROPIC_API_KEY` también habilita el ajuste opcional **"Solo música (IA)"**
-(Ajustes → Filtro de contenido): rechaza pedidos que no parezcan una canción real (podcasts,
-tutoriales, gameplay, etc). Es opt-in por local (apagado por defecto) y **fail-open**: si falta
-la key o la llamada a la IA falla, el pedido se deja pasar igual — nunca se bloquea la cola
-completa por una caída de la IA.
+Ambos son heurísticas de palabras clave, no perfectas — pueden dejar pasar algo raro o bloquear
+un título inusual — pero no dependen de ningún servicio externo ni tienen costo por uso.
 
 ## Para producción (pendiente)
 - Formalizar la **fuente de música** (catálogo licenciado para uso comercial) + Sayco-Acinpro.

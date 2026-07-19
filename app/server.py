@@ -136,9 +136,6 @@ SMTP_PORT = int(os.environ.get("SMTP_PORT", "465"))
 SMTP_USER = os.environ.get("SMTP_USER", "")
 SMTP_PASS = os.environ.get("SMTP_PASS", "")
 
-# Moderación IA de dedicatorias (mesa a mesa) — ver _moderate_message() más abajo.
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-
 def mask_email(email):
     """Oculta la mayoría del usuario del correo pero deja el dominio visible completo,
     para que el dueño confirme a cuál dirección le llegó el correo sin exponerla entera."""
@@ -852,110 +849,59 @@ def itunes_genre(artist, title):
             del _genre_cache[k]
     return genre
 
-_MODERATE_SYSTEM = (
-    "Moderas mensajes cortos que los clientes de un bar se mandan entre mesas (dedicatorias "
-    "públicas que se muestran en una pantalla compartida). Evalúa si el mensaje es apropiado "
-    "para mostrarse en público: rechaza insultos, acoso, contenido sexual explícito, amenazas, "
-    "datos de contacto/spam o publicidad. Permite bromas, piropos normales, saludos y mensajes "
-    "de celebración. Responde solo con el JSON pedido."
-)
+# ---- Moderación de dedicatorias — heurística de palabras clave (sin IA, sin costo, sin
+# dependencias externas). Menos precisa que un modelo de lenguaje (no entiende contexto,
+# sarcasmo, ni faltas de ortografía intencionales), pero es gratis, instantánea, y no depende
+# de un servicio externo. Cualquier coincidencia deja el mensaje pendiente de revisión manual
+# del admin — el heurístico nunca rechaza automáticamente, solo decide qué necesita ojo humano.
+_DEDICA_BLOCKLIST = [
+    "puta", "puto", "hijueputa", "gonorrea", "malparid", "maric", "pendej", "cabron", "cabrón",
+    "perra", "zorra", "imbecil", "imbécil", "estupid", "estúpid", "idiota", "verga", "coño",
+    "mierda", "culiad", "gilipollas", "bastard",
+    "fuck", "bitch", "asshole", "whore", "slut",
+    "sexo", "porno", "xxx", "onlyfans", "nudes", "desnud",
+    "te voy a matar", "te mato",
+    "whatsapp", "wasap", "sigueme", "síguem",
+]
+_PHONE_RE = re.compile(r"\d{7,}")
+_URL_RE = re.compile(r"https?://|www\.")
 
 def _moderate_message(text):
-    """Evalúa una dedicatoria con IA antes de que pueda salir en la TV compartida.
-    Fail-safe: si falta la API key, o la llamada falla/da timeout, NUNCA se aprueba
-    automáticamente — el mensaje queda pendiente de revisión manual del admin. Se llama
-    SIEMPRE antes de tomar LOCK (llamada de red bloqueante), igual que itunes_genre()."""
-    if not ANTHROPIC_API_KEY:
-        return False, "Moderación no configurada (falta ANTHROPIC_API_KEY) — revisar manualmente."
-    payload = json.dumps({
-        "model": "claude-opus-4-8",
-        "max_tokens": 200,
-        "system": _MODERATE_SYSTEM,
-        "messages": [{"role": "user", "content": text[:200]}],
-        "output_config": {"format": {"type": "json_schema", "schema": {
-            "type": "object",
-            "properties": {"approved": {"type": "boolean"}, "reason": {"type": "string"}},
-            "required": ["approved", "reason"],
-            "additionalProperties": False,
-        }}},
-    }).encode("utf-8")
-    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=payload, method="POST",
-                                  headers={"x-api-key": ANTHROPIC_API_KEY,
-                                           "anthropic-version": "2023-06-01",
-                                           "Content-Type": "application/json",
-                                           # User-Agent explícito: el default de urllib queda bloqueado
-                                           # por Cloudflare en varias APIs (visto con Resend esta misma
-                                           # sesión) — se pone siempre por las dudas.
-                                           "User-Agent": "TYM-Music-Server/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=8) as r:
-            resp = json.loads(r.read())
-        block = next((b for b in resp.get("content", []) if b.get("type") == "text"), None)
-        if not block:
-            return False, "Respuesta de moderación inesperada — revisar manualmente."
-        parsed = json.loads(block["text"])
-        return bool(parsed.get("approved")), str(parsed.get("reason", ""))[:200]
-    except Exception as e:
-        print("🛡️  Error moderando dedicatoria (queda pendiente):", e, flush=True)
-        return False, "No se pudo verificar el mensaje — revisar manualmente."
+    """Heurística de palabras clave para dedicatorias — reemplaza la moderación por IA de una
+    sesión anterior (tenía costo por mensaje y quedaba inservible sin API key configurada).
+    Se llama dentro del LOCK: es una comparación de texto en memoria, no I/O de red, así que
+    no hace falta resolverla antes de tomar el lock como sí hacía falta con la llamada a IA."""
+    t = text.lower()
+    hit = next((w for w in _DEDICA_BLOCKLIST if w in t), None)
+    if hit:
+        return False, "Contiene una palabra o frase marcada para revisión."
+    if _PHONE_RE.search(text):
+        return False, "Parece contener un número de teléfono — revisar por spam."
+    if _URL_RE.search(t):
+        return False, "Parece contener un link — revisar por spam."
+    return True, ""
 
-# ---- "Solo música": clasificación IA opcional (settings.music_only) para /api/request ----
-_MUSIC_CACHE = {}
-_MUSIC_CACHE_TTL = 7 * 24 * 3600  # la clasificación de un video no cambia — cache global de 1 semana
+# ---- "Solo música" — heurística de palabras clave + duración (sin IA, sin costo). Bloquea los
+# casos obvios de contenido no-musical (podcasts, tutoriales, gameplay, etc.); no entiende
+# títulos ambiguos o en otros idiomas tan bien como un modelo de lenguaje, pero es gratis e
+# instantánea — no hace falta resolverla antes del LOCK, es una comparación en memoria.
+_NOT_MUSIC_KEYWORDS = [
+    "podcast", "tutorial", "vlog", "gameplay", "let's play", "lets play", "walkthrough",
+    "reaction", "unboxing", "noticias", "entrevista", "documental", "documentary",
+    "receta", "cómo hacer", "como hacer", "curso de", "clase de", "review", "reseña",
+    "trailer", "full episode", "capítulo completo", "capitulo completo", "resumen",
+    "highlights", "compilation", "asmr", "meditación", "meditacion", "audiolibro",
+    "conferencia", "webinar", "sermón", "sermon", "predica",
+]
+_MUSIC_MAX_DURATION_SECS = 20 * 60  # 20 min — por encima y sin más indicios, sospechoso
 
-_IS_MUSIC_SYSTEM = (
-    "Evalúas si un video de YouTube pedido para la cola de música de un bar es una canción "
-    "real (audio musical: canción, remix, versión en vivo, DJ set, instrumental). Responde "
-    "false para podcasts, tutoriales, vlogs, noticias, gameplay, comedia, ASMR, contenido "
-    "infantil no musical, o cualquier cosa que no sea principalmente música para escuchar o "
-    "bailar. Responde solo con el JSON pedido."
-)
-
-def is_music_content(yt, title, artist):
-    """Clasifica con IA si un video pedido es realmente música — solo se llama cuando el local
-    activó settings.music_only. Fail-open: sin ANTHROPIC_API_KEY, o si la llamada falla, se
-    PERMITE el pedido — bloquear TODOS los pedidos por una caída de la IA sería mucho peor
-    que dejar pasar ocasionalmente algo que no es música (a diferencia de la moderación de
-    dedicatorias, aquí un falso negativo no sale en una pantalla compartida sin revisar).
-    Cache global por yt id (no por local): el mismo video es la misma clasificación en
-    cualquier bar, así que se paga la llamada una sola vez por canción en todo el sistema."""
-    if not ANTHROPIC_API_KEY:
-        return True
-    now = time.time()
-    hit = _MUSIC_CACHE.get(yt)
-    if hit and now - hit[0] < _MUSIC_CACHE_TTL:
-        return hit[1]
-    payload = json.dumps({
-        "model": "claude-opus-4-8",
-        "max_tokens": 150,
-        "system": _IS_MUSIC_SYSTEM,
-        "messages": [{"role": "user", "content": f"Título: {title}\nArtista/canal: {artist or '(desconocido)'}"}],
-        "output_config": {"format": {"type": "json_schema", "schema": {
-            "type": "object",
-            "properties": {"is_music": {"type": "boolean"}, "reason": {"type": "string"}},
-            "required": ["is_music", "reason"],
-            "additionalProperties": False,
-        }}},
-    }).encode("utf-8")
-    req = urllib.request.Request("https://api.anthropic.com/v1/messages", data=payload, method="POST",
-                                  headers={"x-api-key": ANTHROPIC_API_KEY,
-                                           "anthropic-version": "2023-06-01",
-                                           "Content-Type": "application/json",
-                                           "User-Agent": "TYM-Music-Server/1.0"})
-    try:
-        with urllib.request.urlopen(req, timeout=8) as r:
-            resp = json.loads(r.read())
-        block = next((b for b in resp.get("content", []) if b.get("type") == "text"), None)
-        result = bool(json.loads(block["text"]).get("is_music", True)) if block else True
-    except Exception as e:
-        print("🎵 Error clasificando si es música (se permite el pedido):", e, flush=True)
-        result = True
-    _MUSIC_CACHE[yt] = (now, result)
-    if len(_MUSIC_CACHE) > 5000:
-        stale = [k for k, v in _MUSIC_CACHE.items() if now - v[0] > _MUSIC_CACHE_TTL]
-        for k in stale:
-            del _MUSIC_CACHE[k]
-    return result
+def is_music_content(title, artist, duration):
+    haystack = f"{title} {artist or ''}".lower()
+    if any(kw in haystack for kw in _NOT_MUSIC_KEYWORDS):
+        return False
+    if duration and duration > _MUSIC_MAX_DURATION_SECS:
+        return False
+    return True
 
 def get_session(token):
     return STATE["sessions"].get(token) if token else None
@@ -1940,32 +1886,10 @@ class H(BaseHTTPRequestHandler):
                         d = dict(d); d["_genre"] = itunes_genre(_fartist, _ftitle) or ""
                     except Exception:
                         pass
-        # "Solo música" (settings.music_only, opt-in por local): clasificación IA de si el video
-        # pedido es realmente una canción — misma razón para resolverla ANTES del LOCK (llamada
-        # de red bloqueante). Solo se llama si el local activó el ajuste, para no pagar latencia
-        # ni costo de IA en cada pedido de locales que no lo quieren.
-        if path == "/api/request":
-            _mv = VENUES.get(vid)
-            if _mv and _mv["settings"].get("music_only"):
-                _myt, _mtitle = d.get("yt") or "", d.get("title") or ""
-                if _myt and _mtitle:
-                    try:
-                        d = dict(d); d["_is_music"] = is_music_content(_myt, _mtitle, d.get("artist") or "")
-                    except Exception:
-                        pass
-        # Moderación IA de dedicatorias — opt-in por local (settings.dedica_moderation, apagado
-        # por defecto). Llamada de red bloqueante, igual motivo que arriba: se resuelve ANTES
-        # del LOCK global para no congelar todos los locales mientras la IA responde (~1-2s).
-        # Con el ajuste apagado, los mensajes pasan directo (comportamiento original) — sin esto
-        # un local sin ANTHROPIC_API_KEY configurada veía TODAS sus dedicatorias atascadas en
-        # "pendiente" para siempre, sin salir nunca en /tv (bug reportado en vivo).
-        if path == "/api/dedica":
-            _dv = VENUES.get(vid)
-            if _dv and _dv["settings"].get("dedica_moderation"):
-                _dmsg = (d.get("message") or "").strip()
-                if _dmsg and len(_dmsg) <= 80:
-                    _approved, _reason = _moderate_message(_dmsg)
-                    d = dict(d); d["_mod_approved"] = _approved; d["_mod_reason"] = _reason
+        # "Solo música" y moderación de dedicatorias ahora son heurísticas en memoria (sin IA,
+        # sin costo) — ver is_music_content()/_moderate_message() más arriba. Al no ser I/O de
+        # red, ya no hace falta resolverlas antes del LOCK; se llaman directo dentro del lock,
+        # junto a las validaciones de /api/request y /api/dedica.
         with LOCK:
             self.set_venue(vid)
             # ---- Sesion de mesa ----
@@ -2114,11 +2038,8 @@ class H(BaseHTTPRequestHandler):
                 title = str(d.get("title") or "Canción")[:200]
                 artist = str(d.get("artist") or "")[:120]
                 now = time.time()
-                # "Solo música" (settings.music_only): rechaza si la IA clasificó el video como
-                # no-música (resuelto antes del LOCK arriba). d.get("_is_music") es None si el
-                # ajuste está apagado o la clasificación no se pudo resolver — solo se rechaza
-                # con un False explícito, nunca por ausencia del campo (fail-open).
-                if STATE["settings"].get("music_only") and d.get("_is_music") is False:
+                # "Solo música" (settings.music_only): heurística de palabras clave + duración.
+                if STATE["settings"].get("music_only") and not is_music_content(title, artist, dur):
                     return self._send(400, {"error": "Esto no parece ser una canción — este local solo permite música 🎵",
                                             "not_music": True})
                 # Filtro de contenido: palabras bloqueadas / permitidas — compara contra
@@ -2803,8 +2724,8 @@ class H(BaseHTTPRequestHandler):
                 if len(message) > 80:
                     return self._send(400, {"error": "El mensaje no puede tener más de 80 caracteres."})
                 if STATE["settings"].get("dedica_moderation"):
-                    status = "approved" if bool(d.get("_mod_approved")) else "pending"
-                    mod_reason = str(d.get("_mod_reason") or "")
+                    _approved, mod_reason = _moderate_message(message)
+                    status = "approved" if _approved else "pending"
                 else:
                     status, mod_reason = "approved", ""
                 ded = {"id": nid(), "from_table": sess["table"], "to_table": to_table,
