@@ -2618,8 +2618,21 @@ class H(BaseHTTPRequestHandler):
                 act = d.get("action")
                 new_pin = None
                 if act == "add":
-                    n = len(STATE["tables"]) + 1
-                    STATE["tables"].append({"name": d.get("name") or f"Mesa {n}", "pin": gen_unique_pin(), "extra_pins": []})
+                    name = d.get("name")
+                    if not name:
+                        # Reutiliza el primer número "Mesa N" libre (ej. si borraste la 3 de 7,
+                        # la próxima mesa nueva vuelve a ser la 3, no la 8) en vez de usar
+                        # len(tables)+1, que duplicaba nombres apenas había un hueco.
+                        used = set()
+                        for t in STATE["tables"]:
+                            m = re.match(r"^Mesa (\d+)$", t["name"])
+                            if m:
+                                used.add(int(m.group(1)))
+                        n = 1
+                        while n in used:
+                            n += 1
+                        name = f"Mesa {n}"
+                    STATE["tables"].append({"name": name, "pin": gen_unique_pin(), "extra_pins": []})
                 elif act == "remove":
                     STATE["tables"] = [t for t in STATE["tables"] if t["name"] != d.get("name")]
                 elif act == "regen":
