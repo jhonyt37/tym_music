@@ -355,9 +355,14 @@
       <input class="field" id="newPass" type="password" placeholder="Nueva contraseña" autocomplete="new-password">
       <input class="field" id="newPassConfirm" type="password" placeholder="Repetir contraseña" autocomplete="new-password" style="margin-top:8px">
       <button class="btn ghost block sm" style="margin-top:10px" onclick="changePassword()">🔑 Cambiar contraseña</button>
+        </div>
+      </details>
 
-      <p class="sec" style="margin-top:22px">Zona de peligro</p>
-      <button class="btn ghost block sm" onclick="reset()">Reiniciar demo</button>
+      <details class="settingsSection" style="border:1px solid #ef4444;border-radius:10px;margin-top:14px">
+        <summary><span class="sec" style="color:#ef4444">⚠️ Zona de peligro</span><span class="chev">▸</span></summary>
+        <div class="secBody">
+      <div class="small" style="color:var(--mut);margin-bottom:10px">Acciones irreversibles — no hay vuelta atrás.</div>
+      <button class="btn ghost block sm" style="border-color:#ef4444;color:#ef4444" onclick="reset()">Reiniciar demo</button>
         </div>
       </details>
 
