@@ -301,6 +301,7 @@
       <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (× precio)</span><input class="field" id="jumpMult" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Bloquear nuevas prioridades si la cola supera (minutos, 0=sin límite)</span><input class="field" id="maxPrioMin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Duración máxima de una canción pedida (minutos, 0=sin límite)</span><input class="field" id="maxSongDurationMin" type="number"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">💌 Cargo extra por dedicatoria al pedir (COP, 0=gratis)</span><input class="field" id="dedicaPrice" type="number" step="100"></div>
 
       <label class="opt" style="margin-top:12px">
         <div><b>Permitir skip democrático ⏭</b><div class="small">Las mesas pueden votar para saltar la canción actual (mayoría simple)</div></div>
@@ -325,6 +326,11 @@
       <label class="opt" style="margin-bottom:14px">
         <div><b>Solo música 🎵</b><div class="small">Rechaza pedidos que no parezcan una canción real (podcasts, tutoriales, gameplay, etc) por título/duración. No es infalible — puede colar algo raro o bloquear un título inusual.</div></div>
         <input type="checkbox" id="musicOnly" style="width:22px;height:22px">
+      </label>
+
+      <label class="opt" style="margin-bottom:14px">
+        <div><b>Moderar mensaje al pedir canción 💌</b><div class="small">Separado de la moderación de dedicatorias mesa a mesa. Si un cliente escribe un mensaje al pedir su canción y queda marcado, la canción suena igual pero el mensaje no aparece en TV hasta que lo apruebes abajo, en Social.</div></div>
+        <input type="checkbox" id="songMessageModeration" style="width:22px;height:22px">
       </label>
 
       <label class="small" style="display:block;margin-bottom:4px">🚫 Palabras BLOQUEADAS (ej: metal, trap, reggaetón)</label>
@@ -595,6 +601,13 @@
       <div id="dedicaAdminList"><div class="empty">Sin dedicatorias aún.</div></div>
     </div>
 
+    <!-- Mensajes en pedidos de canción (separado de las dedicatorias mesa a mesa) -->
+    <div class="card" id="songMsgCard" style="display:none">
+      <p class="sec">🎵 Mensajes en canciones por revisar</p>
+      <div class="small" style="color:var(--mut);margin-bottom:10px">Mensajes que un cliente escribió al pedir su canción y quedaron marcados por la moderación — la canción suena igual, solo el mensaje queda oculto en TV hasta que decidas.</div>
+      <div id="songMsgList"></div>
+    </div>
+
   </div>
 </div>
 
@@ -818,6 +831,8 @@ async function save(){
     jump_multiplier:parseInt($('jumpMult').value||0),
     max_priority_queue_min:parseInt($('maxPrioMin').value||0),
     max_song_duration_min:parseInt($('maxSongDurationMin').value||0),
+    dedica_price:parseInt($('dedicaPrice').value||0),
+    song_message_moderation:$('songMessageModeration').checked,
     fallback_shuffle:$('fbShuffle').checked,
     prepaid_mode:$('prepaid').checked, min_direct_pay:parseInt($('minDirectPay').value||0),
     show_tym_brand:$('showTymBrand').checked,
@@ -1006,6 +1021,8 @@ async function tick(){
       $('jumpMult').value=s.settings.jump_multiplier;
       $('maxPrioMin').value=s.settings.max_priority_queue_min||0;
       $('maxSongDurationMin').value=s.settings.max_song_duration_min||0;
+      $('dedicaPrice').value=s.settings.dedica_price||0;
+      if($('songMessageModeration'))$('songMessageModeration').checked=!!s.settings.song_message_moderation;
       $('fbShuffle').checked=s.settings.fallback_shuffle!==false;
       $('prepaid').checked=s.settings.prepaid_mode||false;
       $('minDirectPay').value=s.settings.min_direct_pay||700;
@@ -1256,10 +1273,12 @@ async function tick(){
     if(badgeN>0){badge.textContent=badgeN;badge.classList.add('show');}
     else{badge.classList.remove('show');}
 
-    // Badge de alertas en el tab "Social": dedicatorias pendientes de moderación
+    // Badge de alertas en el tab "Social": dedicatorias + mensajes de canción pendientes
     const dedsPending=(s.all_dedicas||[]).filter(dd=>dd.status==='pending');
+    const songMsgsPending=s.pending_song_messages||[];
+    const socialBadgeN=dedsPending.length+songMsgsPending.length;
     const socialBadge=$('socialBadge');
-    if(dedsPending.length>0){socialBadge.textContent=dedsPending.length;socialBadge.classList.add('show');}
+    if(socialBadgeN>0){socialBadge.textContent=socialBadgeN;socialBadge.classList.add('show');}
     else{socialBadge.classList.remove('show');}
 
     // Social tab
@@ -1267,7 +1286,7 @@ async function tick(){
 
     // Notificaciones unificadas clicables: avisa de cosas nuevas que requieren atención del
     // admin y no está viendo, con un toast que lo lleva directo a la pestaña correspondiente.
-    _checkNewAlerts(pend,assists,dedsPending,pollClosing,dueloClosing);
+    _checkNewAlerts(pend,assists,dedsPending,songMsgsPending,pollClosing,dueloClosing);
   }catch(e){}
 }
 
@@ -1275,11 +1294,12 @@ async function tick(){
 // nada, solo se toma como línea base — si no, al abrir el panel con pedidos ya pendientes se
 // dispararían toasts de golpe por cosas que el admin ya sabía que estaban ahí.
 let _seenAlertIds=null,_seenPollClosing=false,_seenDueloClosing=false;
-function _checkNewAlerts(pend,assists,dedsPending,pollClosing,dueloClosing){
+function _checkNewAlerts(pend,assists,dedsPending,songMsgsPending,pollClosing,dueloClosing){
   const ids=new Set([
     ...pend.map(p=>'req:'+p.id),
     ...assists.map(a=>'ast:'+a.id),
     ...dedsPending.map(dd=>'ded:'+dd.id),
+    ...songMsgsPending.map(m=>'sm:'+m.id),
   ]);
   if(_seenAlertIds===null){_seenAlertIds=ids;_seenPollClosing=pollClosing;_seenDueloClosing=dueloClosing;return;}
   const notifyIfNew=(items,prefix,tab,label)=>{
@@ -1291,6 +1311,7 @@ function _checkNewAlerts(pend,assists,dedsPending,pollClosing,dueloClosing){
   notifyIfNew(pend,'req:','live','🎵 Nuevo pedido pendiente — click para revisar');
   notifyIfNew(assists,'ast:','live','🔔 Una mesa pidió ayuda — click para atenderla');
   notifyIfNew(dedsPending,'ded:','social','🛡️ Mensaje por moderar — click para revisar');
+  notifyIfNew(songMsgsPending,'sm:','social','🎵 Mensaje de canción por revisar — click para revisar');
   if(pollClosing&&!_seenPollClosing&&!document.getElementById('tab-social').classList.contains('active')){
     toast('⏱ La votación está por cerrar — click para ver el resultado','',5000,()=>showTab('social'));
   }
@@ -1636,6 +1657,22 @@ function renderSocialAdmin(s){
   });
   if(!totalV2)vbox.innerHTML='<div class="empty">Aún sin votos de vibe.</div>';
 
+  // Mensajes en pedidos de canción pendientes de revisión (separado de dedicatorias)
+  const smCard=$('songMsgCard'),smBox=$('songMsgList');
+  const songMsgs=s.pending_song_messages||[];
+  if(smCard&&smBox){
+    if(!songMsgs.length){smCard.style.display='none';}
+    else{
+      smCard.style.display='';smBox.innerHTML='';
+      songMsgs.forEach(m=>{
+        const r=document.createElement('div');r.className='row';r.style.borderLeft='4px solid #f59e0b';r.style.paddingLeft='10px';
+        const reasonTxt=m.reason?` · <span style="color:var(--mut)">${esc(m.reason)}</span>`:'';
+        r.innerHTML=`<span class="pulse" style="background:#f59e0b"></span><div class="info" style="flex:1"><div class="t" style="font-size:13px">"${esc(m.message)}"</div><div class="a">${esc(m.title)} · ${esc(m.table)}${reasonTxt}</div></div><div style="display:flex;gap:6px;flex-shrink:0"><button class="btn sm green" onclick="moderateSongMessage(${m.id},true)">✓ Aprobar</button><button class="btn sm red" onclick="moderateSongMessage(${m.id},false)">✕ Rechazar</button></div>`;
+        smBox.appendChild(r);
+      });
+    }
+  }
+
   // Dedicatorias
   const dbox=$('dedicaAdminList');if(!dbox)return;
   const deds=s.all_dedicas||[];
@@ -1665,6 +1702,12 @@ async function deleteDedica(id){
 async function moderateDedica(id,approve){
   await post(approve?'/api/admin/dedica/approve':'/api/admin/dedica/reject',{id});
   toast(approve?'Dedicatoria aprobada ✓':'Dedicatoria rechazada','ok');
+  tick();
+}
+
+async function moderateSongMessage(id,approve){
+  await post(approve?'/api/admin/song_message/approve':'/api/admin/song_message/reject',{id});
+  toast(approve?'Mensaje aprobado ✓':'Mensaje rechazado','ok');
   tick();
 }
 

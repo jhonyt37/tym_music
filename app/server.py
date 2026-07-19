@@ -320,7 +320,9 @@ def make_venue(name):
             "max_priority_queue_min": 0,   # bloquear nuevas prioridades si cola premium > N min (0=off)
             "max_song_duration_min": 0,    # rechazar pedidos de canciones más largas que N min (0=off)
             "music_only": False,           # rechazar pedidos que la IA clasifique como no-música
-            "dedica_moderation": False,    # moderar dedicatorias con IA antes de mostrarlas en TV (off=pasan directo)
+            "dedica_moderation": False,    # moderar dedicatorias (mesa a mesa) antes de mostrarlas en TV (off=pasan directo)
+            "song_message_moderation": False,  # moderar el mensaje al pedir canción (separado de dedica_moderation)
+            "dedica_price": 0,             # cargo extra si el pedido incluye mensaje (0=gratis, se suma al precio de la canción)
             "fallback_shuffle": True,       # lista del local en orden aleatorio
             "theme": "azul",               # tema de color: azul | purpura | verde | rojo | dorado | rosa
             "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
@@ -1259,7 +1261,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                   "fallback": np.get("fallback", False),
                   "duration": np.get("duration", DEFAULT_DUR), "position": np.get("position", 0),
                   "learned_end": STATE["learned_end"].get(np["yt"]),
-                  "message": (np.get("message") or ""),
+                  "message": (np.get("message") or "") if np.get("message_status", "approved") == "approved" else "",
                   "ts": np.get("ts"), "played_at": np.get("played_at"),
                   "reactions": ncounts, "my_reacts": nmine, "react_total": ntotal}
         now_ts = time.time()
@@ -1444,7 +1446,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
-                                       "show_tym_brand", "music_only", "dedica_moderation")},
+                                       "show_tym_brand", "music_only", "dedica_moderation",
+                                       "song_message_moderation", "dedica_price")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
@@ -1519,6 +1522,12 @@ def public_state(token=None, admin=False, mark_dedica=None):
         out["repeat_exceptions"] = list(STATE.get("repeat_exceptions", set()))
         out["all_dedicas"] = list(reversed(STATE.get("dedicas", [])))[:30]
         out["all_announcements"] = list(reversed(STATE.get("announcements", [])))
+        _msg_pool = (([np] if np else []) + STATE["items"])
+        out["pending_song_messages"] = [
+            {"id": it["id"], "title": it["title"], "table": it.get("table", ""),
+             "message": it.get("message", ""), "reason": it.get("message_mod_reason", "")}
+            for it in _msg_pool if it.get("message_status") == "pending"
+        ]
         out["customers"] = sorted(STATE["customers"].values(), key=lambda c: -c.get("balance", 0))[:100]
         own = next((o for o in TYM["owners"].values() if o.get("venue") == CUR_VID), None)
         out["owner_email"] = (own or {}).get("email", "")
@@ -1871,6 +1880,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/duelo", "/api/admin/duelo/close",
                        "/api/admin/announcement", "/api/admin/show_qr",
                        "/api/admin/dedica/delete", "/api/admin/dedica/approve", "/api/admin/dedica/reject",
+                       "/api/admin/song_message/approve", "/api/admin/song_message/reject",
                        "/api/admin/change_password", "/api/admin/update_email")
         vid = self.resolve_vid(d)
         if path in ADMIN_PATHS:
@@ -2054,6 +2064,7 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "No pude leer el link de YouTube"})
                 title = str(d.get("title") or "Canción")[:200]
                 artist = str(d.get("artist") or "")[:120]
+                req_msg = (d.get("message") or "").strip()[:80]
                 now = time.time()
                 # "Solo música" (settings.music_only): heurística de palabras clave + duración.
                 if STATE["settings"].get("music_only") and not is_music_content(title, artist, dur):
@@ -2115,6 +2126,13 @@ class H(BaseHTTPRequestHandler):
                 # escalan de precio — pase de tiempo y créditos ya prepagados quedan igual.
                 abuse_mult = priority_abuse_multiplier(table, now) if charge > 0 else 1
                 charge = charge * abuse_mult
+                # Dedicatoria (mensaje al pedir): cargo fijo adicional si el local lo configuró
+                # — se SUMA al precio de la canción (gratis/prioridad/salto), no lo reemplaza,
+                # y queda fuera del anti-abuso de arriba (son cargos independientes).
+                dedica_price = int(STATE["settings"].get("dedica_price", 0) or 0)
+                if req_msg and dedica_price > 0:
+                    ckind = (ckind + " + dedicatoria") if charge > 0 else "dedicatoria"
+                    charge += dedica_price
                 charge_via, paid_amount = None, 0
                 if charge > 0 and STATE["settings"].get("prepaid_mode"):
                     ok, via, err = try_charge_prepaid(sess, charge, ckind, title,
@@ -2125,7 +2143,14 @@ class H(BaseHTTPRequestHandler):
                     charge_via, paid_amount, charge = via, charge, 0
                 if mode in ("salto", "single"):
                     record_priority_purchase(table, now)
-                req_msg = (d.get("message") or "").strip()[:80]
+                # Moderación del mensaje (independiente de la moderación de dedicatorias mesa a
+                # mesa) — heurística de palabras clave; si lo marca, el mensaje NO se muestra en
+                # TV hasta que el admin lo apruebe (la canción sí suena normal mientras tanto).
+                if req_msg and STATE["settings"].get("song_message_moderation"):
+                    _msg_approved, _msg_reason = _moderate_message(req_msg)
+                    msg_status = "approved" if _msg_approved else "pending"
+                else:
+                    msg_status, _msg_reason = "approved", ""
                 item = {"id": nid(), "title": title, "artist": artist, "yt": yt,
                         "token": d.get("token"), "table": table, "priority": priority,
                         "super": sup, "mode": mode, "duration": dur,
@@ -2133,7 +2158,7 @@ class H(BaseHTTPRequestHandler):
                         "play_status": "pending", "played_enough": False, "requeue_count": 0,
                         "ts": time.time(), "charge_on_play": charge, "charged": bool(charge_via),
                         "charge_kind": ckind, "charge_via": charge_via, "paid_amount": paid_amount,
-                        "message": req_msg}
+                        "message": req_msg, "message_status": msg_status, "message_mod_reason": _msg_reason}
                 STATE["items"].append(item)
                 bump_count(yt, title, artist)
                 log_order(table, d.get("token"), mode, title, yt)   # analítica (free/premium)
@@ -2483,11 +2508,11 @@ class H(BaseHTTPRequestHandler):
                 for k in ("repeat_block_min", "repeat_block_songs", "trim_end_secs",
                           "free_per_window", "free_window_min", "jump_multiplier",
                           "max_priority_queue_min", "max_song_duration_min",
-                          "poll_duration_secs", "duelo_duration_secs"):
+                          "poll_duration_secs", "duelo_duration_secs", "dedica_price"):
                     if k in d:
                         try: s[k] = max(0, int(d[k]))
                         except Exception: pass
-                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote", "music_only", "dedica_moderation"):
+                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote", "music_only", "dedica_moderation", "song_message_moderation"):
                     if k in d:
                         s[k] = bool(d[k])
                 if "min_direct_pay" in d:
@@ -3010,6 +3035,21 @@ class H(BaseHTTPRequestHandler):
                     if dd["id"] == ded_id:
                         dd["status"] = new_status
                         break
+                return self._send(200, {"ok": True})
+
+            # ---- Admin: aprobar/rechazar el mensaje de una canción pedida (separado de las
+            # dedicatorias mesa a mesa) — el mensaje puede estar en la canción sonando ahora o
+            # todavía en cola, así que se busca en ambos lugares. ----
+            if path in ("/api/admin/song_message/approve", "/api/admin/song_message/reject"):
+                item_id = d.get("id")
+                if item_id is None:
+                    return self._send(400, {"error": "Falta el id."})
+                new_status = "approved" if path.endswith("approve") else "rejected"
+                target = STATE["now_playing"] if STATE["now_playing"] and STATE["now_playing"]["id"] == item_id else None
+                if not target:
+                    target = next((i for i in STATE["items"] if i["id"] == item_id), None)
+                if target:
+                    target["message_status"] = new_status
                 return self._send(200, {"ok": True})
 
         # ---- TYM Master: resetear la contraseña del dueño de un local ----

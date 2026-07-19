@@ -403,7 +403,8 @@ body{padding-bottom:80px}
     </div>
     <div style="margin-top:14px" id="sheetDedicaBox">
       <label style="font-size:12px;color:var(--mut);font-weight:700">💌 Dedicatoria (opcional)</label>
-      <input class="field" id="sheetDedicaMsg" maxlength="80" placeholder="Ej: ¡Feliz cumpleaños María! 🎂" style="margin-top:4px">
+      <input class="field" id="sheetDedicaMsg" maxlength="80" placeholder="Ej: ¡Feliz cumpleaños María! 🎂" style="margin-top:4px" oninput="updateDedicaPriceHint()">
+      <div class="small" id="sheetDedicaPriceHint" style="margin-top:4px;color:var(--gold);font-weight:700;display:none"></div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px">
       <button class="btn ghost" style="flex:1" onclick="closeSheet()">Cancelar</button>
@@ -507,7 +508,7 @@ function applyTheme(t){
   r.setProperty('--card',th.card);r.setProperty('--line',th.line);
   document.querySelector('meta[name="theme-color"]').content=th.bg;
 }
-let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0, jumpReason='';
+let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0, jumpReason='', dedicaPrice=0;
 let prepaidMode=false, walletBalance=0, insufRetry=null, insufNeed=0, pendingRetry=null;
 let registerGateOpen=false, _anonBusy=false, pendingTabConfirm=false;
 // Si el navegador restaura esta página desde el bfcache (back/forward) en vez de cargarla de
@@ -770,15 +771,23 @@ function openSheet(s){
   chosen={yt:s.yt,title:s.title,artist:s.artist||'',length:s.length||''};mode='normal';
   $('sTitle').textContent=s.title;$('sArtist').textContent=s.artist||'';
   $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
-  updatePriOption();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
+  updatePriOption();updateDedicaPriceHint();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
   $('sheet').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
 }
 function openSheetLink(l){
   chosen={link:l,title:'Tu canción (link)'};mode='normal';
   $('sTitle').textContent='Canción desde link';$('sArtist').textContent=l.slice(0,42);
   $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
-  updatePriOption();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
+  updatePriOption();updateDedicaPriceHint();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
   $('sheet').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
+}
+// Muestra el costo extra de la dedicatoria AL MOMENTO de escribirla — pedido explícito: el
+// cliente debe saber cuánto vale antes de confirmar, no enterarse después.
+function updateDedicaPriceHint(){
+  const el=$('sheetDedicaPriceHint');if(!el)return;
+  const hasMsg=($('sheetDedicaMsg').value||'').trim().length>0;
+  if(hasMsg&&dedicaPrice>0){el.style.display='';el.textContent='💌 +'+cop(dedicaPrice)+' por la dedicatoria';}
+  else el.style.display='none';
 }
 function updatePriOption(){
   const now=Date.now()/1000;
@@ -806,15 +815,19 @@ function pick(m){
 function closeSheet(){$('sheet').classList.remove('open');document.body.style.overflow='';$('nav').classList.remove('modal-open');try{$('sheetDedicaMsg').value='';}catch(e){}}
 function confirmReq(){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
+  const hasMsg=($('sheetDedicaMsg').value||'').trim().length>0;
+  const dedicaNote=(hasMsg&&dedicaPrice>0)?'<br><span style="color:var(--gold);font-size:13px">💌 +'+cop(dedicaPrice)+' por la dedicatoria</span>':'';
   if(mode==='super'){
-    confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> y suena de primera. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'. Solo <b>una vez por canción</b>.',doReq);
+    confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> y suena de primera. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'. Solo <b>una vez por canción</b>.'+dedicaNote,doReq);
   } else if(mode==='pri'){
     const now=Date.now()/1000;let msg;
     if(sess&&sess.pass_until>now) msg='Tu <b>pase activo</b> cubre esta prioridad (sin cargo extra).';
     else if(sess&&sess.credits>0) msg='Usarás <b>1 crédito</b> de prioridad (te quedan '+(sess.credits-1)+').';
     else msg='Se cobrará <b>'+cop(price)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'.';
     if(price_queue_min>5) msg+='<br><span style="color:#9aa7c2;font-size:13px">⏱ Cola de prioridades: ~'+price_queue_min+' min de espera antes de la tuya</span>';
-    confirmModal('Pedir con prioridad ⚡',msg,doReq);
+    confirmModal('Pedir con prioridad ⚡',msg+dedicaNote,doReq);
+  } else if(hasMsg&&dedicaPrice>0){
+    confirmModal('💌 Pedir con dedicatoria','Se cobrará <b>'+cop(dedicaPrice)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+' por la dedicatoria.',doReq);
   } else doReq();
 }
 let _reqInFlight=false;
@@ -1573,6 +1586,7 @@ async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
     price=s.settings.price_priority;packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
+    dedicaPrice=s.settings.dedica_price||0;
     jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;price_queue_min=s.priority_queue_min||0;jumpReason=s.jump_unavailable_reason||'';
     prepaidMode=!!s.settings.prepaid_mode;walletBalance=s.wallet_balance||0;
     VENUE_TZ=s.settings.timezone||'America/Bogota';
