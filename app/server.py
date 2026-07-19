@@ -907,12 +907,16 @@ def get_session(token):
     return STATE["sessions"].get(token) if token else None
 
 def active_persons_count():
-    """Cuenta sesiones (personas) activas en las últimas 2h — NO mesas distintas.
-    Usado para el umbral de skip-vote; debe ser la única fuente de verdad para que
-    el número mostrado al cliente coincida con el que realmente decide el salto."""
+    """Cuenta MESAS DISTINTAS con sesión activa en las últimas 2h. Usado para el umbral de
+    skip-vote; debe ser la única fuente de verdad para que el número mostrado al cliente
+    coincida con el que realmente decide el salto. Antes contaba cada sesión/token sin
+    deduplicar por mesa: volver a entrar el PIN (batería, refresh, cambio de dispositivo —
+    incluyendo el bug del gate trabado corregido esta sesión) inflaba el conteo sin límite,
+    un bar de 13 mesas llegó a mostrar 49 "personas activas" — bug reportado en vivo. Ahora
+    coincide con "active_sessions" (mismo cálculo, una sola fuente de verdad)."""
     now = time.time()
-    return sum(1 for se in STATE.get("sessions", {}).values()
-               if now - se.get("created", 0) < 7200)
+    return len({se["table"] for se in STATE.get("sessions", {}).values()
+                if now - se.get("created", 0) < 7200})
 
 def get_customer(sess):
     phone = sess and sess.get("phone")
@@ -1418,6 +1422,19 @@ def public_state(token=None, admin=False, mark_dedica=None):
     _active_slot = next((sl for sl in s.get("schedule", []) if sl.get("genre") == _active_genre
                          and s.get("schedule")), None)
 
+    # ---- Por qué no se puede saltar al #1 ahora — se expone SIEMPRE el motivo (no solo un
+    # booleano) para que el cliente muestre el botón deshabilitado con una explicación en vez
+    # de ocultarlo sin más: evita que el cliente le pregunte al mesero por qué no aparece,
+    # reduciendo la carga operativa del admin del bar.
+    if not np:
+        jump_reason = "Aún no hay una canción sonando."
+    elif (poll_state and poll_state.get("active")) or (duelo_state and duelo_state.get("active")):
+        jump_reason = "Hay una votación o duelo en curso — espera a que termine."
+    elif STATE.get("jump_used_for") == np["id"]:
+        jump_reason = "Ya se usó el salto para esta canción — disponible con la siguiente."
+    else:
+        jump_reason = None
+
     out = {
         "settings": dict({k: s.get(k) for k in ("venue_name", "price_priority", "style", "auto_approve",
                                        "genre", "credit_packages", "time_pass",
@@ -1436,14 +1453,14 @@ def public_state(token=None, admin=False, mark_dedica=None):
         "tables": [t["name"] for t in STATE["tables"]],
         "stations": STATE.get("stations", []),
         "now_playing": np_pub,
-        "jump_available": bool(np) and STATE.get("jump_used_for") != np["id"],
+        "jump_available": jump_reason is None,
+        "jump_unavailable_reason": jump_reason,
         "jump_price": s["price_priority"] * s.get("jump_multiplier", 3),
         "priority_queue_min": int(sum(i.get("duration", DEFAULT_DUR)
                                       for i in queue_view() if i.get("priority")) // 60),
         "tv_active": (time.time() - STATE.get("tv_lastseen", 0)) < 15,
         "qr_force": time.time() < STATE.get("qr_force_until", 0),
-        "active_sessions": len({se["table"] for se in STATE.get("sessions", {}).values()
-                               if time.time() - se.get("created", 0) < 7200}),
+        "active_sessions": active_persons_count(),
         "assists": [a for a in STATE.get("assists", []) if not a.get("resolved")],
         "queue": qout,
         "queue_count": len(q),

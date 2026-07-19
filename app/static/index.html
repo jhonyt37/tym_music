@@ -397,8 +397,8 @@ body{padding-bottom:80px}
       <div><b>⚡ Prioridad</b><div class="small" id="priSub">Suena antes</div></div>
       <div class="price" id="priPrice">$1.000</div>
     </div>
-    <div class="opt" id="optSuper" onclick="pick('super')" style="display:none">
-      <div><b>⏫ Al frente (#1)</b><div class="small">Suena de primera, ¡ya mismo!</div></div>
+    <div class="opt" id="optSuper" onclick="pick('super')">
+      <div><b>⏫ Al frente (#1)</b><div class="small" id="superSub">Suena de primera, ¡ya mismo!</div></div>
       <div class="price" id="superPrice" style="color:#a78bfa">$3.000</div>
     </div>
     <div style="margin-top:14px" id="sheetDedicaBox">
@@ -507,7 +507,7 @@ function applyTheme(t){
   r.setProperty('--card',th.card);r.setProperty('--line',th.line);
   document.querySelector('meta[name="theme-color"]').content=th.bg;
 }
-let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0;
+let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0, jumpReason='';
 let prepaidMode=false, walletBalance=0, insufRetry=null, insufNeed=0, pendingRetry=null;
 let registerGateOpen=false, _anonBusy=false, pendingTabConfirm=false;
 // Si el navegador restaura esta página desde el bfcache (back/forward) en vez de cargarla de
@@ -786,10 +786,17 @@ function updatePriOption(){
   if(sess&&sess.pass_until>now){$('priSub').textContent='Incluida en tu pase activo'+wait;$('priPrice').textContent='Pase';}
   else if(sess&&sess.credits>0){$('priSub').textContent='Usa 1 crédito (te quedan '+(sess.credits-1)+')'+wait;$('priPrice').textContent='1 créd.';}
   else{$('priSub').textContent='Suena antes'+wait+' — se suma a tu cuenta';$('priPrice').textContent=cop(price);}
-  $('optSuper').style.display = jumpAvail ? '' : 'none';
+  // El botón "Al frente (#1)" SIEMPRE se muestra (nunca se oculta) — cuando no está
+  // disponible se ve deshabilitado con el motivo exacto (jumpReason, del servidor) en vez de
+  // desaparecer sin explicación: evita que el cliente le pregunte al mesero por qué no está,
+  // reduciendo la carga operativa del admin del bar.
+  $('optSuper').classList.toggle('disabled',!jumpAvail);
+  $('superSub').textContent = jumpAvail ? 'Suena de primera, ¡ya mismo!' : jumpReason;
   $('superPrice').textContent=cop(jumpPrice);
 }
-function pick(m){mode=m;
+function pick(m){
+  if(m==='super'&&!jumpAvail){toast(jumpReason||'El salto al #1 no está disponible ahora','err');return;}
+  mode=m;
   $('optNormal').classList.toggle('sel',m==='normal');
   $('optPri').classList.toggle('sel',m==='pri');
   $('optSuper').classList.toggle('sel',m==='super');
@@ -1407,7 +1414,15 @@ function songRow(it,opts){
   div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+esc(it.table||it.artist||'')+tsHtml}</div></div>`;
   if(opts&&opts.boost){
     if(!it.priority){const b=document.createElement('button');b.className='btn sm gold';b.textContent='⚡ Impulsar';b.onclick=()=>boost(it.id,it.mine);div.appendChild(b);}
-    if(jumpAvail&&!it.super){const jb=document.createElement('button');jb.className='btn sm';jb.style.background='#7c3aed';jb.textContent='⏫ #1';jb.title='Saltar al primer lugar';jb.onclick=()=>jump(it.id,it.mine);div.appendChild(jb);}
+    // Siempre visible (nunca oculto) — deshabilitado con el motivo en el title (tooltip) cuando
+    // no está disponible, en vez de desaparecer sin explicación. Ver pick()/updatePriOption().
+    if(!it.super){
+      const jb=document.createElement('button');jb.className='btn sm';
+      jb.style.background=jumpAvail?'#7c3aed':'var(--bg2)';jb.style.color=jumpAvail?'':'var(--mut)';
+      jb.style.cursor=jumpAvail?'pointer':'not-allowed';
+      jb.textContent='⏫ #1';jb.title=jumpAvail?'Saltar al primer lugar':jumpReason;
+      jb.onclick=()=>jump(it.id,it.mine);div.appendChild(jb);
+    }
   }
   const rr=document.createElement('div');rr.className='reacts';rr.style.flexBasis='100%';rr.innerHTML=reactHtml(it);div.appendChild(rr);
   return div;
@@ -1558,7 +1573,7 @@ async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
     price=s.settings.price_priority;packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
-    jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;price_queue_min=s.priority_queue_min||0;
+    jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;price_queue_min=s.priority_queue_min||0;jumpReason=s.jump_unavailable_reason||'';
     prepaidMode=!!s.settings.prepaid_mode;walletBalance=s.wallet_balance||0;
     VENUE_TZ=s.settings.timezone||'America/Bogota';
     renderSocials(s.settings.socials);

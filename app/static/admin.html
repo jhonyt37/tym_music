@@ -108,6 +108,15 @@
     <!-- Strip resumen de hoy -->
     <div id="todayStrip" class="kpis" style="margin-bottom:14px;display:none"></div>
 
+    <!-- Filtrar por mesa: revisar consumo/actividad de una sola mesa -->
+    <div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span class="small" style="color:var(--mut)">🔍 Revisar mesa</span>
+      <select class="field" id="liveMesaFilter" style="margin:0;width:170px;padding:6px 8px" onchange="_liveMesaFilter=this.value;tick()">
+        <option value="">Todas las mesas</option>
+      </select>
+      <span class="small" id="liveMesaFilterHint" style="color:var(--mut)"></span>
+    </div>
+
     <!-- Actividad activa ahora -->
     <div class="card" id="activeNowCard" style="display:none;margin-bottom:14px;border-color:var(--pri)">
       <p class="sec" style="margin-bottom:10px">⚡ Activo ahora</p>
@@ -659,6 +668,7 @@ function tickify(parent){
   },120);
 }
 let editing=false, formLoaded=false, curTimer=null, packages=[], pass_obj={minutes:30,price:5000}, curTheme='azul';
+let _liveMesaFilter='';
 let VENUE_TZ='America/Bogota';
 
 function showTab(id){
@@ -1063,6 +1073,23 @@ async function tick(){
       });
     }else{ac.style.display='none';}
 
+    // Filtro "Revisar mesa": repuebla el select con las mesas del local (preservando la
+    // selección) y arma el texto de ayuda. El filtro se aplica abajo a cobros/movimientos y
+    // pendientes (listas simples); la cola NO se filtra fuera del DOM — solo se atenúan las
+    // filas de otras mesas — porque el drag&drop de reordenar depende de tener SIEMPRE la
+    // lista completa (_qSnapshot), filtrarla rompería el reorder mientras el filtro está activo.
+    const lmf=$('liveMesaFilter');
+    if(lmf){
+      const tbls=s.tables||[];
+      if(lmf.dataset.count!=tbls.length){
+        lmf.innerHTML='<option value="">Todas las mesas</option>'+tbls.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+        lmf.dataset.count=tbls.length;
+      }
+      lmf.value=_liveMesaFilter;
+      const hintEl=$('liveMesaFilterHint');
+      if(hintEl)hintEl.textContent=_liveMesaFilter?'Mostrando cobros y pendientes de '+_liveMesaFilter+' · la cola se atenúa para las demás':'';
+    }
+
     // Ledger / cobros
     const bt=$('byTable'),L=$('ledger');
     if(s.settings.prepaid_mode){
@@ -1073,13 +1100,14 @@ async function tick(){
       $('total').textContent=cop(s.ledger_total);
       const byT={};(s.ledger||[]).forEach(l=>{byT[l.table]=(byT[l.table]||0)+l.amount;});
       bt.innerHTML='';
-      Object.entries(byT).forEach(([t,v])=>{
+      Object.entries(byT).filter(([t])=>!_liveMesaFilter||t===_liveMesaFilter).forEach(([t,v])=>{
         const d=document.createElement('div');d.className='grp';
         d.innerHTML=`<span style="flex:1">${esc(t)}</span><span class="price" style="color:var(--gold)">${cop(v)}</span>`;
         const b=document.createElement('button');b.className='btn red sm';b.textContent='Cerrar cuenta';b.style.marginLeft='10px';
         b.onclick=()=>closeTable(t,v);d.appendChild(b);bt.appendChild(d);
       });
-      const lg=s.ledger||[];
+      if(_liveMesaFilter&&!(_liveMesaFilter in byT))bt.innerHTML='<div class="empty">'+esc(_liveMesaFilter)+' no tiene cobros este turno.</div>';
+      const lg=(s.ledger||[]).filter(x=>!_liveMesaFilter||x.table===_liveMesaFilter);
       if(!lg.length)L.innerHTML='<div class="empty">Sin cobros aún.</div>';
       else{L.innerHTML='';lg.forEach(x=>{const r=document.createElement('div');r.className='row';
         r.innerHTML=`<div class="info"><div class="t">${esc(x.table)} · <span class="small">${esc(x.kind)}</span></div><div class="a">${esc(x.title)}${x.ts?' · '+hm3(x.ts):''}</div></div><div class="chip pri">${cop(x.amount)}</div>`;
@@ -1087,8 +1115,10 @@ async function tick(){
     }
 
     // Pendientes de aprobación
-    const P=$('pending');const pend=s.pending||[];$('pcount').textContent=pend.length;
-    if(!pend.length)P.innerHTML='<div class="empty">No hay pedidos pendientes.</div>';
+    const P=$('pending');const pendAll=s.pending||[];
+    const pend=pendAll.filter(it=>!_liveMesaFilter||it.table===_liveMesaFilter);
+    $('pcount').textContent=pendAll.length;
+    if(!pend.length)P.innerHTML=_liveMesaFilter?'<div class="empty">'+esc(_liveMesaFilter)+' no tiene pedidos pendientes.</div>':'<div class="empty">No hay pedidos pendientes.</div>';
     else{P.innerHTML='';pend.forEach(it=>{
       const r=document.createElement('div');r.className='row';
       r.innerHTML=`<img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${esc(it.title)} ${it.priority?'<span class="chip pri">⚡</span>':''}</div><div class="a">${esc(it.table)}${it.ts?' · '+hm3(it.ts):''}</div></div>`;
@@ -1114,6 +1144,7 @@ async function tick(){
     Q.innerHTML='';const np=s.now_playing;
     if(np){
       const r=document.createElement('div');r.className='row';r.style.borderColor='var(--pri)';
+      if(_liveMesaFilter&&np.table!==_liveMesaFilter)r.style.opacity='.35';
       const npTs=np.played_at||np.ts;
       r.innerHTML=`<span class="pulse"></span><img class="mini" src="${img(np.yt)}"><div class="info"><div class="t">${esc(np.title)}</div><div class="a">${np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table))}${npTs?' · sonando desde '+hm3(npTs):''}</div></div>`;
       const sk=document.createElement('button');sk.className='btn ghost sm';sk.textContent='⏭';sk.onclick=skip;r.appendChild(sk);Q.appendChild(r);
@@ -1123,6 +1154,7 @@ async function tick(){
     if(!q.length&&!np)Q.innerHTML='<div class="empty">Nada en cola.</div>';
     q.forEach((it,i)=>{
       const r=document.createElement('div');r.className='row';r.draggable=true;
+      if(_liveMesaFilter&&it.table!==_liveMesaFilter)r.style.opacity='.35';
       r.innerHTML=`<span class="drag-handle" title="Arrastra para reordenar">⠿</span><div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.table)}${it.ts?' · '+hm3(it.ts):''}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
       const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';rm.onclick=()=>remove(it.id);r.appendChild(rm);
       // Drag events para reorder

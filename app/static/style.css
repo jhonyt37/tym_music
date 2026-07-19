@@ -100,6 +100,8 @@ header.bar{
   border-radius:14px;padding:14px;margin-top:12px;background:var(--card);cursor:pointer}
 .opt.sel{border-color:var(--pri);box-shadow:0 0 0 2px rgba(59,130,246,.3)}
 .opt .price{font-weight:800;color:var(--gold)}
+.opt.disabled{opacity:.45;cursor:not-allowed}
+.opt.disabled .price{color:var(--mut)}
 .field{width:100%;padding:13px 14px;border-radius:12px;border:1px solid var(--line);
   background:var(--card);color:var(--txt);font-size:16px;outline:none;margin-top:10px}
 

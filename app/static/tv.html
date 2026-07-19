@@ -465,11 +465,17 @@ function showDedicaOverlay(ded){
 }
 
 // ---- Mensaje de canción (dedicatoria inline) ----
+// Debe aparecer apenas arranca la canción (no 5s después) y repetirse varias veces durante
+// toda su duración (antes solo 3 veces fijas, insuficiente en canciones largas) — pedido
+// explícito en vivo: el mensaje es la razón de ser de la dedicatoria, tiene que verse.
+const _SONG_MSG_INTERVAL_MS=40000;
 function showSongMessage(msg,dur){
   _songMsgTimeouts.forEach(clearTimeout);_songMsgTimeouts=[];
   const el=$('songMsgText');if(!el||!msg)return;
   const durMs=(dur||210)*1000;
-  const times=[5000,Math.max(8000,durMs*0.45),Math.max(12000,durMs-35000)].filter(t=>t<durMs-4000);
+  const times=[];
+  for(let t=300;t<durMs-4000;t+=_SONG_MSG_INTERVAL_MS)times.push(t);
+  if(!times.length)times.push(300);
   times.forEach(t=>{
     const tid=setTimeout(()=>{
       el.textContent=msg;
