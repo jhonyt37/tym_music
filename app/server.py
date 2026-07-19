@@ -802,6 +802,22 @@ def _itunes_query(term, entity):
     except Exception:
         return []
 
+# iTunes clasifica géneros con etiquetas propias que no siempre coinciden con el término
+# coloquial que un dueño de bar en Colombia escribiría en el filtro (ej. "reggaeton" nunca
+# aparece literal — iTunes usa "Urbano latino", confirmado en vivo probando Daddy Yankee, J
+# Balvin, Karol G). Sin este mapeo, bloquear/permitir por género quedaría roto en la práctica
+# para los términos más obvios que alguien realmente escribiría.
+_GENRE_ALIASES = {
+    "reggaeton": "urbano latino", "reggaetón": "urbano latino", "urbano": "urbano latino",
+    "perreo": "urbano latino", "trap": "hip-hop/rap",
+}
+
+def _kw_matches(kw, haystack, genre):
+    if kw in haystack:
+        return True
+    alias = _GENRE_ALIASES.get(kw)
+    return bool(alias and genre and alias in genre)
+
 def itunes_genre(artist, title):
     artist = (artist or "").strip()[:80]
     title = (title or "").strip()[:150]
@@ -1765,6 +1781,22 @@ class H(BaseHTTPRequestHandler):
             if pre_yt:
                 pre_title, pre_artist = yt_title(pre_yt)
                 d = dict(d); d["yt"] = pre_yt; d["title"] = pre_title; d["artist"] = pre_artist or ""
+        # Filtro de contenido por género: si el local configuró palabras bloqueadas/permitidas,
+        # resolver el género real (iTunes, llamada de red) ANTES del LOCK — mismo motivo que la
+        # resolución de link de arriba. Antes el filtro solo comparaba título+artista como texto
+        # plano, así que bloquear "reggaeton" como palabra no frenaba canciones de ese género
+        # cuyo título/artista no contuviera esa palabra literal (ej. "Bad Bunny - Dákiti") — bug
+        # reportado en vivo. Solo se hace la llamada si el local realmente tiene el filtro
+        # activo, para no pagar latencia de red en cada pedido de locales sin filtro.
+        if path == "/api/request":
+            _fv = VENUES.get(vid)
+            if _fv and (_fv["settings"].get("blocked_keywords") or _fv["settings"].get("allowed_keywords")):
+                _ftitle, _fartist = d.get("title") or "", d.get("artist") or ""
+                if _ftitle or _fartist:
+                    try:
+                        d = dict(d); d["_genre"] = itunes_genre(_fartist, _ftitle) or ""
+                    except Exception:
+                        pass
         with LOCK:
             self.set_venue(vid)
             # ---- Sesion de mesa ----
@@ -1909,13 +1941,17 @@ class H(BaseHTTPRequestHandler):
                 title = str(d.get("title") or "Canción")[:200]
                 artist = str(d.get("artist") or "")[:120]
                 now = time.time()
-                # Filtro de contenido: palabras bloqueadas / permitidas
+                # Filtro de contenido: palabras bloqueadas / permitidas — compara contra
+                # título+artista+género real (resuelto antes del LOCK arriba, ver "_genre"),
+                # con alias para términos coloquiales que no coinciden con la etiqueta de
+                # iTunes (ver _GENRE_ALIASES / _kw_matches).
                 _haystack = (title + " " + (artist or "")).lower()
+                _genre_l = (d.get("_genre") or "").lower()
                 _blocked = [kw.strip().lower() for kw in STATE["settings"].get("blocked_keywords", []) if kw.strip()]
-                if _blocked and any(kw in _haystack for kw in _blocked):
+                if _blocked and any(_kw_matches(kw, _haystack, _genre_l) for kw in _blocked):
                     return self._send(400, {"error": "Esta canción no está disponible en este local 🎵", "content_blocked": True})
                 _allowed = [kw.strip().lower() for kw in STATE["settings"].get("allowed_keywords", []) if kw.strip()]
-                if _allowed and not any(kw in _haystack for kw in _allowed):
+                if _allowed and not any(_kw_matches(kw, _haystack, _genre_l) for kw in _allowed):
                     return self._send(400, {"error": "Esta canción no encaja con la música del local. ¡Prueba con otra! 🎶", "content_blocked": True})
                 if in_play_or_queue(yt):
                     fresh = next((i for i in STATE["items"] if i["yt"] == yt and now - i.get("ts", 0) < 10), None)
