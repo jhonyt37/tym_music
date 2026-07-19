@@ -325,11 +325,6 @@
         <input type="checkbox" id="musicOnly" style="width:22px;height:22px">
       </label>
 
-      <label class="opt" style="margin-bottom:14px">
-        <div><b>Moderar mensaje al pedir canción 💌</b><div class="small">Separado de la moderación de dedicatorias mesa a mesa. Si un cliente escribe un mensaje al pedir su canción y queda marcado, la canción suena igual pero el mensaje no aparece en TV hasta que lo apruebes abajo, en Social.</div></div>
-        <input type="checkbox" id="songMessageModeration" style="width:22px;height:22px" onchange="post('/api/admin/settings',{song_message_moderation:$('songMessageModeration').checked}).then(()=>toast('Guardado','ok'))">
-      </label>
-
       <label class="small" style="display:block;margin-bottom:4px">🚫 Palabras BLOQUEADAS (ej: metal, trap, reggaetón)</label>
       <div style="display:flex;gap:6px;margin-bottom:6px">
         <input class="field" id="blockedInput" placeholder="Agregar palabra..." style="margin:0;flex:1" onkeydown="if(event.key==='Enter'){addKeyword('blocked');event.preventDefault()}">
@@ -610,6 +605,14 @@
     </div>
 
     <!-- Mensajes en pedidos de canción (separado de las dedicatorias mesa a mesa) -->
+    <div class="card">
+      <p class="sec">🎵 Mensaje al pedir canción</p>
+      <label class="opt">
+        <div><b>Moderar antes de mostrar en TV</b><div class="small">Separado de la moderación de dedicatorias mesa a mesa. Si un cliente escribe un mensaje al pedir su canción y queda marcado, la canción suena igual pero el mensaje no aparece en TV hasta que lo apruebes abajo.</div></div>
+        <input type="checkbox" id="songMessageModeration" style="width:22px;height:22px" onchange="post('/api/admin/settings',{song_message_moderation:$('songMessageModeration').checked}).then(()=>toast('Guardado','ok'))">
+      </label>
+    </div>
+
     <div class="card" id="songMsgCard" style="display:none">
       <p class="sec">🎵 Mensajes en canciones por revisar</p>
       <div class="small" style="color:var(--mut);margin-bottom:10px">Mensajes que un cliente escribió al pedir su canción y quedaron marcados por la moderación — la canción suena igual, solo el mensaje queda oculto en TV hasta que decidas.</div>
