@@ -275,10 +275,6 @@
       <div class="pkgrow"><span class="small" style="flex:1">No repetir la misma en (minutos, 0=sin límite)</span><input class="field" id="repMin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Ni dentro de las últimas N canciones</span><input class="field" id="repSongs" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Cortar últimos seg del video (silencios)</span><input class="field" id="trimEnd" type="number"></div>
-      <label class="opt" style="margin-top:12px">
-        <div><b>Lista del local en orden aleatorio</b><div class="small">Si está apagado, sigue el orden en que añadiste las canciones</div></div>
-        <input type="checkbox" id="fbShuffle" style="width:22px;height:22px" onchange="post('/api/admin/settings',{fallback_shuffle:$('fbShuffle').checked}).then(()=>toast('Guardado','ok'))">
-      </label>
         </div>
       </details>
 
@@ -347,16 +343,6 @@
         <button class="btn sm" onclick="addKeyword('allowed')">+ Agregar</button>
       </div>
       <div id="allowedTags" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px;margin-bottom:14px"></div>
-        </div>
-      </details>
-
-      <details class="settingsSection">
-        <summary><span class="sec">Horario automático 📅</span><span class="chev">▸</span></summary>
-        <div class="secBody">
-      <div class="small" style="color:var(--mut);margin-bottom:12px">Define franjas horarias con géneros distintos. La lista de fallback cambia automáticamente a la hora indicada (hora Bogotá).</div>
-      <div id="scheduleSlots" style="margin-bottom:10px"></div>
-      <button class="btn ghost sm" onclick="addScheduleSlot()">+ Agregar franja</button>
-      <div class="small" style="color:var(--mut);margin-top:8px" id="activeSlotInfo"></div>
         </div>
       </details>
 
@@ -430,6 +416,21 @@
         <h2 style="margin-top:14px;font-size:14px;font-weight:700">En tu lista</h2>
         <div class="small" style="color:var(--mut);margin-bottom:6px">Arrastra ⠿ para reordenar — así suena en modo fallback, cuando nadie está pidiendo canciones.</div>
         <div class="list" id="curList"></div>
+
+        <label class="opt" style="margin-top:14px">
+          <div><b>Orden aleatorio</b><div class="small">Si está apagado, la lista de arriba suena en el orden en que la armaste</div></div>
+          <input type="checkbox" id="fbShuffle" style="width:22px;height:22px" onchange="post('/api/admin/settings',{fallback_shuffle:$('fbShuffle').checked}).then(()=>toast('Guardado','ok'))">
+        </label>
+
+        <details class="settingsSection" style="margin-top:10px">
+          <summary><span class="sec">Horario automático 📅</span><span class="chev">▸</span></summary>
+          <div class="secBody">
+        <div class="small" style="color:var(--mut);margin-bottom:12px">Define franjas horarias con géneros distintos. La lista de fallback cambia automáticamente a la hora indicada (hora Bogotá).</div>
+        <div id="scheduleSlots" style="margin-bottom:10px"></div>
+        <button class="btn ghost sm" onclick="addScheduleSlot()">+ Agregar franja</button>
+        <div class="small" style="color:var(--mut);margin-top:8px" id="activeSlotInfo"></div>
+          </div>
+        </details>
       </div>
 
       <!-- Brand + packages -->
