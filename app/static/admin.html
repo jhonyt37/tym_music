@@ -217,18 +217,6 @@
           </details>
         </div>
 
-        <div class="card">
-          <p class="sec">Cobros del turno</p>
-          <div class="kpi gold" id="total" style="font-size:30px;margin:2px 0 6px">$0</div>
-          <div class="small" style="color:var(--mut);margin-bottom:12px">Total acumulado en este turno</div>
-          <div id="byTable"></div>
-        </div>
-
-        <div class="card">
-          <p class="sec">Movimientos recientes</p>
-          <div class="list" id="ledger"><div class="empty">Sin cobros aún.</div></div>
-        </div>
-
       </div>
     </div>
   </div>
@@ -488,6 +476,22 @@
      ============================================================ -->
 <div id="tab-caja" class="tabpanel">
   <div class="wrap wide">
+
+    <!-- Turno actual -->
+    <p class="sec" style="margin-bottom:10px">🧾 Turno actual</p>
+    <div class="grid2" style="align-items:start;margin-bottom:14px">
+      <div class="card">
+        <p class="sec">Cobros del turno</p>
+        <div class="kpi gold" id="total" style="font-size:30px;margin:2px 0 6px">$0</div>
+        <div class="small" style="color:var(--mut);margin-bottom:12px">Total acumulado en este turno</div>
+        <div id="byTable"></div>
+      </div>
+
+      <div class="card">
+        <p class="sec">Movimientos recientes</p>
+        <div class="list" id="ledger"><div class="empty">Sin cobros aún.</div></div>
+      </div>
+    </div>
 
     <!-- Dashboard transaccional de hoy -->
     <div class="card" style="margin-bottom:14px;border-color:var(--pri);box-shadow:0 0 0 1px rgba(59,130,246,.15),0 4px 20px rgba(59,130,246,.08)">
