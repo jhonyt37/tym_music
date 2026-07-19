@@ -351,20 +351,6 @@
       </details>
 
       <details class="settingsSection">
-        <summary><span class="sec">Tema de color</span><span class="chev">▸</span></summary>
-        <div class="secBody">
-      <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0" id="themeRow">
-        <div onclick="pickThemeAndSave('azul')" data-t="azul" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #3b82f6;background:#0e1320;color:#3b82f6">Azul</div>
-        <div onclick="pickThemeAndSave('purpura')" data-t="purpura" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #a855f7;background:#0e0b1e;color:#a855f7">Púrpura</div>
-        <div onclick="pickThemeAndSave('verde')" data-t="verde" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #10b981;background:#081411;color:#10b981">Verde</div>
-        <div onclick="pickThemeAndSave('rojo')" data-t="rojo" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #ef4444;background:#1a0e0e;color:#ef4444">Rojo</div>
-        <div onclick="pickThemeAndSave('dorado')" data-t="dorado" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #f59e0b;background:#1a1408;color:#f59e0b">Dorado</div>
-        <div onclick="pickThemeAndSave('rosa')" data-t="rosa" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #ec4899;background:#1a0e16;color:#ec4899">Rosa</div>
-      </div>
-        </div>
-      </details>
-
-      <details class="settingsSection">
         <summary><span class="sec">Horario automático 📅</span><span class="chev">▸</span></summary>
         <div class="secBody">
       <div class="small" style="color:var(--mut);margin-bottom:12px">Define franjas horarias con géneros distintos. La lista de fallback cambia automáticamente a la hora indicada (hora Bogotá).</div>
@@ -467,6 +453,20 @@
           <label class="small">Web (URL)</label>
           <input class="field" id="soWeb" placeholder="https://...">
           <button class="btn block" style="margin-top:12px" onclick="save()">Guardar</button>
+
+          <details class="settingsSection" style="margin-top:14px">
+            <summary><span class="sec">Apariencia</span><span class="chev">▸</span></summary>
+            <div class="secBody">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0" id="themeRow">
+            <div onclick="pickThemeAndSave('azul')" data-t="azul" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #3b82f6;background:#0e1320;color:#3b82f6">Azul</div>
+            <div onclick="pickThemeAndSave('purpura')" data-t="purpura" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #a855f7;background:#0e0b1e;color:#a855f7">Púrpura</div>
+            <div onclick="pickThemeAndSave('verde')" data-t="verde" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #10b981;background:#081411;color:#10b981">Verde</div>
+            <div onclick="pickThemeAndSave('rojo')" data-t="rojo" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #ef4444;background:#1a0e0e;color:#ef4444">Rojo</div>
+            <div onclick="pickThemeAndSave('dorado')" data-t="dorado" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #f59e0b;background:#1a1408;color:#f59e0b">Dorado</div>
+            <div onclick="pickThemeAndSave('rosa')" data-t="rosa" style="flex:1 1 28%;min-width:90px;cursor:pointer;border-radius:10px;height:48px;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px;border:2px solid #ec4899;background:#1a0e16;color:#ec4899">Rosa</div>
+          </div>
+            </div>
+          </details>
         </div>
 
         <div class="card">
