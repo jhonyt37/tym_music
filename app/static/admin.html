@@ -56,6 +56,10 @@
 .row.dragging{opacity:.3;border-style:dashed!important}
 .row.drag-over{border-top:2px solid var(--pri)!important;background:rgba(59,130,246,.08)}
 .row[draggable=true]{cursor:default}
+/* Soltar archivos/carpetas del sistema para copiarlos a la carpeta permitida (modo local) */
+#dropZone{margin-top:14px;border:2px dashed var(--line);border-radius:14px;padding:26px;
+  text-align:center;transition:border-color .15s,background .15s}
+#dropZone.drag-over{border-color:var(--pri);background:rgba(59,130,246,.08)}
 </style>
 </head>
 <body>
@@ -539,14 +543,25 @@
       <div class="small" style="color:var(--gold);margin-bottom:10px">
         ⚠ Chrome no deja elegir <b>Escritorio</b>, <b>Documentos</b>, <b>Descargas</b> ni la
         carpeta de <b>Inicio</b> directamente (restricción de seguridad del navegador, no de
-        TYM). No hace falta mover toda la música — alcanza con elegir la <b>subcarpeta</b>
-        donde están las canciones (ej. "Descargas/Música del bar" en vez de "Descargas").
+        TYM) — para esto, elige o crea cualquier <b>subcarpeta</b> (ej. "Descargas/Música del
+        bar"). Esta va a ser la carpeta permitida, donde vive el catálogo.
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost" id="pickFolderBtn" onclick="pickLocalFolder()">📁 Elegir carpeta…</button>
         <button class="btn ghost" id="forceRescanBtn" onclick="forceRescanLocalCatalog()">🔄 Forzar revisión del catálogo</button>
       </div>
       <div class="small" id="scanStatus" style="margin-top:8px"></div>
+
+      <div id="dropZone">
+        <div style="font-size:34px;margin-bottom:6px">⬇️📂</div>
+        <div style="font-weight:700">Arrastra canciones (o una carpeta completa) aquí para agregarlas</div>
+        <div class="small" style="color:var(--mut);margin-top:4px">
+          Se copian dentro de la carpeta permitida de arriba — funciona aunque el archivo
+          original esté en Escritorio, Documentos o Descargas (arrastrar SÍ lo permite Chrome,
+          aunque elegir esas carpetas directo no). Necesitas haber elegido la carpeta permitida
+          primero.
+        </div>
+      </div>
       <div id="rescanReport" style="margin-top:10px"></div>
       <div id="scanReview" style="margin-top:10px"></div>
 
@@ -1446,6 +1461,20 @@ async function scanFolder(dirHandle,onProgress){
   return found;
 }
 
+// Fila compacta y con etiquetas para título/artista/género — antes eran 3 <input> sin
+// ninguna indicación de cuál era cuál, y con el tamaño de campo normal (pensado para
+// formularios grandes) cada fila quedaba enorme. Se comparte entre la tabla de revisión y
+// "En el catálogo" para que se vean igual.
+function localTrackFieldsHtml(v){
+  const sm='padding:8px 10px;font-size:14px;margin:0';
+  const lbl='color:var(--mut);display:block;margin-bottom:2px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px';
+  return `<div style="display:grid;grid-template-columns:2fr 1.3fr 1fr;gap:6px">
+    <div><label style="${lbl}">Título</label><input class="field" style="${sm}" data-f="title" value="${esc(v.title||'')}"></div>
+    <div><label style="${lbl}">Artista</label><input class="field" style="${sm}" data-f="artist" value="${esc(v.artist||'')}"></div>
+    <div><label style="${lbl}">Género</label><input class="field" style="${sm}" data-f="genre" value="${esc(v.genre||'')}"></div>
+  </div>`;
+}
+
 let _scanBatch=[];
 async function pickLocalFolder(){
   if(!window.showDirectoryPicker){
@@ -1453,7 +1482,10 @@ async function pickLocalFolder(){
     return;
   }
   let dirHandle;
-  try{dirHandle=await window.showDirectoryPicker();}
+  // mode:'readwrite' de una vez — la necesita el cuadro de arrastrar y soltar (copia
+  // archivos DENTRO de esta carpeta), pedirla junto con la de lectura evita un segundo
+  // permiso más adelante.
+  try{dirHandle=await window.showDirectoryPicker({mode:'readwrite'});}
   catch(e){return;} // el usuario canceló el selector
   await idbSetDirHandle(dirHandle);
   _localDirHandle=dirHandle;
@@ -1464,6 +1496,129 @@ async function pickLocalFolder(){
     'No se encontraron archivos de audio/video en esa carpeta.';
   renderScanReview(_scanBatch);
 }
+
+// ---- Arrastrar y soltar (pedido explícito): la respuesta a "¿y si la canción está en una
+// carpeta bloqueada por Chrome (Escritorio/Documentos/Descargas)?" — arrastrar un archivo (o
+// una carpeta entera) a este cuadro SÍ está permitido aunque venga de una de esas carpetas
+// (la restricción de Chrome es solo sobre el selector nativo de carpetas, no sobre soltar
+// archivos ya elegidos por el usuario con el mouse). Se copian los bytes dentro de la carpeta
+// permitida que ya se eligió arriba — todo dentro del navegador, nunca por fuera de TYM. ----
+
+async function ensureWriteAccess(){
+  if(!_localDirHandle)return false;
+  try{
+    if(await _localDirHandle.queryPermission({mode:'readwrite'})==='granted')return true;
+    if(await _localDirHandle.requestPermission({mode:'readwrite'})==='granted')return true;
+  }catch(e){}
+  return false;
+}
+
+// Recorre lo que se soltó (webkitGetAsEntry — funciona tanto para archivos sueltos como para
+// carpetas arrastradas completas) y devuelve la lista plana de archivos de audio/video con su
+// ruta relativa (para recrear la subcarpeta si se arrastró una carpeta, no solo archivos).
+async function walkDroppedEntry(entry,prefix){
+  const found=[];
+  if(entry.isFile){
+    const mt=mediaTypeOf(entry.name);
+    if(mt){
+      const file=await new Promise((res,rej)=>entry.file(res,rej));
+      found.push({path:prefix?prefix+'/'+entry.name:entry.name,file,mediaType:mt});
+    }
+  }else if(entry.isDirectory){
+    const reader=entry.createReader();
+    const children=[];
+    // readEntries() no siempre devuelve todo de una — hay que llamarlo seguido hasta que
+    // devuelva vacío (comportamiento documentado de la API, no es un error).
+    while(true){
+      const batch=await new Promise((res,rej)=>reader.readEntries(res,rej));
+      if(!batch.length)break;
+      children.push(...batch);
+    }
+    for(const child of children){
+      const sub=await walkDroppedEntry(child,prefix?prefix+'/'+entry.name:entry.name);
+      found.push(...sub);
+    }
+  }
+  return found;
+}
+
+async function fileExistsIn(dir,name){
+  try{await dir.getFileHandle(name);return true;}catch(e){return false;}
+}
+
+// Copia un archivo encontrado en lo que se soltó DENTRO de la carpeta permitida, recreando
+// las subcarpetas que traiga su ruta relativa. Nunca sobreescribe algo que ya esté ahí (podría
+// ser una canción distinta con el mismo nombre) — lo salta y lo reporta.
+async function copyDroppedFile(found){
+  const parts=found.path.split('/');
+  const filename=parts.pop();
+  let dir=_localDirHandle;
+  for(const part of parts)dir=await dir.getDirectoryHandle(part,{create:true});
+  if(await fileExistsIn(dir,filename))return{skipped:true,path:found.path};
+  const fh=await dir.getFileHandle(filename,{create:true});
+  const writable=await fh.createWritable();
+  await writable.write(found.file);
+  await writable.close();
+  return{skipped:false,path:found.path,file:found.file,mediaType:found.mediaType};
+}
+
+(function initDropZone(){
+  const zone=$('dropZone');
+  if(!zone)return;
+  ['dragenter','dragover'].forEach(ev=>zone.addEventListener(ev,e=>{e.preventDefault();zone.classList.add('drag-over');}));
+  ['dragleave','dragend'].forEach(ev=>zone.addEventListener(ev,()=>zone.classList.remove('drag-over')));
+  zone.addEventListener('drop',async e=>{
+    e.preventDefault();zone.classList.remove('drag-over');
+    if(!window.DataTransferItem||!DataTransferItem.prototype.webkitGetAsEntry){
+      toast('Tu navegador no soporta arrastrar y soltar carpetas — usa Chrome o Edge','err');
+      return;
+    }
+    if(!_localDirHandle){
+      const saved=await idbGetDirHandle();
+      if(saved){try{if(await saved.queryPermission({mode:'read'})==='granted')_localDirHandle=saved;}catch(err){}}
+    }
+    if(!_localDirHandle){toast('Primero elige la carpeta permitida con el botón de arriba','err');return;}
+    const okWrite=await ensureWriteAccess();
+    if(!okWrite){toast('TYM necesita permiso para escribir en esa carpeta — elígela de nuevo con el botón de arriba','err');return;}
+    const items=e.dataTransfer.items;
+    const entries=[];
+    for(let i=0;i<items.length;i++){
+      const entry=items[i].webkitGetAsEntry&&items[i].webkitGetAsEntry();
+      if(entry)entries.push(entry);
+    }
+    if(!entries.length)return;
+    const status=$('scanStatus');
+    status.textContent='Copiando a la carpeta permitida…';
+    let found=[];
+    for(const entry of entries)found=found.concat(await walkDroppedEntry(entry,''));
+    if(!found.length){
+      status.textContent='Lo que soltaste no tiene archivos de audio/video reconocibles.';
+      return;
+    }
+    const newTracks=[];let skipped=0;
+    for(let i=0;i<found.length;i++){
+      status.textContent=`Copiando… ${i+1}/${found.length}`;
+      const res=await copyDroppedFile(found[i]);
+      if(res.skipped){skipped++;continue;}
+      let tags=null;
+      if(res.mediaType==='audio')tags=await readId3Tags(res.file);
+      const guess=guessFromFilename(res.file.name);
+      const topFolder=res.path.includes('/')?res.path.split('/')[0]:'';
+      newTracks.push({
+        path:res.path,
+        title:(tags&&tags.title)||guess.title||res.file.name,
+        artist:(tags&&tags.artist)||guess.artist||'',
+        genre:(tags&&tags.genre)||topFolder||'',
+        media_type:res.mediaType,
+        duration:null,
+      });
+    }
+    status.textContent=`${newTracks.length} archivo(s) copiado(s) a la carpeta permitida`+
+      (skipped?` — ${skipped} ya existían ahí, no se tocaron`:'')+'.';
+    _scanBatch=_scanBatch.concat(newTracks);
+    renderScanReview(_scanBatch);
+  });
+})();
 
 // "Forzar revisión" (Fase 5): re-escanea la carpeta ya concedida (sin selector nativo si el
 // permiso sigue vigente) y compara contra el catálogo actual — nuevo → tabla de revisión de
@@ -1509,15 +1664,11 @@ function renderScanReview(list){
   box.appendChild(bar);
   const table=document.createElement('div');table.className='list';
   list.forEach((t,i)=>{
-    const r=document.createElement('div');r.className='row';
+    const r=document.createElement('div');r.className='row';r.style.alignItems='flex-start';
     r.innerHTML=`<span style="font-size:20px">${t.media_type==='video'?'🎬':'🎵'}</span>
-      <div class="info" style="display:flex;flex-direction:column;gap:4px;flex:1">
-        <input class="field" style="margin:0" data-f="title" value="${esc(t.title)}" placeholder="Título">
-        <div style="display:flex;gap:6px">
-          <input class="field" style="margin:0;flex:1" data-f="artist" value="${esc(t.artist)}" placeholder="Artista">
-          <input class="field" style="margin:0;flex:1" data-f="genre" value="${esc(t.genre)}" placeholder="Género">
-        </div>
-        <div class="small" style="color:var(--mut)">${esc(t.path)}</div>
+      <div class="info" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0">
+        ${localTrackFieldsHtml(t)}
+        <div class="small" style="color:var(--mut);opacity:.75">📄 ${esc(t.path)}</div>
       </div>`;
     ['title','artist','genre'].forEach(f=>{
       r.querySelector(`[data-f="${f}"]`).addEventListener('input',e=>{_scanBatch[i][f]=e.target.value;});
@@ -1553,19 +1704,15 @@ function renderLocalCatalog(fullCurated){
   box.innerHTML='';
   hint.textContent=list.length?'':'Aún no has escaneado ninguna carpeta.';
   list.forEach(c=>{
-    const r=document.createElement('div');r.className='row';
+    const r=document.createElement('div');r.className='row';r.style.alignItems='flex-start';
     // auto_added: el TV lo encontró solo en un re-escaneo (Fase 5) y nadie lo ha revisado
     // todavía — editar cualquier campo (a mano o con el botón de iTunes) lo marca revisado.
     const autoBadge=c.auto_added?'<span class="small" style="color:var(--gold);font-weight:700;display:block;margin-bottom:2px">🆕 Detectado automáticamente — revisa</span>':'';
     r.innerHTML=`<span style="font-size:20px">${c.media_type==='video'?'🎬':'🎵'}</span>
-      <div class="info" style="display:flex;flex-direction:column;gap:4px;flex:1">
+      <div class="info" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0">
         ${autoBadge}
-        <input class="field" style="margin:0" data-f="title" value="${esc(c.title)}">
-        <div style="display:flex;gap:6px">
-          <input class="field" style="margin:0;flex:1" data-f="artist" value="${esc(c.artist||'')}">
-          <input class="field" style="margin:0;flex:1" data-f="genre" value="${esc(c.genre||'')}">
-        </div>
-        <div class="small" style="color:var(--mut)">${esc(c.local_path||'')}</div>
+        ${localTrackFieldsHtml(c)}
+        <div class="small" style="color:var(--mut);opacity:.75">📄 ${esc(c.local_path||'')}</div>
       </div>`;
     const saveField=async(f,val)=>{await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,[f]:val});};
     ['title','artist','genre'].forEach(f=>{
