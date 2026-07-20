@@ -2132,7 +2132,8 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/dedica/delete", "/api/admin/dedica/approve", "/api/admin/dedica/reject",
                        "/api/admin/dedica_presets", "/api/admin/dedica_codes",
                        "/api/admin/song_message/approve", "/api/admin/song_message/reject",
-                       "/api/admin/change_password", "/api/admin/update_email")
+                       "/api/admin/change_password", "/api/admin/update_email",
+                       "/api/admin/local_catalog", "/api/admin/classify_track")
         vid = self.resolve_vid(d)
         if path in ADMIN_PATHS:
             av = self.authed_venue()
@@ -2954,6 +2955,69 @@ class H(BaseHTTPRequestHandler):
                     pos = {yt: i for i, yt in enumerate(order)}
                     STATE["curated"].sort(key=lambda c: pos.get(c["yt"], 999999))
                 return self._send(200, {"ok": True, "curated": STATE["curated"]})
+
+            if path == "/api/admin/local_catalog":
+                # Fase 2 del modo catálogo local (ver plan federated-knitting-lagoon.md) — el
+                # importador de /admin escanea una carpeta 100% del lado del navegador (nunca
+                # sube el archivo, solo esta metadata de texto) y manda el lote acá.
+                act = d.get("action")
+                if act == "import":
+                    tracks = d.get("tracks") or []
+                    if not isinstance(tracks, list):
+                        return self._send(400, {"error": "tracks debe ser una lista"})
+                    by_yt = {c["yt"]: c for c in STATE["curated"]}
+                    added, updated = 0, 0
+                    for t in tracks[:2000]:
+                        if not isinstance(t, dict):
+                            continue
+                        path = str(t.get("path") or "").strip()[:500]
+                        if not path:
+                            continue
+                        yt = "local:" + hashlib.sha1(path.encode("utf-8")).hexdigest()[:16]
+                        entry = {
+                            "yt": yt, "title": str(t.get("title") or "Canción")[:200],
+                            "artist": str(t.get("artist") or "")[:120],
+                            "duration": int(t["duration"]) if str(t.get("duration") or "").isdigit() else DEFAULT_DUR,
+                            "genre": (str(t.get("genre"))[:40] if t.get("genre") else None),
+                            "media_type": (t.get("media_type") if t.get("media_type") in ("audio", "video") else None),
+                            "local_path": path,
+                        }
+                        if yt in by_yt:
+                            by_yt[yt].update(entry); updated += 1
+                        else:
+                            by_yt[yt] = entry; STATE["curated"].append(entry); added += 1
+                    return self._send(200, {"ok": True, "added": added, "updated": updated, "curated": STATE["curated"]})
+                elif act == "edit":
+                    yt = d.get("yt")
+                    # Solo canciones locales por esta vía — el buscador de YouTube ya tiene su
+                    # propio flujo de agregar y no necesita edición (el título/artista se saca
+                    # del video real).
+                    if not yt or not is_local_id(yt):
+                        return self._send(400, {"error": "yt inválido"})
+                    c = next((c for c in STATE["curated"] if c["yt"] == yt), None)
+                    if not c:
+                        return self._send(404, {"error": "No encontrada"})
+                    if "title" in d:
+                        c["title"] = str(d.get("title") or "Canción")[:200]
+                    if "artist" in d:
+                        c["artist"] = str(d.get("artist") or "")[:120]
+                    if "genre" in d:
+                        c["genre"] = str(d.get("genre"))[:40] if d.get("genre") else None
+                    return self._send(200, {"ok": True, "curated": STATE["curated"]})
+                return self._send(400, {"error": "Acción inválida"})
+
+            if path == "/api/admin/classify_track":
+                # Ayuda opcional del importador: recibe un título/artista "adivinado" del
+                # nombre del archivo y lo refina cruzando con iTunes — reutiliza las mismas
+                # funciones que ya limpian/corrigen resultados de YouTube (construidas para
+                # eso, pero el cruce con iTunes no le importa de dónde salió el texto).
+                title_guess = str(d.get("title") or "").strip()[:200]
+                artist_guess = str(d.get("artist") or "").strip()[:120]
+                clean_title = _clean_title_display(title_guess)
+                artist = _lookup_real_artist(_clean_for_lookup(clean_title)) if not artist_guess else None
+                genre = itunes_genre(artist_guess or artist or "", clean_title)
+                return self._send(200, {"ok": True, "title": clean_title,
+                                         "artist": artist or artist_guess or "", "genre": genre})
 
             if path == "/api/admin/dedica_presets":
                 act = d.get("action")

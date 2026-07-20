@@ -517,6 +517,24 @@
 
       </div>
     </div>
+
+    <!-- Catálogo local del bar (Fase 2 — modo sin YouTube) -->
+    <div class="card" style="margin-top:14px">
+      <p class="sec">📁 Catálogo local del bar</p>
+      <div class="small" style="color:var(--mut);margin-bottom:10px">
+        Apunta a la carpeta de música del local (o una carpeta compartida por red) y se
+        escanea desde tu navegador — TYM nunca sube ni guarda los archivos, solo el
+        título/artista/género que se lee de cada uno. Necesario para el
+        <b>Modo catálogo local</b> (Ajustes → Catálogo de canciones).
+      </div>
+      <button class="btn ghost" id="pickFolderBtn" onclick="pickLocalFolder()">📁 Elegir carpeta…</button>
+      <div class="small" id="scanStatus" style="margin-top:8px"></div>
+      <div id="scanReview" style="margin-top:10px"></div>
+
+      <h2 style="margin-top:16px;font-size:14px;font-weight:700">En el catálogo</h2>
+      <div class="small" style="color:var(--mut);margin-bottom:6px" id="localCatEmptyHint"></div>
+      <div class="list" id="localCatList"></div>
+    </div>
   </div>
 </div>
 
@@ -1190,7 +1208,10 @@ async function reorderCurated(order){
   await post('/api/admin/curated',{action:'reorder',order});
   tick();
 }
-function renderCurated(list){
+function renderCurated(fullList){
+  // El catálogo local (Fase 2, prefijo "local:") tiene su propia lista/tarjeta más abajo
+  // ("Catálogo local del bar") — esta sigue siendo solo YouTube, como siempre.
+  const list=(fullList||[]).filter(c=>!(c.yt&&c.yt.startsWith('local:')));
   window._cur=list;const box=$('curList');box.innerHTML='';
   if(!list.length){box.innerHTML='<div class="empty">Aún no has añadido recomendadas.</div>';return;}
   _curSnapshot=list.map(c=>c.yt);
@@ -1224,6 +1245,230 @@ function renderCurated(list){
       order.splice(toIdx,0,_dragCurYt);
       _dragCurYt=null;reorderCurated(order);
     });
+    box.appendChild(r);
+  });
+  tickify(box);
+}
+
+// ---- Catálogo local del bar (Fase 2 — modo sin YouTube, ver plan
+// federated-knitting-lagoon.md). Todo el escaneo pasa por File System Access API,
+// 100% en el navegador — ningún archivo ni bytes de audio/video salen de este tab,
+// solo el título/artista/género (texto) termina en el servidor. ----
+
+const _AUDIO_EXT=['mp3','m4a','wav','ogg','flac','aac','wma'];
+const _VIDEO_EXT=['mp4','mkv','avi','mov','webm','m4v'];
+const _JUNK_PHRASES_JS=['official video','official audio','official music video','video oficial',
+  'audio oficial','lyric video','lyrics','letra','video lyric','visualizer','hd','4k','remastered',
+  'official visualizer','music video'];
+
+function _cleanGuessPiece(s){
+  let t=(s||'').replace(/[_.]+/g,' ').trim();
+  t=t.replace(/\[[^\]]*\]|\([^)]*\)/g,m=>{
+    const low=m.slice(1,-1).toLowerCase().trim();
+    return _JUNK_PHRASES_JS.some(p=>low.includes(p))?' ':m;
+  });
+  // Palabra de basura suelta al final, sin parentesis (ej. "... Letra", "... Lyrics")
+  for(let i=0;i<3;i++){
+    const before=t;
+    t=t.replace(new RegExp('\\s*[-|]?\\s*(?:'+_JUNK_PHRASES_JS.join('|')+')\\s*$','i'),'');
+    if(t===before)break;
+  }
+  t=t.replace(/\s+/g,' ').trim(' -');
+  return t;
+}
+
+// Adivina título/artista a partir del nombre de archivo — el patrón más común en
+// descargas reales es "Artista - Título.ext"; si no hay guion, todo es título.
+function guessFromFilename(filename){
+  let noExt=filename.replace(/\.[a-zA-Z0-9]+$/,'');
+  // Numero de pista al inicio (ej. "01 - ", "01. ", "01_") — no es el artista.
+  noExt=noExt.replace(/^\d{1,3}[\s._-]+/,'');
+  const cleaned=_cleanGuessPiece(noExt);
+  const parts=cleaned.split(/\s+-\s+/);
+  if(parts.length>=2)return{title:_cleanGuessPiece(parts.slice(1).join(' - ')),artist:_cleanGuessPiece(parts[0])};
+  return{title:cleaned,artist:''};
+}
+
+function extOf(filename){
+  const m=/\.([a-zA-Z0-9]+)$/.exec(filename);
+  return m?m[1].toLowerCase():'';
+}
+function mediaTypeOf(filename){
+  const e=extOf(filename);
+  if(_AUDIO_EXT.includes(e))return'audio';
+  if(_VIDEO_EXT.includes(e))return'video';
+  return null;
+}
+
+// Lector mínimo de tags ID3v2 (TIT2/TPE1/TCON) — solo lo suficiente para mejorar la
+// adivinanza del nombre de archivo cuando el mp3 sí trae metadata real. Sin librería
+// externa: basta leer el encabezado + los primeros frames, casi siempre en los
+// primeros KB del archivo.
+async function readId3Tags(file){
+  try{
+    const buf=await file.slice(0,262144).arrayBuffer();
+    const b=new Uint8Array(buf);
+    if(b.length<10||b[0]!==0x49||b[1]!==0x44||b[2]!==0x33)return null; // "ID3"
+    const ver=b[3];
+    const size=((b[6]&0x7f)<<21)|((b[7]&0x7f)<<14)|((b[8]&0x7f)<<7)|(b[9]&0x7f);
+    let pos=10;const end=Math.min(10+size,b.length);
+    const out={};
+    const decodeFrame=(bytes)=>{
+      if(!bytes.length)return'';
+      const enc=bytes[0];const body=bytes.slice(1);
+      try{
+        if(enc===1||enc===2)return new TextDecoder('utf-16').decode(body).replace(/\0/g,'').trim();
+        return new TextDecoder('utf-8').decode(body).replace(/\0/g,'').trim();
+      }catch(e){return'';}
+    };
+    while(pos+10<=end){
+      const id=String.fromCharCode(b[pos],b[pos+1],b[pos+2],b[pos+3]);
+      let fsize;
+      if(ver>=4)fsize=((b[pos+4]&0x7f)<<21)|((b[pos+5]&0x7f)<<14)|((b[pos+6]&0x7f)<<7)|(b[pos+7]&0x7f);
+      else fsize=(b[pos+4]<<24)|(b[pos+5]<<16)|(b[pos+6]<<8)|b[pos+7];
+      if(!fsize||!/^[A-Z0-9]{4}$/.test(id))break;
+      const fbody=b.slice(pos+10,pos+10+fsize);
+      if(id==='TIT2')out.title=decodeFrame(fbody);
+      else if(id==='TPE1')out.artist=decodeFrame(fbody);
+      else if(id==='TCON')out.genre=decodeFrame(fbody).replace(/^\(\d+\)$/,'');
+      pos+=10+fsize;
+    }
+    return(out.title||out.artist||out.genre)?out:null;
+  }catch(e){return null;}
+}
+
+async function* walkLocalDir(dirHandle,prefix){
+  for await(const[name,handle]of dirHandle.entries()){
+    if(handle.kind==='file'){
+      const mt=mediaTypeOf(name);
+      if(mt)yield{path:prefix?prefix+'/'+name:name,handle,mediaType:mt,genreHint:prefix};
+    }else if(handle.kind==='directory'){
+      yield*walkLocalDir(handle,prefix?prefix+'/'+name:name);
+    }
+  }
+}
+
+let _scanBatch=[];
+async function pickLocalFolder(){
+  if(!window.showDirectoryPicker){
+    toast('Tu navegador no soporta esto — usa Chrome o Edge','err');
+    return;
+  }
+  let dirHandle;
+  try{dirHandle=await window.showDirectoryPicker();}
+  catch(e){return;} // el usuario canceló el selector
+  const status=$('scanStatus');
+  status.textContent='Escaneando…';
+  _scanBatch=[];
+  let n=0;
+  for await(const entry of walkLocalDir(dirHandle,'')){
+    n++;
+    status.textContent=`Escaneando… ${n} archivos encontrados`;
+    const file=await entry.handle.getFile();
+    let tags=null;
+    if(entry.mediaType==='audio')tags=await readId3Tags(file);
+    const guess=guessFromFilename(entry.handle.name);
+    const topFolder=entry.path.includes('/')?entry.path.split('/')[0]:'';
+    _scanBatch.push({
+      path:entry.path,
+      title:(tags&&tags.title)||guess.title||entry.handle.name,
+      artist:(tags&&tags.artist)||guess.artist||'',
+      genre:(tags&&tags.genre)||topFolder||'',
+      media_type:entry.mediaType,
+      duration:null,
+    });
+  }
+  status.textContent=n?`${n} archivos listos para revisar abajo — ajusta lo que haga falta y guarda.`:
+    'No se encontraron archivos de audio/video en esa carpeta.';
+  renderScanReview(_scanBatch);
+}
+
+function renderScanReview(list){
+  const box=$('scanReview');box.innerHTML='';
+  if(!list.length)return;
+  const bar=document.createElement('div');
+  bar.style.cssText='display:flex;gap:8px;align-items:center;margin-bottom:8px';
+  bar.innerHTML=`<button class="btn green sm" id="saveScanBtn">💾 Guardar catálogo (${list.length})</button>
+    <span class="small" style="color:var(--mut)">Revisa título/artista/género antes de guardar — se puede editar después también.</span>`;
+  box.appendChild(bar);
+  const table=document.createElement('div');table.className='list';
+  list.forEach((t,i)=>{
+    const r=document.createElement('div');r.className='row';
+    r.innerHTML=`<span style="font-size:20px">${t.media_type==='video'?'🎬':'🎵'}</span>
+      <div class="info" style="display:flex;flex-direction:column;gap:4px;flex:1">
+        <input class="field" style="margin:0" data-f="title" value="${esc(t.title)}" placeholder="Título">
+        <div style="display:flex;gap:6px">
+          <input class="field" style="margin:0;flex:1" data-f="artist" value="${esc(t.artist)}" placeholder="Artista">
+          <input class="field" style="margin:0;flex:1" data-f="genre" value="${esc(t.genre)}" placeholder="Género">
+        </div>
+        <div class="small" style="color:var(--mut)">${esc(t.path)}</div>
+      </div>`;
+    ['title','artist','genre'].forEach(f=>{
+      r.querySelector(`[data-f="${f}"]`).addEventListener('input',e=>{_scanBatch[i][f]=e.target.value;});
+    });
+    const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';
+    x.onclick=()=>{_scanBatch.splice(i,1);renderScanReview(_scanBatch);};
+    r.appendChild(x);
+    table.appendChild(r);
+  });
+  box.appendChild(table);
+  $('saveScanBtn').onclick=saveLocalCatalogBatch;
+  tickify(box);
+}
+
+async function saveLocalCatalogBatch(){
+  if(!_scanBatch.length)return;
+  const btn=$('saveScanBtn');if(btn){btn.disabled=true;btn.textContent='Guardando…';}
+  const r=await post('/api/admin/local_catalog',{action:'import',tracks:_scanBatch});
+  if(r.ok){
+    toast(`Catálogo guardado: ${r.added} nuevas, ${r.updated} actualizadas`,'ok');
+    _scanBatch=[];$('scanReview').innerHTML='';$('scanStatus').textContent='';
+    renderLocalCatalog(r.curated||[]);
+  }else{
+    toast(r.error||'No se pudo guardar','err');
+    if(btn){btn.disabled=false;btn.textContent='💾 Guardar catálogo';}
+  }
+}
+
+function renderLocalCatalog(fullCurated){
+  const list=(fullCurated||[]).filter(c=>c.yt&&c.yt.startsWith('local:'));
+  const box=$('localCatList'),hint=$('localCatEmptyHint');
+  box.innerHTML='';
+  hint.textContent=list.length?'':'Aún no has escaneado ninguna carpeta.';
+  list.forEach(c=>{
+    const r=document.createElement('div');r.className='row';
+    r.innerHTML=`<span style="font-size:20px">${c.media_type==='video'?'🎬':'🎵'}</span>
+      <div class="info" style="display:flex;flex-direction:column;gap:4px;flex:1">
+        <input class="field" style="margin:0" data-f="title" value="${esc(c.title)}">
+        <div style="display:flex;gap:6px">
+          <input class="field" style="margin:0;flex:1" data-f="artist" value="${esc(c.artist||'')}">
+          <input class="field" style="margin:0;flex:1" data-f="genre" value="${esc(c.genre||'')}">
+        </div>
+        <div class="small" style="color:var(--mut)">${esc(c.local_path||'')}</div>
+      </div>`;
+    const saveField=async(f,val)=>{await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,[f]:val});};
+    ['title','artist','genre'].forEach(f=>{
+      const inp=r.querySelector(`[data-f="${f}"]`);
+      inp.addEventListener('change',()=>saveField(f,inp.value));
+    });
+    const itunesBtn=document.createElement('button');itunesBtn.className='btn ghost sm';itunesBtn.textContent='🔎 iTunes';
+    itunesBtn.title='Autocompletar género/artista cruzando con iTunes';
+    itunesBtn.onclick=async()=>{
+      itunesBtn.disabled=true;
+      const cl=await post('/api/admin/classify_track',{title:c.title,artist:c.artist});
+      if(cl.ok){
+        r.querySelector('[data-f="title"]').value=cl.title;
+        r.querySelector('[data-f="artist"]').value=cl.artist;
+        r.querySelector('[data-f="genre"]').value=cl.genre||'';
+        await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,title:cl.title,artist:cl.artist,genre:cl.genre});
+        toast('Actualizado con iTunes','ok');
+      }
+      itunesBtn.disabled=false;
+    };
+    r.appendChild(itunesBtn);
+    const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';
+    x.onclick=async()=>{await post('/api/admin/curated',{action:'remove',yt:c.yt});tick();};
+    r.appendChild(x);
     box.appendChild(r);
   });
   tickify(box);
@@ -1331,6 +1576,7 @@ async function tick(){
       r.innerHTML=`<div class="info"><div class="t">${esc(x.email)}</div><div class="a">${esc(x.table||'')}</div></div>`;sl.appendChild(r);});}
 
     renderCurated(s.curated||[]);
+    renderLocalCatalog(s.curated||[]);
     renderStations(s.stations||[]);
     renderCustomers(s.customers||[]);
 
