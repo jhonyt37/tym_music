@@ -419,6 +419,7 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 <script>
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function post(u,b){return (await fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})})).json();}
 // ---- Ojito de mostrar/ocultar contraseña ----
 function initPasswordToggle(id){
   const el=document.getElementById(id);
@@ -553,6 +554,122 @@ function hideLocalFileError(){const el=document.getElementById('localFileWarn');
 
 function setLocalAudioView(show,np){
   $('localAudioView').style.display=show?'flex':'none';
+}
+
+// ---- Re-escaneo periódico del catálogo (Fase 5) — duplica el escáner de admin.html (mismo
+// espíritu que el importador: sin librería externa, sin subir el archivo, solo el texto de la
+// metadata). Se dispara solo/en segundo plano cada tanto junto a un cambio de canción — ver el
+// disparador en el loop principal — nunca bloquea la reproducción. Los archivos nuevos que
+// encuentra se auto-importan marcados auto_added:true para que /admin los destaque como
+// pendientes de revisar (nunca reemplaza ni borra lo que ya está en el catálogo). ----
+const _AUDIO_EXT=['mp3','m4a','wav','ogg','flac','aac','wma'];
+const _VIDEO_EXT=['mp4','mkv','avi','mov','webm','m4v'];
+const _JUNK_PHRASES_JS=['official video','official audio','official music video','video oficial',
+  'audio oficial','lyric video','lyrics','letra','video lyric','visualizer','hd','4k','remastered',
+  'official visualizer','music video'];
+function _cleanGuessPiece(s){
+  let t=(s||'').replace(/[_.]+/g,' ').trim();
+  t=t.replace(/\[[^\]]*\]|\([^)]*\)/g,m=>{
+    const low=m.slice(1,-1).toLowerCase().trim();
+    return _JUNK_PHRASES_JS.some(p=>low.includes(p))?' ':m;
+  });
+  for(let i=0;i<3;i++){
+    const before=t;
+    t=t.replace(new RegExp('\\s*[-|]?\\s*(?:'+_JUNK_PHRASES_JS.join('|')+')\\s*$','i'),'');
+    if(t===before)break;
+  }
+  t=t.replace(/\s+/g,' ').trim(' -');
+  return t;
+}
+function guessFromFilename(filename){
+  let noExt=filename.replace(/\.[a-zA-Z0-9]+$/,'');
+  noExt=noExt.replace(/^\d{1,3}[\s._-]+/,'');
+  const cleaned=_cleanGuessPiece(noExt);
+  const parts=cleaned.split(/\s+-\s+/);
+  if(parts.length>=2)return{title:_cleanGuessPiece(parts.slice(1).join(' - ')),artist:_cleanGuessPiece(parts[0])};
+  return{title:cleaned,artist:''};
+}
+function extOf(filename){const m=/\.([a-zA-Z0-9]+)$/.exec(filename);return m?m[1].toLowerCase():'';}
+function mediaTypeOf(filename){
+  const e=extOf(filename);
+  if(_AUDIO_EXT.includes(e))return'audio';
+  if(_VIDEO_EXT.includes(e))return'video';
+  return null;
+}
+async function readId3Tags(file){
+  try{
+    const buf=await file.slice(0,262144).arrayBuffer();
+    const b=new Uint8Array(buf);
+    if(b.length<10||b[0]!==0x49||b[1]!==0x44||b[2]!==0x33)return null;
+    const ver=b[3];
+    const size=((b[6]&0x7f)<<21)|((b[7]&0x7f)<<14)|((b[8]&0x7f)<<7)|(b[9]&0x7f);
+    let pos=10;const end=Math.min(10+size,b.length);
+    const out={};
+    const decodeFrame=(bytes)=>{
+      if(!bytes.length)return'';
+      const enc=bytes[0];const body=bytes.slice(1);
+      try{
+        if(enc===1||enc===2)return new TextDecoder('utf-16').decode(body).replace(/\0/g,'').trim();
+        return new TextDecoder('utf-8').decode(body).replace(/\0/g,'').trim();
+      }catch(e){return'';}
+    };
+    while(pos+10<=end){
+      const id=String.fromCharCode(b[pos],b[pos+1],b[pos+2],b[pos+3]);
+      let fsize;
+      if(ver>=4)fsize=((b[pos+4]&0x7f)<<21)|((b[pos+5]&0x7f)<<14)|((b[pos+6]&0x7f)<<7)|(b[pos+7]&0x7f);
+      else fsize=(b[pos+4]<<24)|(b[pos+5]<<16)|(b[pos+6]<<8)|b[pos+7];
+      if(!fsize||!/^[A-Z0-9]{4}$/.test(id))break;
+      const fbody=b.slice(pos+10,pos+10+fsize);
+      if(id==='TIT2')out.title=decodeFrame(fbody);
+      else if(id==='TPE1')out.artist=decodeFrame(fbody);
+      else if(id==='TCON')out.genre=decodeFrame(fbody).replace(/^\(\d+\)$/,'');
+      pos+=10+fsize;
+    }
+    return(out.title||out.artist||out.genre)?out:null;
+  }catch(e){return null;}
+}
+async function* walkLocalDir(dirHandle,prefix){
+  for await(const[name,handle]of dirHandle.entries()){
+    if(handle.kind==='file'){
+      const mt=mediaTypeOf(name);
+      if(mt)yield{path:prefix?prefix+'/'+name:name,handle,mediaType:mt};
+    }else if(handle.kind==='directory'){
+      yield*walkLocalDir(handle,prefix?prefix+'/'+name:name);
+    }
+  }
+}
+
+let _lastFolderScanAt=0;
+const FOLDER_SCAN_MIN_INTERVAL_MS=10*60*1000; // cada 10 min como mucho, nunca más seguido
+async function maybeRescanFolder(){
+  if(!_localRootHandle)return;
+  const now=Date.now();
+  if(now-_lastFolderScanAt<FOLDER_SCAN_MIN_INTERVAL_MS)return;
+  _lastFolderScanAt=now;
+  try{
+    const curRes=await post('/api/admin/curated',{});
+    const existingPaths=new Set((curRes.curated||[])
+      .filter(c=>c.yt&&c.yt.startsWith('local:'))
+      .map(c=>c.local_path));
+    const news=[];
+    for await(const entry of walkLocalDir(_localRootHandle,'')){
+      if(existingPaths.has(entry.path))continue;
+      const file=await entry.handle.getFile();
+      let tags=null;
+      if(entry.mediaType==='audio')tags=await readId3Tags(file);
+      const guess=guessFromFilename(entry.handle.name);
+      const topFolder=entry.path.includes('/')?entry.path.split('/')[0]:'';
+      news.push({
+        path:entry.path,
+        title:(tags&&tags.title)||guess.title||entry.handle.name,
+        artist:(tags&&tags.artist)||guess.artist||'',
+        genre:(tags&&tags.genre)||topFolder||'',
+        media_type:entry.mediaType,
+        duration:null,
+      });
+    }
+    if(news.length)await post('/api/admin/local_catalog',{action:'import',auto:true,tracks:news});
+  }catch(e){/* best-effort — un re-escaneo fallido no debe afectar la reproducción */}
 }
 
 let _localBlobUrl=null;
@@ -1305,7 +1422,14 @@ setInterval(async()=>{
 
     // Recuperar: si hay canción en servidor pero no está cargada — un archivo local no
     // depende de "ready" (SDK de YouTube), solo YouTube lo necesita.
-    if(s.now_playing&&(ready||isLocalId(s.now_playing.yt))&&s.now_playing.yt!==curYt){load(s.now_playing);}
+    if(s.now_playing&&(ready||isLocalId(s.now_playing.yt))&&s.now_playing.yt!==curYt){
+      load(s.now_playing);
+      // Re-escaneo periódico (Fase 5): "disparado junto al cambio de canción, no un poll
+      // aparte" — se aprovecha el cambio de canción que ya se está detectando acá en vez de
+      // agregar un setInterval nuevo; el propio maybeRescanFolder() se auto-limita a como
+      // mucho una vez cada 10 min y nunca bloquea la reproducción (fire-and-forget).
+      maybeRescanFolder();
+    }
     _watchdogStuck(!!s.now_playing, !s.now_playing||s.now_playing.yt===curYt, !!(s.now_playing&&isLocalId(s.now_playing.yt)));
 
     // Recuperar reproductor detenido/pausado/cued después de carga exitosa

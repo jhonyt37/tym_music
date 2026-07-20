@@ -527,8 +527,12 @@
         título/artista/género que se lee de cada uno. Necesario para el
         <b>Modo catálogo local</b> (Ajustes → Catálogo de canciones).
       </div>
-      <button class="btn ghost" id="pickFolderBtn" onclick="pickLocalFolder()">📁 Elegir carpeta…</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn ghost" id="pickFolderBtn" onclick="pickLocalFolder()">📁 Elegir carpeta…</button>
+        <button class="btn ghost" id="forceRescanBtn" onclick="forceRescanLocalCatalog()">🔄 Forzar revisión del catálogo</button>
+      </div>
       <div class="small" id="scanStatus" style="margin-top:8px"></div>
+      <div id="rescanReport" style="margin-top:10px"></div>
       <div id="scanReview" style="margin-top:10px"></div>
 
       <h2 style="margin-top:16px;font-size:14px;font-weight:700">En el catálogo</h2>
@@ -1357,6 +1361,64 @@ async function* walkLocalDir(dirHandle,prefix){
   }
 }
 
+// Persistencia del permiso de carpeta (Fase 5) — mismo patrón que /tv: el handle real
+// (no solo un flag) vive en IndexedDB, así "Forzar revisión" no tiene que volver a abrir el
+// selector nativo cada vez que el admin quiera re-escanear.
+const LOCAL_DIR_DB='tym_admin_local_dir',LOCAL_DIR_STORE='handles',LOCAL_DIR_KEY='dir';
+function _idbOpen(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(LOCAL_DIR_DB,1);
+    req.onupgradeneeded=()=>req.result.createObjectStore(LOCAL_DIR_STORE);
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function idbGetDirHandle(){
+  try{
+    const db=await _idbOpen();
+    return await new Promise((resolve,reject)=>{
+      const tx=db.transaction(LOCAL_DIR_STORE,'readonly');
+      const req=tx.objectStore(LOCAL_DIR_STORE).get(LOCAL_DIR_KEY);
+      req.onsuccess=()=>resolve(req.result||null);
+      req.onerror=()=>reject(req.error);
+    });
+  }catch(e){return null;}
+}
+async function idbSetDirHandle(handle){
+  try{
+    const db=await _idbOpen();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(LOCAL_DIR_STORE,'readwrite');
+      tx.objectStore(LOCAL_DIR_STORE).put(handle,LOCAL_DIR_KEY);
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+    });
+  }catch(e){}
+}
+let _localDirHandle=null;
+
+async function scanFolder(dirHandle,onProgress){
+  const found=[];
+  let n=0;
+  for await(const entry of walkLocalDir(dirHandle,'')){
+    n++;
+    if(onProgress)onProgress(n);
+    const file=await entry.handle.getFile();
+    let tags=null;
+    if(entry.mediaType==='audio')tags=await readId3Tags(file);
+    const guess=guessFromFilename(entry.handle.name);
+    const topFolder=entry.path.includes('/')?entry.path.split('/')[0]:'';
+    found.push({
+      path:entry.path,
+      title:(tags&&tags.title)||guess.title||entry.handle.name,
+      artist:(tags&&tags.artist)||guess.artist||'',
+      genre:(tags&&tags.genre)||topFolder||'',
+      media_type:entry.mediaType,
+      duration:null,
+    });
+  }
+  return found;
+}
+
 let _scanBatch=[];
 async function pickLocalFolder(){
   if(!window.showDirectoryPicker){
@@ -1366,29 +1428,47 @@ async function pickLocalFolder(){
   let dirHandle;
   try{dirHandle=await window.showDirectoryPicker();}
   catch(e){return;} // el usuario canceló el selector
+  await idbSetDirHandle(dirHandle);
+  _localDirHandle=dirHandle;
   const status=$('scanStatus');
   status.textContent='Escaneando…';
-  _scanBatch=[];
-  let n=0;
-  for await(const entry of walkLocalDir(dirHandle,'')){
-    n++;
-    status.textContent=`Escaneando… ${n} archivos encontrados`;
-    const file=await entry.handle.getFile();
-    let tags=null;
-    if(entry.mediaType==='audio')tags=await readId3Tags(file);
-    const guess=guessFromFilename(entry.handle.name);
-    const topFolder=entry.path.includes('/')?entry.path.split('/')[0]:'';
-    _scanBatch.push({
-      path:entry.path,
-      title:(tags&&tags.title)||guess.title||entry.handle.name,
-      artist:(tags&&tags.artist)||guess.artist||'',
-      genre:(tags&&tags.genre)||topFolder||'',
-      media_type:entry.mediaType,
-      duration:null,
-    });
-  }
-  status.textContent=n?`${n} archivos listos para revisar abajo — ajusta lo que haga falta y guarda.`:
+  _scanBatch=await scanFolder(dirHandle,n=>status.textContent=`Escaneando… ${n} archivos encontrados`);
+  status.textContent=_scanBatch.length?`${_scanBatch.length} archivos listos para revisar abajo — ajusta lo que haga falta y guarda.`:
     'No se encontraron archivos de audio/video en esa carpeta.';
+  renderScanReview(_scanBatch);
+}
+
+// "Forzar revisión" (Fase 5): re-escanea la carpeta ya concedida (sin selector nativo si el
+// permiso sigue vigente) y compara contra el catálogo actual — nuevo → tabla de revisión de
+// siempre; ya no se encuentra en disco → aviso, no se borra solo (puede ser un disco de red
+// desconectado momentáneamente, no una decisión real de quitarla).
+async function forceRescanLocalCatalog(){
+  const status=$('scanStatus'),report=$('rescanReport');
+  report.innerHTML='';
+  if(!_localDirHandle){
+    const saved=await idbGetDirHandle();
+    if(saved){
+      try{if(await saved.queryPermission({mode:'read'})==='granted')_localDirHandle=saved;}catch(e){}
+    }
+  }
+  if(!_localDirHandle){
+    toast('Primero elige la carpeta con el botón de arriba','err');
+    return pickLocalFolder();
+  }
+  status.textContent='Revisando carpeta…';
+  const found=await scanFolder(_localDirHandle,n=>status.textContent=`Revisando… ${n} archivos encontrados`);
+  const foundPaths=new Set(found.map(f=>f.path));
+  const existing=(window._fullCurated||[]).filter(c=>c.yt&&c.yt.startsWith('local:'));
+  const existingPaths=new Set(existing.map(c=>c.local_path));
+  const news=found.filter(f=>!existingPaths.has(f.path));
+  const missing=existing.filter(c=>c.local_path&&!foundPaths.has(c.local_path));
+  status.textContent=`Revisión terminada — ${found.length} archivos en la carpeta.`;
+  const parts=[];
+  if(news.length)parts.push(`<div class="small" style="color:var(--gold);font-weight:700">🆕 ${news.length} canción(es) nueva(s) — revísalas abajo antes de guardar.</div>`);
+  if(missing.length)parts.push(`<div class="small" style="color:#ef4444;font-weight:700;margin-top:6px">⚠ ${missing.length} canción(es) del catálogo ya no están en la carpeta (¿se movieron o borraron?):<br>${missing.map(m=>esc(m.title)).join(', ')}</div>`);
+  if(!news.length&&!missing.length)parts.push('<div class="small" style="color:#22c55e">✅ Todo al día — no hay cambios.</div>');
+  report.innerHTML=parts.join('');
+  _scanBatch=news;
   renderScanReview(_scanBatch);
 }
 
@@ -1440,14 +1520,19 @@ async function saveLocalCatalogBatch(){
 }
 
 function renderLocalCatalog(fullCurated){
+  window._fullCurated=fullCurated||[];
   const list=(fullCurated||[]).filter(c=>c.yt&&c.yt.startsWith('local:'));
   const box=$('localCatList'),hint=$('localCatEmptyHint');
   box.innerHTML='';
   hint.textContent=list.length?'':'Aún no has escaneado ninguna carpeta.';
   list.forEach(c=>{
     const r=document.createElement('div');r.className='row';
+    // auto_added: el TV lo encontró solo en un re-escaneo (Fase 5) y nadie lo ha revisado
+    // todavía — editar cualquier campo (a mano o con el botón de iTunes) lo marca revisado.
+    const autoBadge=c.auto_added?'<span class="small" style="color:var(--gold);font-weight:700;display:block;margin-bottom:2px">🆕 Detectado automáticamente — revisa</span>':'';
     r.innerHTML=`<span style="font-size:20px">${c.media_type==='video'?'🎬':'🎵'}</span>
       <div class="info" style="display:flex;flex-direction:column;gap:4px;flex:1">
+        ${autoBadge}
         <input class="field" style="margin:0" data-f="title" value="${esc(c.title)}">
         <div style="display:flex;gap:6px">
           <input class="field" style="margin:0;flex:1" data-f="artist" value="${esc(c.artist||'')}">

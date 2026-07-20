@@ -3055,6 +3055,13 @@ class H(BaseHTTPRequestHandler):
                     tracks = d.get("tracks") or []
                     if not isinstance(tracks, list):
                         return self._send(400, {"error": "tracks debe ser una lista"})
+                    # Fase 5: cuando el TV se auto-importa contenido nuevo que encontró en un
+                    # re-escaneo (sin que el admin lo haya revisado), se marca auto_added para
+                    # que /admin lo destaque como pendiente de revisar — nunca se toca este flag
+                    # en una entrada YA existente (ni al admin re-escanear manualmente y toparse
+                    # con algo que ya estaba, ni al TV): solo editar una entrada a mano (abajo)
+                    # cuenta como "revisada".
+                    auto = bool(d.get("auto"))
                     by_yt = {c["yt"]: c for c in STATE["curated"]}
                     added, updated = 0, 0
                     for t in tracks[:2000]:
@@ -3075,6 +3082,7 @@ class H(BaseHTTPRequestHandler):
                         if yt in by_yt:
                             by_yt[yt].update(entry); updated += 1
                         else:
+                            entry["auto_added"] = auto
                             by_yt[yt] = entry; STATE["curated"].append(entry); added += 1
                     return self._send(200, {"ok": True, "added": added, "updated": updated, "curated": STATE["curated"]})
                 elif act == "edit":
@@ -3087,6 +3095,7 @@ class H(BaseHTTPRequestHandler):
                     c = next((c for c in STATE["curated"] if c["yt"] == yt), None)
                     if not c:
                         return self._send(404, {"error": "No encontrada"})
+                    c["auto_added"] = False  # editar a mano cuenta como revisada
                     if "title" in d:
                         c["title"] = str(d.get("title") or "Canción")[:200]
                     if "artist" in d:
