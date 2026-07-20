@@ -106,13 +106,20 @@ def gen_token():
     return secrets.token_hex(16)
 
 def remove_solid_bg(data_uri):
-    """Si un logo subido (data URI base64) tiene fondo de color sólido/uniforme, lo vuelve
-    transparente — así en el TV/la app no se ve un rectángulo de color alrededor del logo,
-    solo el logo. Heurística: si los 4 bordes del PNG/JPG son del mismo color (dentro de una
-    tolerancia), se hace flood-fill de ese color desde el borde hacia adentro (nunca borra
-    zonas del mismo color que estén DENTRO del logo, solo lo que es alcanzable desde afuera).
-    Si la imagen ya tiene transparencia real, o el borde no es uniforme (foto, degradado,
-    diseño sin fondo sólido), se devuelve intacta — "en caso de que aplique", nunca a ciegas.
+    """Procesa un logo subido (data URI base64) antes de guardarlo:
+    (1) Lo redimensiona si es más grande de lo necesario — en pantalla un logo nunca se
+    muestra a más de ~180px, así que una foto de varios cientos de KB solo desperdicia
+    espacio y además puede reventar el límite de tamaño guardado (700000 caracteres),
+    TRUNCANDO el base64 a la mitad y corrompiéndolo en un archivo irrenderizable — bug
+    reportado en vivo: un logo real de 634KB (846000 caracteres en base64, por encima del
+    límite) nunca aparecía en NINGUNA pantalla, ni TV ni cliente, sin ningún error visible.
+    (2) Si el fondo es de un color sólido/uniforme, lo vuelve transparente — así en el TV/la
+    app no se ve un rectángulo de color alrededor del logo, solo el logo. Heurística: si los
+    4 bordes del PNG/JPG son del mismo color (dentro de una tolerancia), se hace flood-fill
+    de ese color desde el borde hacia adentro (nunca borra zonas del mismo color que estén
+    DENTRO del logo, solo lo que es alcanzable desde afuera). Si la imagen ya tiene
+    transparencia real, o el borde no es uniforme (foto, degradado, diseño sin fondo
+    sólido), el color de fondo se deja intacto — "en caso de que aplique", nunca a ciegas.
     """
     try:
         from PIL import Image
@@ -126,38 +133,43 @@ def remove_solid_bg(data_uri):
         raw = base64.b64decode(b64)
         im = Image.open(io.BytesIO(raw)).convert("RGBA")
         w, h = im.size
-        if w < 4 or h < 4 or w * h > 4_000_000:  # logos gigantes: no vale el costo, se deja igual
+        if w < 4 or h < 4:
             return data_uri
+        MAX_DIM = 480  # de sobra incluso para retina a los tamaños que se muestra en pantalla
+        if max(w, h) > MAX_DIM:
+            scale = MAX_DIM / max(w, h)
+            im = im.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
+            w, h = im.size
         px = im.load()
-        if any(px[x, y][3] < 250 for x in (0, w - 1) for y in (0, h - 1)):
-            return data_uri  # ya tiene transparencia real en las esquinas, no tocar
-        corners = [px[0, 0][:3], px[w - 1, 0][:3], px[0, h - 1][:3], px[w - 1, h - 1][:3]]
-        def dist(a, b):
-            return sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
-        base = corners[0]
-        if any(dist(base, c) > 30 for c in corners[1:]):
-            return data_uri  # esquinas no coinciden entre sí: no hay un fondo sólido claro
-        TOL = 40
-        from collections import deque
-        seen = bytearray(w * h)
-        q = deque()
-        for x in range(w):
-            q.append((x, 0)); q.append((x, h - 1))
-        for y in range(h):
-            q.append((0, y)); q.append((w - 1, y))
-        while q:
-            x, y = q.popleft()
-            if x < 0 or x >= w or y < 0 or y >= h:
-                continue
-            idx = y * w + x
-            if seen[idx]:
-                continue
-            seen[idx] = 1
-            r, g, b, a = px[x, y]
-            if dist((r, g, b), base) > TOL:
-                continue
-            px[x, y] = (r, g, b, 0)
-            q.append((x - 1, y)); q.append((x + 1, y)); q.append((x, y - 1)); q.append((x, y + 1))
+        has_alpha_already = any(px[x, y][3] < 250 for x in (0, w - 1) for y in (0, h - 1))
+        if not has_alpha_already:
+            corners = [px[0, 0][:3], px[w - 1, 0][:3], px[0, h - 1][:3], px[w - 1, h - 1][:3]]
+            def dist(a, b):
+                return sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
+            base = corners[0]
+            uniform_border = all(dist(base, c) <= 30 for c in corners[1:])
+            if uniform_border:
+                TOL = 40
+                from collections import deque
+                seen = bytearray(w * h)
+                q = deque()
+                for x in range(w):
+                    q.append((x, 0)); q.append((x, h - 1))
+                for y in range(h):
+                    q.append((0, y)); q.append((w - 1, y))
+                while q:
+                    x, y = q.popleft()
+                    if x < 0 or x >= w or y < 0 or y >= h:
+                        continue
+                    idx = y * w + x
+                    if seen[idx]:
+                        continue
+                    seen[idx] = 1
+                    r, g, b, a = px[x, y]
+                    if dist((r, g, b), base) > TOL:
+                        continue
+                    px[x, y] = (r, g, b, 0)
+                    q.append((x - 1, y)); q.append((x + 1, y)); q.append((x, y - 1)); q.append((x, y + 1))
         buf = io.BytesIO()
         im.save(buf, "PNG")
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
@@ -1966,8 +1978,22 @@ class H(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0) or 0)
         if not n:
             return {}
-        if n > 65536:
-            self.rfile.read(min(n, 131072))  # consume para no romper la conexión
+        # 3MB: acota el abuso (no es una API de subida de archivos genérica) pero alcanza
+        # para un logo real de cámara/diseño sin que el admin tenga que redimensionarlo a
+        # mano — antes el límite era 64KB y CUALQUIER request más grande (ej. subir un logo
+        # de unos cientos de KB) devolvía {} en silencio: el POST respondía 200 OK pero no
+        # cambiaba nada, sin ningún error visible. Bug reportado en vivo.
+        MAX_BODY = 3_000_000
+        if n > MAX_BODY:
+            # Antes solo se leían 128KB fijos del body para "no romper la conexión" — con un
+            # body de verdad grande eso dejaba el resto sin leer en el socket, corrompiendo
+            # el siguiente request en la misma conexión keep-alive. Ahora se drena TODO.
+            remaining = n
+            while remaining > 0:
+                chunk = self.rfile.read(min(remaining, 65536))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
             return {}
         try:
             return json.loads(self.rfile.read(n) or b"{}")
@@ -2691,7 +2717,7 @@ class H(BaseHTTPRequestHandler):
                 if "venue_logo" in d:                       # logo del BAR
                     s["venue_logo"] = remove_solid_bg(str(d["venue_logo"]))[:700000]
                 if "tym_logo" in d:                          # logo de TYM (global)
-                    TYM["tym_logo"] = str(d["tym_logo"])[:700000]
+                    TYM["tym_logo"] = remove_solid_bg(str(d["tym_logo"]))[:700000]
                 if "socials" in d and isinstance(d["socials"], dict):  # redes de TYM (global)
                     TYM["socials"] = {kk: str(vv)[:300] for kk, vv in d["socials"].items()}
                 if "credit_packages" in d and isinstance(d["credit_packages"], list):

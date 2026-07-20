@@ -19,6 +19,14 @@ if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');
 <link rel="stylesheet" href="/style.css">
 <style>
 
+/* Logo del bar, grande y centrado arriba del todo en el tab "Pedir" — la identidad del
+   local donde estás pidiendo, no solo el nombre chiquito de la cabecera. Oculto si el local
+   no subió logo (sin placeholder vacío). */
+#venueBanner{display:flex;flex-direction:column;align-items:center;text-align:center;
+  margin:4px 0 16px;gap:8px}
+#venueBanner img{max-height:100px;max-width:min(280px,80%);object-fit:contain}
+#venueBanner .venue-banner-name{font-size:16px;font-weight:800;color:var(--txt)}
+
 /* Confirmacion visual al pedir cancion — mas notoria que el toast chiquito de abajo */
 #reqFlash{position:fixed;inset:0;z-index:65;display:flex;align-items:center;justify-content:center;
   pointer-events:none;opacity:0;transition:opacity .25s ease}
@@ -232,6 +240,10 @@ body{padding-bottom:80px}
 <div class="wrap">
   <!-- ===== PEDIR ===== -->
   <section class="tab on" id="tab-pedir">
+    <div class="venue-banner" id="venueBanner" style="display:none">
+      <img id="venueBannerLogo" alt="">
+      <div class="venue-banner-name" id="venueBannerName"></div>
+    </div>
     <div class="card">
       <h2>Pon tu canción 🎵</h2>
       <div class="search-wrap">
@@ -1735,6 +1747,16 @@ async function poll(){
     $('headerVenue').textContent=s.settings.venue_name||'';
     updateHeaderTicker(s.my_tab_total||0);
     updateAssistBtn();
+
+    // Logo grande y centrado arriba del tab "Pedir" — identidad del local, oculto si no
+    // subió logo (nunca un placeholder vacío).
+    if(s.settings.venue_logo){
+      $('venueBannerLogo').src=s.settings.venue_logo;
+      $('venueBannerName').textContent=s.settings.venue_name||'';
+      $('venueBanner').style.display='';
+    }else{
+      $('venueBanner').style.display='none';
+    }
 
     // Gate. En modo prepago se navega y se pide GRATIS sin formulario (sesión anónima
     // silenciosa vía ensureAnonSession) — el registro de celular solo se pide cuando

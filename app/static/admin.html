@@ -857,7 +857,28 @@ function pickThemeAndSave(t){
 }
 
 let tymLogoData=null, venueLogoData=null, curSettings={};
-function readImg(f,cb){if(!f)return;const r=new FileReader();r.onload=()=>cb(r.result);r.readAsDataURL(f);}
+function readImg(f,cb){
+  if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{
+    // Redimensiona en el navegador antes de mandar al servidor — una foto de cámara sin
+    // redimensionar puede pesar varios MB, y aunque el servidor ya la acepta (antes había
+    // un límite de 64KB que la descartaba en silencio), redimensionar acá hace la subida
+    // mucho más rápida y liviana. El servidor igual la vuelve a procesar (quita el fondo si
+    // aplica) así que esto es solo para no mandar de más por la red.
+    const img=new Image();
+    img.onload=()=>{
+      const MAX=480;let w=img.width,h=img.height;
+      if(w>MAX||h>MAX){const s=MAX/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
+      const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      cb(canvas.toDataURL('image/png'));
+    };
+    img.onerror=()=>cb(r.result); // si algo falla al redimensionar, manda el original igual
+    img.src=r.result;
+  };
+  r.readAsDataURL(f);
+}
 function renderLogoPrev(){
   const p=$('logoPrev');if(!p)return;p.innerHTML='';
   const t=tymLogoData||curSettings.tym_logo,v=venueLogoData||curSettings.venue_logo;
