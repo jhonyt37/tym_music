@@ -96,6 +96,7 @@
   <button class="tabBtn" onclick="showTab('tables')" id="tbtn-tables">🍽️ Mesas</button>
   <button class="tabBtn" onclick="showTab('caja')" id="tbtn-caja">💰 Caja</button>
   <button class="tabBtn" onclick="showTab('content')" id="tbtn-content">🎵 Contenido</button>
+  <button class="tabBtn" onclick="showTab('local')" id="tbtn-local" style="display:none">🗂️ Modo local</button>
   <button class="tabBtn" onclick="showTab('settings')" id="tbtn-settings">⚙️ Ajustes</button>
 </nav>
 
@@ -343,7 +344,7 @@
         <summary><span class="sec">Catálogo de canciones</span><span class="chev">▸</span></summary>
         <div class="secBody">
       <label class="opt" style="margin-top:10px">
-        <div><b>Modo catálogo local (en construcción)</b><div class="small">En vez de buscar en YouTube, los clientes piden solo del catálogo propio del local (archivos que el bar ya tiene) — evita el bloqueo de embed de YouTube y no depende de un tercero. Todavía no hay forma de cargar canciones al catálogo local, activarlo no tiene efecto por ahora.</div></div>
+        <div><b>Modo catálogo local</b><div class="small">En vez de buscar en YouTube, los clientes piden solo del catálogo propio del local (archivos que el bar ya tiene) — evita el bloqueo de embed de YouTube y no depende de un tercero. Al activarlo aparece un tab nuevo "🗂️ Modo local" arriba, donde se conecta la carpeta de música y se administra el catálogo.</div></div>
         <input type="checkbox" id="contentModeLocal" style="width:22px;height:22px">
       </label>
         </div>
@@ -517,15 +518,23 @@
 
       </div>
     </div>
+  </div>
+</div>
 
-    <!-- Catálogo local del bar (Fase 2 — modo sin YouTube) -->
-    <div class="card" style="margin-top:14px">
+<!-- ============================================================
+     TAB: MODO LOCAL (catálogo propio del bar, sin YouTube — Fase 2+)
+     Solo visible/con sentido si content_mode=="local" (Ajustes → Catálogo de
+     canciones) — todas las opciones de este modo viven acá para no mezclarlas
+     con la configuración de YouTube del resto del panel.
+     ============================================================ -->
+<div id="tab-local" class="tabpanel">
+  <div class="wrap wide">
+    <div class="card">
       <p class="sec">📁 Catálogo local del bar</p>
       <div class="small" style="color:var(--mut);margin-bottom:10px">
         Apunta a la carpeta de música del local (o una carpeta compartida por red) y se
         escanea desde tu navegador — TYM nunca sube ni guarda los archivos, solo el
-        título/artista/género que se lee de cada uno. Necesario para el
-        <b>Modo catálogo local</b> (Ajustes → Catálogo de canciones).
+        título/artista/género que se lee de cada uno.
       </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost" id="pickFolderBtn" onclick="pickLocalFolder()">📁 Elegir carpeta…</button>
@@ -1116,7 +1125,19 @@ async function save(){
   // final. Se limpia para que renderLogoPrev() vuelva a curSettings y se refresque con la
   // imagen ya procesada en el próximo tick().
   if(hadNewLogo){tymLogoData=null;venueLogoData=null;setTimeout(tick,300);}
+  syncLocalTabVisibility(payload.content_mode==='local');
   toast('Ajustes guardados');editing=false;
+}
+// Todas las opciones del catálogo local (Fase 2+) viven en su propio tab — solo tiene sentido
+// verlas si el local activó "Modo catálogo local" en Ajustes, para no mezclar esa config con
+// la de YouTube (pedido explícito: evitar confundir ambos modos en la misma vista).
+function syncLocalTabVisibility(isLocal){
+  const btn=$('tbtn-local');
+  if(!btn)return;
+  btn.style.display=isLocal?'':'none';
+  if(!isLocal&&document.getElementById('tab-local')&&document.getElementById('tab-local').classList.contains('active')){
+    showTab('content');
+  }
 }
 async function reset(){
   if(confirm('¿Reiniciar la demo? Borra cola, cobros y sesiones.')){
@@ -1222,8 +1243,8 @@ async function reorderCurated(order){
   tick();
 }
 function renderCurated(fullList){
-  // El catálogo local (Fase 2, prefijo "local:") tiene su propia lista/tarjeta más abajo
-  // ("Catálogo local del bar") — esta sigue siendo solo YouTube, como siempre.
+  // El catálogo local (prefijo "local:") tiene su propio tab ("🗂️ Modo local") — esta
+  // sigue siendo solo YouTube, como siempre.
   const list=(fullList||[]).filter(c=>!(c.yt&&c.yt.startsWith('local:')));
   window._cur=list;const box=$('curList');box.innerHTML='';
   if(!list.length){box.innerHTML='<div class="empty">Aún no has añadido recomendadas.</div>';return;}
@@ -1626,6 +1647,7 @@ async function tick(){
       $('prepaid').checked=s.settings.prepaid_mode||false;
       $('minDirectPay').value=s.settings.min_direct_pay||700;
       $('contentModeLocal').checked=s.settings.content_mode==='local';
+      syncLocalTabVisibility(s.settings.content_mode==='local');
       $('showTymBrand').checked=s.settings.show_tym_brand||false;
       $('ownerEmail').value=s.owner_email||'';
       if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;
