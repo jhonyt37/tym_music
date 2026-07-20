@@ -139,6 +139,23 @@ body{padding-bottom:80px}
 .poll-bar{height:5px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden;flex-basis:100%}
 .poll-bar-fill{height:100%;background:var(--pri);border-radius:3px;transition:width .5s}
 .poll-vote-n{font-size:11px;color:var(--mut);font-weight:700;margin-left:auto;white-space:nowrap}
+/* Poll con exactamente 2 opciones: mismo cara-a-cara que el duelo, en azul (con 3 opciones
+   sigue siendo lista vertical — el "enfrentadas" solo tiene sentido cuando son 2). */
+#pollOptions.vs-row{display:flex;align-items:stretch;gap:8px;margin-top:8px}
+.poll-vs-divider{flex:none;align-self:center;font-size:12px;font-weight:900;color:var(--pri);opacity:.85;
+  width:26px;text-align:center;letter-spacing:.5px}
+.poll-vs-team{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;
+  background:var(--bg2);border:2px solid var(--line);border-radius:16px;padding:12px 8px;
+  cursor:pointer;transition:border-color .2s,background .2s,transform .1s;touch-action:manipulation}
+.poll-vs-team:active{transform:scale(.97)}
+.poll-vs-team.on{border-color:var(--pri);background:rgba(59,130,246,.15)}
+.poll-vs-img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:10px;background:#0b0f1a}
+.poll-vs-info{width:100%;min-width:0}
+.poll-vs-info .t{font-size:13px;font-weight:700;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.poll-vs-info .a{font-size:11px;color:var(--mut);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.poll-vs-votes{font-size:11px;color:var(--mut);font-weight:700}
+.poll-vs-team .poll-vs-bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;width:100%}
+.poll-vs-team .poll-vs-bar-fill{height:100%;background:var(--pri);border-radius:3px;transition:width .5s}
 /* Check inequívoco de "este es tu voto" — antes solo cambiaba el borde/fondo, muy sutil */
 .vote-check{color:var(--pri);font-weight:900;font-size:17px;flex:none;animation:voteCheckIn .25s ease-out}
 .duelo-team .vote-check{color:#f59e0b}
@@ -1106,14 +1123,26 @@ function renderPoll(poll){
   const box=$('pollOptions');box.innerHTML='';
   const opts=poll.options||[];const votes=poll.votes||{};const myVote=poll.my_vote;
   const totalVotes=Object.values(votes).reduce((s,n)=>s+n,0)||1;
-  opts.forEach(opt=>{
+  // Con exactamente 2 opciones, mismo layout cara a cara que el duelo (pedido explícito del
+  // usuario) — con 3 sigue como lista vertical, que es lo correcto cuando no es un 1 contra 1.
+  const vsMode=opts.length===2;
+  box.classList.toggle('vs-row',vsMode);
+  opts.forEach((opt,idx)=>{
     const count=votes[opt.yt]||0;const pct=Math.round(100*count/totalVotes);const on=myVote===opt.yt;
-    const div=document.createElement('div');div.className='poll-opt'+(on?' on':'');div.style.flexWrap='wrap';
-    div.innerHTML=`<img class="mini" src="${img(opt.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${esc(opt.title)}</div><div class="a">${esc(opt.artist||'')}</div></div>${on?'<span class="vote-check">✓</span>':''}<div class="poll-vote-n">${count} voto${count!==1?'s':''} · ${pct}%</div><div class="poll-bar" style="flex-basis:100%"><div class="poll-bar-fill" style="width:${on?pct:0}%"></div></div>`;
-    div.onclick=()=>votePoll(opt.yt);
-    box.appendChild(div);
+    if(vsMode){
+      const div=document.createElement('div');div.className='poll-vs-team'+(on?' on':'');
+      div.innerHTML=`<img class="poll-vs-img" src="${img(opt.yt)}" onerror="this.removeAttribute('src')"><div class="poll-vs-info"><div class="t">${esc(opt.title)}</div><div class="a">${esc(opt.artist||'')}</div></div>${on?'<span class="vote-check">✓</span>':''}<div class="poll-vs-votes">${count} voto${count!==1?'s':''} · ${pct}%</div><div class="poll-vs-bar"><div class="poll-vs-bar-fill" style="width:0%"></div></div>`;
+      div.onclick=()=>votePoll(opt.yt);
+      box.appendChild(div);
+      if(idx===0){const vs=document.createElement('div');vs.className='poll-vs-divider';vs.textContent='VS';box.appendChild(vs);}
+    }else{
+      const div=document.createElement('div');div.className='poll-opt'+(on?' on':'');div.style.flexWrap='wrap';
+      div.innerHTML=`<img class="mini" src="${img(opt.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${esc(opt.title)}</div><div class="a">${esc(opt.artist||'')}</div></div>${on?'<span class="vote-check">✓</span>':''}<div class="poll-vote-n">${count} voto${count!==1?'s':''} · ${pct}%</div><div class="poll-bar" style="flex-basis:100%"><div class="poll-bar-fill" style="width:${on?pct:0}%"></div></div>`;
+      div.onclick=()=>votePoll(opt.yt);
+      box.appendChild(div);
+    }
   });
-  setTimeout(()=>{box.querySelectorAll('.poll-bar-fill').forEach((el,i)=>{const count=votes[(opts[i]||{}).yt]||0;const pct=Math.round(100*count/totalVotes);el.style.width=pct+'%';});},50);
+  setTimeout(()=>{box.querySelectorAll('.poll-bar-fill,.poll-vs-bar-fill').forEach((el,i)=>{const count=votes[(opts[i]||{}).yt]||0;const pct=Math.round(100*count/totalVotes);el.style.width=pct+'%';});},50);
   tickify(box);
 }
 async function votePoll(yt){
