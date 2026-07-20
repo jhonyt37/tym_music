@@ -188,6 +188,18 @@ body{padding-bottom:80px}
 
 /* ---- Guide button ---- */
 #guideBtn{background:none;border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;flex-none;touch-action:manipulation}
+#refreshBtn{background:none;border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:4px 10px;font-size:13px;font-weight:700;cursor:pointer;flex-none;touch-action:manipulation;margin-right:6px}
+#refreshBtn:active{transform:rotate(180deg);transition:transform .3s}
+/* Deslizar hacia abajo para actualizar — indicador fijo arriba de todo, empujado por JS
+   (transform translateY) mientras el dedo arrastra; solo se activa si la página ya está
+   arriba del todo (scrollY 0), para no interferir con el scroll normal del resto de la app. */
+#pullRefresh{position:fixed;top:0;left:0;right:0;height:60px;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:2px;transform:translateY(-64px);z-index:60;
+  color:var(--mut);font-size:12px;font-weight:700;pointer-events:none;background:var(--bg,#0e1320)}
+#pullRefreshIcon{font-size:18px;transition:transform .15s}
+#pullRefresh.ready #pullRefreshIcon{transform:rotate(180deg)}
+#pullRefresh.spinning #pullRefreshIcon{animation:pullSpin .7s linear infinite}
+@keyframes pullSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
@@ -201,8 +213,16 @@ body{padding-bottom:80px}
   <div class="tick-wrap" id="tickWrap" style="display:none">
     <div class="tick" id="headerTick"></div>
   </div>
+  <button id="refreshBtn" onclick="location.reload()" title="Actualizar">🔄</button>
   <button id="guideBtn" onclick="openGuide()" title="¿Cómo usar la app?">?</button>
 </header>
+
+<!-- Deslizar hacia abajo para actualizar (pedido explícito para la app instalada — sin barra
+     del navegador no hay ni pull-to-refresh nativo ni botón de recargar a la vista). -->
+<div id="pullRefresh">
+  <div id="pullRefreshIcon">↓</div>
+  <div id="pullRefreshText">Desliza para actualizar</div>
+</div>
 
 <!-- Gate de mesa -->
 <div class="gate" id="gate">
@@ -635,6 +655,48 @@ async function boot(){
   initBellDrag();
   loadReco();
   poll(); setInterval(poll,2000);
+  initPullToRefresh();
+}
+// Deslizar hacia abajo para actualizar (pedido explícito para la app instalada — sin barra
+// del navegador no hay pull-to-refresh nativo ni botón de recargar). Solo se activa si el
+// gesto empieza con la página ya arriba del todo (scrollY 0), para no interferir con el
+// scroll normal del resto de la app; con touch-action:pan-x en el body evitamos el rebote
+// nativo del navegador mientras se está arrastrando (si no, compite con el nuestro).
+function initPullToRefresh(){
+  const el=$('pullRefresh'),icon=$('pullRefreshIcon'),txt=$('pullRefreshText');
+  if(!el)return;
+  const THRESHOLD=70,MAX_PULL=110;
+  let startY=null,pulling=false,ready=false;
+  document.addEventListener('touchstart',e=>{
+    // #floatBell tiene su propio drag (initBellDrag) — si el toque empieza ahí, no competir.
+    if(window.scrollY>0||e.touches.length!==1||e.target.closest('#floatBell'))return;
+    startY=e.touches[0].clientY;pulling=true;ready=false;
+    el.classList.remove('spinning');
+  },{passive:true});
+  document.addEventListener('touchmove',e=>{
+    if(!pulling||startY===null)return;
+    const dy=e.touches[0].clientY-startY;
+    if(dy<=0){el.style.transform='';return;}
+    if(window.scrollY>0){pulling=false;el.style.transform='';return;} // se puso a scrollear normal
+    e.preventDefault();
+    const pull=Math.min(dy*0.5,MAX_PULL);
+    el.style.transform=`translateY(${pull-64}px)`;
+    ready=dy>=THRESHOLD;
+    el.classList.toggle('ready',ready);
+    txt.textContent=ready?'Suelta para actualizar':'Desliza para actualizar';
+  },{passive:false});
+  document.addEventListener('touchend',()=>{
+    if(!pulling)return;
+    pulling=false;
+    if(ready){
+      el.classList.add('spinning');el.classList.remove('ready');
+      txt.textContent='Actualizando…';el.style.transform='translateY(0)';
+      setTimeout(()=>location.reload(),200);
+    }else{
+      el.style.transform='';
+    }
+    startY=null;
+  },{passive:true});
 }
 function showTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('on',t.id==='tab-'+name));
