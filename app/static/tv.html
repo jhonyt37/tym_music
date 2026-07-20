@@ -348,13 +348,26 @@ function initPasswordToggle(id){
   wrap.appendChild(btn);
 }
 initPasswordToggle('lgPass');
-const TV_VENUE=new URLSearchParams(location.search).get('v')||'';
+// Si la URL trae ?v=, se usa y se recuerda para ESTE dispositivo. Si no la trae (ej. el
+// watchdog de más abajo recarga sola tras un redeploy/cold-start de Render, o alguien
+// guardó/abrió /tv sin el parámetro), se recupera el último local conocido en vez de caer
+// al local por defecto del servidor (bardemo, el de pruebas) — bug reportado en vivo: el TV
+// terminaba mostrando la playlist de otro local tras cada redeploy.
+const TV_VENUE=(()=>{
+  const fromUrl=new URLSearchParams(location.search).get('v');
+  const k='tym_tv_venue';
+  if(fromUrl){try{localStorage.setItem(k,fromUrl);}catch(e){}return fromUrl;}
+  try{return localStorage.getItem(k)||'';}catch(e){return '';}
+})();
 // Identidad persistente de ESTE dispositivo/TV física (distinto del BroadcastChannel de
 // pestañas duplicadas, que no cruza dispositivos). Sobrevive a recargas de la misma TV.
 const TV_DEVICE_ID=(()=>{const k='tym_tv_device_id';let id;try{id=localStorage.getItem(k);}catch(e){}
   if(!id){id='tv_'+Math.random().toString(36).slice(2)+Date.now().toString(36);try{localStorage.setItem(k,id);}catch(e){}}
   return id;})();
 let tvBlocked=false,tvDeviceDecided=false,wasEverOwner=false;
+// Detección de redeploy: BOOT_ID cambia solo cuando arranca un proceso nuevo del servidor
+// (a diferencia de VERSION, no depende de que alguien lo suba a mano en cada deploy).
+let _lastBootId=null,_pendingBootId=null;
 async function acceptDeviceTakeover(){
   try{await fetch('/api/tv_ping',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({device_id:TV_DEVICE_ID,force:true})});}catch(e){}
   tvBlocked=false;wasEverOwner=true;tvDeviceDecided=false;
@@ -635,19 +648,24 @@ function onYouTubeIframeAPIReady(){
 
 // Fallback: si el player no se inicializó en 8s, mostrar aviso
 setTimeout(()=>{if(!ready){const b=document.createElement('div');b.id='ytWarn';b.className='warn';b.textContent='⚠ El reproductor de YouTube está tardando en cargar (puede pasar en el primer arranque del servidor)…';document.body.appendChild(b);}},8000);
-// Auto-recuperación: si el player nunca llega a inicializar (ready sigue false), antes solo
-// quedaba el aviso de arriba parpadeando para siempre — el dueño tenía que notar el problema
-// y refrescar a mano, a veces varias veces seguidas hasta que el script de YouTube cargara
-// bien. Ahora se recarga sola una vez pasado el margen razonable de un cold-start de Render
-// (~30s documentado en DEPLOY.md), con tope de reintentos para no quedar en loop si de verdad
-// no hay red.
-setTimeout(()=>{
-  if(ready)return;
+// Auto-recuperación: si el player nunca llega a inicializar (ready sigue false), se recarga
+// sola. ANTES tenía tope de 3 intentos y se rendía dejando la pantalla congelada — un
+// redeploy de Render (o un cold-start más largo de lo normal) NO debería poder tumbar la
+// música del local hasta que alguien note el problema y refresque a mano; "recarga cada
+// tanto hasta que el servidor conteste" es barato (una petición de página cada 10-25s) y
+// nunca debería rendirse sola. El primer intento espera 25s (cubre un cold-start normal); si
+// para entonces sigue sin estar listo, los siguientes reintentan cada 10s en vez de esperar
+// otros 25 — se recupera más rápido si el servidor tarda más de lo normal en levantar.
+(function scheduleYtAutoReload(){
   let n=0; try{n=parseInt(sessionStorage.getItem('tym_tv_autoreload')||'0');}catch(e){}
-  if(n>=3)return; // ya se intentó varias veces solo — deja el aviso estático, algo más de fondo
-  try{sessionStorage.setItem('tym_tv_autoreload',String(n+1));}catch(e){}
-  location.reload();
-},25000);
+  setTimeout(()=>{
+    if(ready)return;
+    try{sessionStorage.setItem('tym_tv_autoreload',String(n+1));}catch(e){}
+    const w=document.getElementById('ytWarn');
+    if(w)w.textContent='⚠ El reproductor de YouTube está tardando en cargar — reintentando automáticamente (intento '+(n+1)+')…';
+    location.reload();
+  },n===0?25000:10000);
+})();
 // Mismo espíritu para cuando el player SÍ inicializó pero se quedó sin cargar nunca la canción
 // actual (curYt nunca alcanza a igualar la del servidor pese a los reintentos normales de
 // tick()) — reseteo el contador de intentos apenas queda sincronizado, para no gastar los 3
@@ -659,8 +677,9 @@ function _watchdogStuck(hasNp,synced){
   _stuckPolls++;
   if(_stuckPolls<6)return; // ~12s de polls (cada 2s) sin lograr sincronizar
   _stuckPolls=0;
+  // Mismo criterio que el watchdog de arriba: sin tope de reintentos — la música del local
+  // no puede quedar dependiendo de que alguien note la pantalla trabada y refresque a mano.
   let n=0; try{n=parseInt(sessionStorage.getItem('tym_tv_autoreload2')||'0');}catch(e){}
-  if(n>=3)return;
   try{sessionStorage.setItem('tym_tv_autoreload2',String(n+1));}catch(e){}
   location.reload();
 }
@@ -884,6 +903,24 @@ setInterval(async()=>{
     if(_dedicaToMark){_tvUrl+=(_tvUrl.includes('?')?'&':'?')+'mark_dedica='+_dedicaToMark;_dedicaToMark=null;}
     const s=await (await fetch(_tvUrl)).json();
     applyBrand(s.settings);
+
+    // Redeploy detectado: BOOT_ID del servidor cambió. Se pide verlo 2 veces seguidas antes
+    // de recargar (no con una sola respuesta) para no dispararse por una sola contestación
+    // rara mientras Render todavía está pasando tráfico del contenedor viejo al nuevo — el
+    // bar no debería tener que notar ni hacer nada, la pantalla se refresca sola y sigue.
+    if(s.boot_id){
+      if(_lastBootId===null)_lastBootId=s.boot_id;
+      else if(s.boot_id!==_lastBootId){
+        if(s.boot_id===_pendingBootId){
+          try{sessionStorage.removeItem('tym_tv_autoreload');sessionStorage.removeItem('tym_tv_autoreload2');}catch(e){}
+          location.reload();
+          return;
+        }
+        _pendingBootId=s.boot_id;
+      }else{
+        _pendingBootId=null;
+      }
+    }
 
     // Watchdog: nunca silencio
     if(!s.now_playing||(ready&&player&&player.getPlayerState&&player.getPlayerState()===YT.PlayerState.ENDED)){await advance();return;}

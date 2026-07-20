@@ -24,6 +24,10 @@ except ImportError:
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATIC = os.path.join(HERE, "static")
 VERSION = "0.0.9-demo"
+# Cambia SOLO en el momento en que arranca este proceso (a diferencia de VERSION, que hay que
+# subir a mano) — sirve para que /tv detecte un redeploy sin depender de que alguien recuerde
+# actualizar VERSION en cada deploy. Ver BOOT_ID en /api/state y el watchdog en tv.html.
+BOOT_ID = secrets.token_hex(6)
 PORT = int(os.environ.get("PORT", 8000))
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "")
 # Upstash Redis (backup remoto: evita perder datos en Render/hosts con disco efímero)
@@ -1493,6 +1497,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         jump_reason = None
 
     out = {
+        "boot_id": BOOT_ID,
         "settings": dict({k: s.get(k) for k in ("venue_name", "price_priority", "style", "auto_approve",
                                        "genre", "credit_packages", "time_pass",
                                        "repeat_block_min", "repeat_block_songs", "trim_end_secs",
@@ -1897,6 +1902,8 @@ class H(BaseHTTPRequestHandler):
                 o["pass_hash"] = hash_password(pwd)
                 save_state()
             tk = gen_token(); AUTH[tk] = o["venue"]
+            save_state()   # AUTH sobrevive a un redeploy (ver save_state/load_state) — si no,
+                            # cada reinicio del proceso desloguea /admin y /tv sin avisar
             body = json.dumps({"ok": True, "venue": o["venue"]}).encode("utf-8")
             secure_flag = "; Secure" if PUBLIC_URL.startswith("https://") else ""
             self.send_response(200)
@@ -1906,6 +1913,7 @@ class H(BaseHTTPRequestHandler):
             self.end_headers(); self.wfile.write(body); return
         if path == "/api/logout":
             AUTH.pop(self.get_cookie("tymauth"), None)
+            save_state()
             return self._send(200, {"ok": True})
         if path == "/api/forgot_password":
             ip = self.client_address[0]
@@ -3326,7 +3334,8 @@ def save_state():
     """{version:3, tym:{...global...}, venues:{id:{...bar...}}} — multi-bar; listo para DB."""
     try:
         data = {"version": 3, "ids": {"_id": _id[0], "_fb": FB_IDX[0]},
-                "tym": TYM, "venues": {vid: venue_snapshot(v) for vid, v in VENUES.items()}}
+                "tym": TYM, "venues": {vid: venue_snapshot(v) for vid, v in VENUES.items()},
+                "auth": AUTH}   # sesiones de dueño (cookie tymauth) — sobreviven a un redeploy
         tmp = DATA_FILE + ".tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
@@ -3428,6 +3437,10 @@ def load_state():
         for vid, v in VENUES.items():
             for tok in v["sessions"]:
                 TOKENS[tok] = vid
+        AUTH.clear()
+        for tk, vid in d.get("auth", {}).items():
+            if vid == "*" or vid in VENUES:
+                AUTH[tk] = vid
         print("Bares activos:", list(VENUES.keys()))
     except Exception as e:
         print("load_state error:", e)
