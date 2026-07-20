@@ -66,6 +66,10 @@ body{padding-bottom:80px}
 .badge{position:absolute;top:4px;right:50%;margin-right:-22px;background:var(--pri);color:#fff;font-size:10px;
   font-weight:800;border-radius:999px;padding:1px 6px;font-style:normal}
 .badge.gold{background:var(--gold);color:#1a1300}
+/* Badge de "hay algo nuevo que votar" — antes era una pastillita estática fácil de no ver;
+   el pulso llama la atención para que el usuario le dé clic por curiosidad. */
+#badgePoll{animation:navBadgePulse 1.3s ease-in-out infinite}
+@keyframes navBadgePulse{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(59,130,246,.55)}50%{transform:scale(1.22);box-shadow:0 0 0 5px rgba(59,130,246,0)}}
 #fx{position:fixed;inset:0;pointer-events:none;z-index:40;overflow:hidden}
 .fxe{position:absolute;bottom:90px;will-change:transform,opacity;animation:floatUp 2.6s ease-out forwards}
 @keyframes floatUp{0%{transform:translateY(0) scale(.5);opacity:0}15%{opacity:1;transform:translateY(-20px) scale(1.1)}100%{transform:translateY(-62vh) scale(1.25);opacity:0}}
@@ -113,17 +117,23 @@ body{padding-bottom:80px}
 
 /* ---- Poll ---- */
 .duelo-team{display:flex;align-items:center;gap:10px;background:var(--bg2);border:2px solid var(--line);
-  border-radius:16px;padding:10px 14px;cursor:pointer;transition:border-color .2s,background .2s;flex-wrap:wrap}
+  border-radius:16px;padding:10px 14px;cursor:pointer;transition:border-color .2s,background .2s,transform .1s;flex-wrap:wrap;touch-action:manipulation}
+.duelo-team:active{transform:scale(.97)}
 .duelo-team.on{border-color:#f59e0b;background:rgba(245,158,11,.13)}
 .duelo-team .duelo-bar{height:6px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden;flex-basis:100%}
 .duelo-team .duelo-bar-fill{height:100%;background:#f59e0b;border-radius:3px;transition:width .5s}
 .duelo-team .duelo-lbl{font-size:11px;font-weight:800;color:#f59e0b;letter-spacing:.5px}
 .poll-opt{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);
-  border-radius:12px;padding:10px 12px;margin-top:8px;cursor:pointer;touch-action:manipulation}
+  border-radius:12px;padding:10px 12px;margin-top:8px;cursor:pointer;touch-action:manipulation;transition:border-color .2s,background .2s,transform .1s}
+.poll-opt:active{transform:scale(.97)}
 .poll-opt.on{border-color:var(--pri);background:rgba(59,130,246,.15)}
 .poll-bar{height:5px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden;flex-basis:100%}
 .poll-bar-fill{height:100%;background:var(--pri);border-radius:3px;transition:width .5s}
 .poll-vote-n{font-size:11px;color:var(--mut);font-weight:700;margin-left:auto;white-space:nowrap}
+/* Check inequívoco de "este es tu voto" — antes solo cambiaba el borde/fondo, muy sutil */
+.vote-check{color:var(--pri);font-weight:900;font-size:17px;flex:none;animation:voteCheckIn .25s ease-out}
+.duelo-team .vote-check{color:#f59e0b}
+@keyframes voteCheckIn{from{transform:scale(0);opacity:0}to{transform:scale(1);opacity:1}}
 
 /* ---- Top mesas ranking ---- */
 .mesa-rank{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:6px}
@@ -878,10 +888,13 @@ function cfNo(){
   if(cfNoCb){cfNoCb();cfNoCb=null;}
 }
 let _toastT=null;
-function toast(t,type,ms){
+// onClick opcional: si viene, el toast queda clickeable (ej. "nueva votación" → ir a Social)
+// en vez de que el usuario tenga que notar el badge de la nav y navegar por su cuenta.
+function toast(t,type,ms,onClick){
   const e=$('toast'),nav=$('nav');
   e.style.bottom=nav?(nav.offsetHeight+16)+'px':'80px';
-  e.textContent=t;e.className='toast'+(type?' '+type:'');e.classList.add('show');
+  e.textContent=t;e.className='toast'+(type?' '+type:'')+(onClick?' clickable':'');e.classList.add('show');
+  e.onclick=onClick?()=>{onClick();e.classList.remove('show');}:null;
   clearTimeout(_toastT);
   _toastT=setTimeout(()=>e.classList.remove('show'),ms||2200);
 }
@@ -1087,7 +1100,7 @@ function renderPoll(poll){
   opts.forEach(opt=>{
     const count=votes[opt.yt]||0;const pct=Math.round(100*count/totalVotes);const on=myVote===opt.yt;
     const div=document.createElement('div');div.className='poll-opt'+(on?' on':'');div.style.flexWrap='wrap';
-    div.innerHTML=`<img class="mini" src="${img(opt.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${esc(opt.title)}</div><div class="a">${esc(opt.artist||'')}</div></div><div class="poll-vote-n">${count} voto${count!==1?'s':''}</div><div class="poll-bar" style="flex-basis:100%"><div class="poll-bar-fill" style="width:${on?pct:0}%"></div></div>`;
+    div.innerHTML=`<img class="mini" src="${img(opt.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${esc(opt.title)}</div><div class="a">${esc(opt.artist||'')}</div></div>${on?'<span class="vote-check">✓</span>':''}<div class="poll-vote-n">${count} voto${count!==1?'s':''} · ${pct}%</div><div class="poll-bar" style="flex-basis:100%"><div class="poll-bar-fill" style="width:${on?pct:0}%"></div></div>`;
     div.onclick=()=>votePoll(opt.yt);
     box.appendChild(div);
   });
@@ -1126,7 +1139,7 @@ function renderDuelo(duelo){
   teams.forEach((team,idx)=>{
     const count=votes[team.yt]||0;const pct=Math.round(100*count/total);const on=myVote===team.yt;
     const div=document.createElement('div');div.className='duelo-team'+(on?' on':'');
-    div.innerHTML=`<div class="duelo-lbl">${idx===0?'⚔️ A':'⚔️ B'}</div><img class="mini" src="${img(team.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${esc(team.title)}</div><div class="a">${esc(team.artist||'')}</div></div><div style="font-size:11px;color:var(--mut);font-weight:700;white-space:nowrap">${count} voto${count!==1?'s':''}</div><div class="duelo-bar"><div class="duelo-bar-fill" style="width:0%"></div></div>`;
+    div.innerHTML=`<div class="duelo-lbl">${idx===0?'⚔️ A':'⚔️ B'}</div><img class="mini" src="${img(team.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${esc(team.title)}</div><div class="a">${esc(team.artist||'')}</div></div>${on?'<span class="vote-check">✓</span>':''}<div style="font-size:11px;color:var(--mut);font-weight:700;white-space:nowrap">${count} voto${count!==1?'s':''} · ${pct}%</div><div class="duelo-bar"><div class="duelo-bar-fill" style="width:0%"></div></div>`;
     div.onclick=()=>voteDuelo(team.yt);
     box.appendChild(div);
   });
@@ -1610,7 +1623,7 @@ function renderLoved(items){
 }
 
 // ---------- Poll ----------
-let _lastNpId=null,_lastPollActive=false;
+let _lastNpId=null,_lastPollActive=false,_lastDueloActive=false;
 async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
@@ -1732,14 +1745,29 @@ async function poll(){
     _dueloDur=s.settings.duelo_duration_secs||60;
     renderPoll(s.poll);
     renderDuelo(s.duelo);
+    // Toast clickeable: antes había que notar el badge en la nav y navegar solo — un solo
+    // toque en el aviso ya te deja en Social listo para votar, sin adivinar dónde ir.
+    const socialTab=document.querySelector('[data-tab="social"]');
+    const onSocialTab=socialTab&&socialTab.classList.contains('on');
     const _pollNowActive=!!(s.poll&&s.poll.active);
     if(_pollNowActive&&!_lastPollActive){
-      toast('🗳️ ¡Nueva votación! Ve a Social para votar','ok');
-      _triggerPushPoll(s.poll);
-      const socialTab=document.querySelector('[data-tab="social"]');
-      if(socialTab&&!socialTab.classList.contains('active'))$('badgePoll').style.display='';
+      toast('🗳️ ¡Nueva votación! Toca para ir a votar','ok',4000,()=>showTab('social'));
+      _triggerPushVote('🗳️ ¡Nueva votación TYM!',
+        (s.poll.options||[]).length?'Elige entre: '+s.poll.options.slice(0,3).map(o=>o.title).join(', '):'¡Vota por la próxima canción!',
+        'tym-poll');
+      if(!onSocialTab)$('badgePoll').style.display='';
     }
     _lastPollActive=_pollNowActive;
+    const _dueloNowActive=!!(s.duelo&&s.duelo.active);
+    if(_dueloNowActive&&!_lastDueloActive){
+      toast('⚔️ ¡Nuevo duelo de canciones! Toca para votar','ok',4000,()=>showTab('social'));
+      const teams=s.duelo.teams||[];
+      _triggerPushVote('⚔️ ¡Nuevo duelo TYM!',
+        teams.length===2?teams[0].title+' vs '+teams[1].title:'¡Vota por tu favorita!',
+        'tym-duelo');
+      if(!onSocialTab)$('badgePoll').style.display='';
+    }
+    _lastDueloActive=_dueloNowActive;
     renderVibe(s.vibe);
     renderDedicaCard(s.tables,s.session,s.settings.dedica_presets);
 
@@ -1790,28 +1818,28 @@ async function _initSW(){
     await _swReg.update();
   }catch(e){}
 }
-async function _triggerPushPoll(poll){
+// Compartida entre poll y duelo — antes solo existía para poll (_triggerPushPoll), el duelo
+// nunca avisaba fuera de la app aunque es el mismo tipo de "ven a votar".
+async function _triggerPushVote(title,body,tag){
   if(!('Notification' in window))return;
   // Pedir permiso si no se ha dado
   if(Notification.permission==='default'){
-    Notification.requestPermission().then(p=>{if(p==='granted'){_subscribePush();_triggerPushPoll(poll);}});
+    Notification.requestPermission().then(p=>{if(p==='granted'){_subscribePush();_triggerPushVote(title,body,tag);}});
     return;
   }
   if(Notification.permission!=='granted')return;
   _subscribePush();
-  const opts=poll&&poll.options||[];
-  const body=opts.length>0?'Elige entre: '+opts.slice(0,3).map(o=>o.title).join(', '):'¡Vota por la próxima canción!';
   if(_swReg){
     try{
-      await _swReg.showNotification('🗳️ ¡Nueva votación TYM!',{
+      await _swReg.showNotification(title,{
         body,icon:'/icon-192.png',badge:'/icon-192.png',
-        tag:'tym-poll',renotify:true,
+        tag,renotify:true,
         data:{url:location.href.replace(/#.*/,'')+'#social'}
       });
       return;
     }catch(e){}
   }
-  try{new Notification('🗳️ ¡Nueva votación TYM!',{body,icon:'/icon-192.png'});}catch(e){}
+  try{new Notification(title,{body,icon:'/icon-192.png'});}catch(e){}
 }
 async function _subscribePush(){
   if(_pushSubscribed||!_swReg)return;

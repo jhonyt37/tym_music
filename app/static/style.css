@@ -115,6 +115,8 @@ header.bar{
 .toast.show{opacity:1}
 .toast.ok{background:var(--green);color:#06210f;border-color:var(--green)}
 .toast.err{background:var(--red);color:#fff;border-color:var(--red)}
+.toast.clickable{cursor:pointer}
+.toast.clickable::after{content:'›';margin-left:8px;font-weight:900;opacity:.8}
 .empty{color:var(--mut);text-align:center;padding:18px;font-size:14px}
 a.link{color:var(--pri);text-decoration:none}
 .small{font-size:12px;color:var(--mut)}
