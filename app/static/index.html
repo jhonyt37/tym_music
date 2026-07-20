@@ -460,9 +460,15 @@ body{padding-bottom:80px}
       <div class="price" id="superPrice" style="color:#a78bfa">$3.000</div>
     </div>
     <div style="margin-top:14px" id="sheetDedicaBox">
-      <label style="font-size:12px;color:var(--mut);font-weight:700">💌 Dedicatoria (opcional)</label>
-      <input class="field" id="sheetDedicaMsg" maxlength="80" placeholder="Ej: ¡Feliz cumpleaños María! 🎂" style="margin-top:4px" oninput="updateDedicaPriceHint()">
-      <div class="small" id="sheetDedicaPriceHint" style="margin-top:4px;color:var(--gold);font-weight:700;display:none"></div>
+      <button type="button" class="btn ghost block sm" id="sheetDedicaOpenBtn" onclick="toggleSheetDedica(true)">💌 Agregar dedicatoria (opcional)</button>
+      <div id="sheetDedicaOpen" style="display:none">
+        <div class="small" style="color:var(--mut);margin-bottom:8px">Tu mensaje aparece junto a la canción cuando suene. Elige uno de los del bar (van directo) o escribe el tuyo.</div>
+        <div id="sheetDedicaPresets" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>
+        <label style="font-size:12px;color:var(--mut);font-weight:700">Tu mensaje</label>
+        <input class="field" id="sheetDedicaMsg" maxlength="80" placeholder="Ej: ¡Feliz cumpleaños María! 🎂" style="margin-top:4px" oninput="updateDedicaPriceHint()">
+        <div class="small" id="sheetDedicaPriceHint" style="margin-top:4px;color:var(--gold);font-weight:700;display:none"></div>
+        <button type="button" class="btn ghost block sm" style="margin-top:10px" onclick="toggleSheetDedica(false)">✕ Pedir sin dedicatoria</button>
+      </div>
     </div>
     <div style="display:flex;gap:10px;margin-top:16px">
       <button class="btn ghost" style="flex:1" onclick="closeSheet()">Cancelar</button>
@@ -829,15 +835,39 @@ function openSheet(s){
   chosen={yt:s.yt,title:s.title,artist:s.artist||'',length:s.length||''};mode='normal';
   $('sTitle').textContent=s.title;$('sArtist').textContent=s.artist||'';
   $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
-  updatePriOption();updateDedicaPriceHint();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
+  updatePriOption();toggleSheetDedica(false);$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
   $('sheet').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
 }
 function openSheetLink(l){
   chosen={link:l,title:'Tu canción (link)'};mode='normal';
   $('sTitle').textContent='Canción desde link';$('sArtist').textContent=l.slice(0,42);
   $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
-  updatePriOption();updateDedicaPriceHint();$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
+  updatePriOption();toggleSheetDedica(false);$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
   $('sheet').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
+}
+// Dedicatoria dentro del sheet de pedir: colapsada por defecto (la mayoría pide sin
+// dedicatoria) — un botón la expande mostrando explicación + mensajes del bar como
+// recomendación + texto libre; "Pedir sin dedicatoria" la vuelve a contraer y limpia lo
+// escrito, para no dejar un mensaje a medio llenar colgado si el cliente cambia de idea.
+function toggleSheetDedica(open){
+  const openBox=$('sheetDedicaOpen'),openBtn=$('sheetDedicaOpenBtn');
+  if(!openBox||!openBtn)return;
+  openBox.style.display=open?'':'none';
+  openBtn.style.display=open?'none':'';
+  if(!open){try{$('sheetDedicaMsg').value='';}catch(e){}}
+  updateDedicaPriceHint();
+}
+function renderSheetDedicaPresets(presets){
+  const box=$('sheetDedicaPresets');if(!box)return;
+  const sig=JSON.stringify(presets||[]);
+  if(box.dataset.rendered===sig)return;
+  box.dataset.rendered=sig;
+  box.innerHTML='';
+  (presets||[]).forEach(p=>{
+    const b=document.createElement('button');b.type='button';b.className='btn ghost sm';b.textContent=p;
+    b.onclick=()=>{$('sheetDedicaMsg').value=p;updateDedicaPriceHint();};
+    box.appendChild(b);
+  });
 }
 // Muestra el costo extra de la dedicatoria AL MOMENTO de escribirla — pedido explícito: el
 // cliente debe saber cuánto vale antes de confirmar, no enterarse después.
@@ -870,7 +900,7 @@ function pick(m){
   const c=$('confirmBtn');
   c.textContent = m==='super'?'Saltar al #1 ⏫':(m==='pri'?'Pedir con prioridad ⚡':'Pedir canción');
   c.classList.toggle('gold',m!=='normal');}
-function closeSheet(){$('sheet').classList.remove('open');document.body.style.overflow='';$('nav').classList.remove('modal-open');try{$('sheetDedicaMsg').value='';}catch(e){}}
+function closeSheet(){$('sheet').classList.remove('open');document.body.style.overflow='';$('nav').classList.remove('modal-open');try{toggleSheetDedica(false);}catch(e){}}
 function confirmReq(){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   const hasMsg=($('sheetDedicaMsg').value||'').trim().length>0;
@@ -892,9 +922,12 @@ let _reqInFlight=false;
 async function doReq(payMethod){
   if(_reqInFlight)return;
   _reqInFlight=true;
+  // Capturar el mensaje ANTES de closeSheet(): ahora limpia el campo al cerrar (para que el
+  // sheet vuelva colapsado/vacío la próxima vez que se abra), así que leerlo después mandaría
+  // siempre vacío.
+  const sheetMsg=($('sheetDedicaMsg').value||'').trim().slice(0,80);
   closeSheet();
   try{
-    const sheetMsg=($('sheetDedicaMsg').value||'').trim().slice(0,80);
     const body=Object.assign({},chosen,{priority:mode==='pri',super:mode==='super',token,message:sheetMsg||undefined});
     if(payMethod)body.pay_method=payMethod;
     const r=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
@@ -1892,6 +1925,7 @@ async function poll(){
     _lastDueloActive=_dueloNowActive;
     renderVibe(s.vibe);
     renderDedicaCard(s.tables,s.session,s.settings.dedica_presets);
+    renderSheetDedicaPresets(s.settings.dedica_presets);
 
     // Badges de navegación
     $('badgeQ').style.display=s.queue_count?'':'none';$('badgeQ').textContent=s.queue_count;
