@@ -573,6 +573,7 @@ function applyTheme(t){
   document.querySelector('meta[name="theme-color"]').content=th.bg;
 }
 let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0, jumpReason='', dedicaPrice=0;
+let priorityAbuseMult=1, priorityAbuseResetAt=0;
 let prepaidMode=false, walletBalance=0, insufRetry=null, insufNeed=0, pendingRetry=null;
 let registerGateOpen=false, _anonBusy=false, pendingTabConfirm=false;
 // Si el navegador restaura esta página desde el bfcache (back/forward) en vez de cargarla de
@@ -877,18 +878,25 @@ function updateDedicaPriceHint(){
   if(hasMsg&&dedicaPrice>0){el.style.display='';el.textContent='💌 +'+cop(dedicaPrice)+' por la dedicatoria';}
   else el.style.display='none';
 }
+// Aviso del multiplicador anti-abuso (x2/x3 por pedidos de prioridad/salto seguidos de la
+// misma mesa) ANTES de pagar, con cuenta regresiva de cuándo baja — antes solo se enteraba
+// en un toast DESPUÉS de que ya lo habían cobrado.
+function abuseMultHint(now){
+  if(priorityAbuseMult<=1||!priorityAbuseResetAt||priorityAbuseResetAt<=now)return'';
+  return ' · 💸 x'+priorityAbuseMult+' (baja a x'+(priorityAbuseMult-1)+' en '+mm(priorityAbuseResetAt-now)+')';
+}
 function updatePriOption(){
   const now=Date.now()/1000;
   const wait=price_queue_min>5?' · ~'+price_queue_min+' min de espera':'';
   if(sess&&sess.pass_until>now){$('priSub').textContent='Incluida en tu pase activo'+wait;$('priPrice').textContent='Pase';}
   else if(sess&&sess.credits>0){$('priSub').textContent='Usa 1 crédito (te quedan '+(sess.credits-1)+')'+wait;$('priPrice').textContent='1 créd.';}
-  else{$('priSub').textContent='Suena antes'+wait+' — se suma a tu cuenta';$('priPrice').textContent=cop(price);}
+  else{$('priSub').textContent='Suena antes'+wait+' — se suma a tu cuenta'+abuseMultHint(now);$('priPrice').textContent=cop(price);}
   // El botón "Al frente (#1)" SIEMPRE se muestra (nunca se oculta) — cuando no está
   // disponible se ve deshabilitado con el motivo exacto (jumpReason, del servidor) en vez de
   // desaparecer sin explicación: evita que el cliente le pregunte al mesero por qué no está,
   // reduciendo la carga operativa del admin del bar.
   $('optSuper').classList.toggle('disabled',!jumpAvail);
-  $('superSub').textContent = jumpAvail ? 'Suena de primera, ¡ya mismo!' : jumpReason;
+  $('superSub').textContent = jumpAvail ? ('Suena de primera, ¡ya mismo!'+abuseMultHint(now)) : jumpReason;
   $('superPrice').textContent=cop(jumpPrice);
 }
 function pick(m){
@@ -905,13 +913,16 @@ function confirmReq(){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   const hasMsg=($('sheetDedicaMsg').value||'').trim().length>0;
   const dedicaNote=(hasMsg&&dedicaPrice>0)?'<br><span style="color:var(--gold);font-size:13px">💌 +'+cop(dedicaPrice)+' por la dedicatoria</span>':'';
+  const now0=Date.now()/1000;
+  const abuseNote=(priorityAbuseMult>1&&priorityAbuseResetAt>now0)?
+    '<br><span style="color:var(--gold);font-size:13px">💸 Precio x'+priorityAbuseMult+' por pedidos seguidos de tu mesa — baja a x'+(priorityAbuseMult-1)+' en '+mm(priorityAbuseResetAt-now0)+'</span>':'';
   if(mode==='super'){
-    confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> y suena de primera. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'. Solo <b>una vez por canción</b>.'+dedicaNote,doReq);
+    confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> y suena de primera. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'. Solo <b>una vez por canción</b>.'+dedicaNote+abuseNote,doReq);
   } else if(mode==='pri'){
     const now=Date.now()/1000;let msg;
     if(sess&&sess.pass_until>now) msg='Tu <b>pase activo</b> cubre esta prioridad (sin cargo extra).';
     else if(sess&&sess.credits>0) msg='Usarás <b>1 crédito</b> de prioridad (te quedan '+(sess.credits-1)+').';
-    else msg='Se cobrará <b>'+cop(price)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'.';
+    else msg='Se cobrará <b>'+cop(price)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'.'+abuseNote;
     if(price_queue_min>5) msg+='<br><span style="color:#9aa7c2;font-size:13px">⏱ Cola de prioridades: ~'+price_queue_min+' min de espera antes de la tuya</span>';
     confirmModal('Pedir con prioridad ⚡',msg+dedicaNote,doReq);
   } else if(hasMsg&&dedicaPrice>0){
@@ -1766,9 +1777,13 @@ let _lastNpId=null,_lastPollActive=false,_lastDueloActive=false;
 async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
-    price=s.settings.price_priority;packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
+    price=(s.priority_price_now!=null?s.priority_price_now:s.settings.price_priority);packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
     dedicaPrice=s.settings.dedica_price||0;
-    jumpAvail=!!s.jump_available;jumpPrice=s.jump_price||0;price_queue_min=s.priority_queue_min||0;jumpReason=s.jump_unavailable_reason||'';
+    jumpAvail=!!s.jump_available;jumpPrice=(s.jump_price_now!=null?s.jump_price_now:(s.jump_price||0));price_queue_min=s.priority_queue_min||0;jumpReason=s.jump_unavailable_reason||'';
+    priorityAbuseMult=s.priority_abuse_mult_now||1;priorityAbuseResetAt=s.priority_abuse_reset_at||0;
+    // Si el sheet de pedir está abierto, refresca el precio/cuenta regresiva del multiplicador
+    // en vivo (poll corre cada 2s) en vez de dejarlos congelados desde que se abrió el sheet.
+    if($('sheet').classList.contains('open'))updatePriOption();
     prepaidMode=!!s.settings.prepaid_mode;walletBalance=s.wallet_balance||0;
     VENUE_TZ=s.settings.timezone||'America/Bogota';
     renderSocials(s.settings.socials);

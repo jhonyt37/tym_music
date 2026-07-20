@@ -1170,6 +1170,21 @@ def record_priority_purchase(table, now):
     hist = STATE.setdefault("priority_abuse", {})
     hist.setdefault(table, []).append(now)
 
+def priority_abuse_preview(table, now):
+    """Como priority_abuse_multiplier, pero de solo lectura y pensado para mostrarle el
+    precio real al cliente ANTES de pagar (bug reportado: antes solo se enteraba del x2/x3
+    en un toast DESPUÉS del cobro). Devuelve (mult, reset_at) — reset_at es el momento en
+    que el multiplicador baja un escalón (None si ya está en x1). Debe reflejar exactamente
+    la misma fórmula que /api/request usa al cobrar de verdad."""
+    mult = priority_abuse_multiplier(table, now)
+    times = sorted(STATE.get("priority_abuse", {}).get(table, []))
+    reset_at = None
+    if mult == 2 and times:
+        reset_at = times[0] + PRIORITY_ABUSE_WINDOW_SECS
+    elif mult == 3 and len(times) >= 2:
+        reset_at = times[-2] + PRIORITY_ABUSE_WINDOW_SECS
+    return mult, reset_at
+
 # ---- Gate + duración dinámica para votación/duelo (llamar bajo LOCK) ----
 # El ganador siempre se marca "super" para sonar inmediatamente después de la actual (ver
 # _close_poll_winner/_close_duelo_winner) — por eso el lanzamiento se bloquea si la canción
@@ -1718,6 +1733,14 @@ def public_state(token=None, admin=False, mark_dedica=None):
         mine = [l for l in STATE["ledger"] if l["table"] == tbl]
         out["my_tab"] = list(reversed(mine))[:20]
         out["my_tab_total"] = sum(l["amount"] for l in mine)
+        # Precio real de prioridad/salto AHORA MISMO, con el multiplicador anti-abuso ya
+        # aplicado — antes el cliente solo se enteraba del x2/x3 en un toast DESPUÉS de que
+        # ya lo habían cobrado. Misma fórmula que /api/request usa al cobrar de verdad.
+        _abuse_mult, _abuse_reset_at = priority_abuse_preview(tbl, time.time())
+        out["priority_price_now"] = s["price_priority"] * _abuse_mult
+        out["jump_price_now"] = s["price_priority"] * s.get("jump_multiplier", 3) * _abuse_mult
+        out["priority_abuse_mult_now"] = _abuse_mult
+        out["priority_abuse_reset_at"] = _abuse_reset_at
         if STATE["settings"].get("prepaid_mode"):
             customer = get_customer(sess)
             out["wallet_balance"] = customer.get("balance", 0) if customer else 0
