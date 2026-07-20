@@ -654,6 +654,16 @@ _JUNK_WORD_RE = re.compile(r"\b(hd|4k|hq|official|oficial)\b", re.IGNORECASE)
 _JUNK_TRAILING_RE = re.compile(
     r"\s*[-|]\s*(?:" + "|".join(re.escape(p) for p in _JUNK_PHRASES) + r")\s*$",
     re.IGNORECASE)
+# Basura que sale FUERA de paréntesis en resultados de búsqueda reales (no solo en el
+# catálogo/curados, que suelen venir limpios): separador "// Reggaeton Viejo 🔥" que algunos
+# canales agregan como tag de género, una sola palabra de basura pegada al final sin guion
+# ("... Letra"), y emoji decorativo al final del título.
+_TRAILING_SEP_RE = re.compile(r"\s*//.*$")
+_TRAILING_BARE_JUNK_RE = re.compile(
+    r"\s+(?:" + "|".join(re.escape(p) for p in ("letra", "lyrics", "audio", "video", "official", "oficial")) + r")\s*$",
+    re.IGNORECASE)
+_TRAILING_EMOJI_RE = re.compile(
+    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]+\\s*$")
 
 def _clean_title_display(t):
     original = (t or "").strip()
@@ -668,7 +678,16 @@ def _clean_title_display(t):
             return " "
         return m.group(0)  # conserva contenido real: (Remix), (Live), (feat. X)...
     t = _BRACKET_RE.sub(strip_group, original)
+    t = _TRAILING_SEP_RE.sub("", t)
     t = _JUNK_TRAILING_RE.sub("", t)
+    # Palabra de basura pegada al final sin guion/parentesis (ej. "... Letra") y emoji
+    # decorativo — se repite unas pasadas por si quedan varias encadenadas al final.
+    for _ in range(3):
+        new_t = _TRAILING_EMOJI_RE.sub("", t)
+        new_t = _TRAILING_BARE_JUNK_RE.sub("", new_t).strip()
+        if new_t == t:
+            break
+        t = new_t
     t = re.sub(r"\s+", " ", t).strip(" -|")
     return t if t else original
 
@@ -1261,7 +1280,10 @@ def react_counts(item_id, token=None):
 
 def public_item(it, token):
     counts, mine, total = react_counts(it["id"], token)
-    return {"id": it["id"], "title": it["title"], "artist": it.get("artist", ""),
+    # Filtro de salida (no solo de entrada): cubre cola, now_playing e historial sin importar
+    # por dónde haya entrado el título (búsqueda, link pegado, o datos viejos guardados antes
+    # de que existiera _clean_title_display) — barato e idempotente, seguro correrlo siempre.
+    return {"id": it["id"], "title": _clean_title_display(it["title"]), "artist": it.get("artist", ""),
             "yt": it["yt"], "table": it.get("table", ""), "priority": it.get("priority", False),
             "super": it.get("super", False),
             "duration": it.get("duration", DEFAULT_DUR), "mine": bool(token) and it.get("token") == token,
@@ -1289,7 +1311,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
     np_pub = None
     if np:
         ncounts, nmine, ntotal = react_counts(np["id"], token)
-        np_pub = {"id": np["id"], "title": np["title"], "artist": np.get("artist", ""), "yt": np["yt"],
+        np_pub = {"id": np["id"], "title": _clean_title_display(np["title"]), "artist": np.get("artist", ""), "yt": np["yt"],
                   "table": np.get("table", ""), "priority": np.get("priority", False),
                   "fallback": np.get("fallback", False),
                   "duration": np.get("duration", DEFAULT_DUR), "position": np.get("position", 0),
@@ -1316,7 +1338,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                     tok_sess = get_session(tok)
                     if tok_sess:
                         pub_tables.add(tok_sess["table"])
-            a = agg.setdefault(it["yt"], {"yt": it["yt"], "title": it["title"],
+            a = agg.setdefault(it["yt"], {"yt": it["yt"], "title": _clean_title_display(it["title"]),
                                           "artist": it.get("artist", ""), "total": 0, "tables": []})
             a["total"] += tot
             for t in pub_tables:
@@ -1329,7 +1351,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         if not yt:
             continue
         if yt not in req_songs:
-            req_songs[yt] = {"yt": yt, "title": e.get("title", "?"), "artist": e.get("artist", ""), "count": 0}
+            req_songs[yt] = {"yt": yt, "title": _clean_title_display(e.get("title") or "?"), "artist": e.get("artist", ""), "count": 0}
         req_songs[yt]["count"] += 1
     top_requested = sorted(req_songs.values(), key=lambda x: -x["count"])[:10]
 
@@ -1548,9 +1570,9 @@ def public_state(token=None, admin=False, mark_dedica=None):
         out["pending"] = [public_item(i, token) for i in pending_view()]
         out["ledger"] = list(reversed(STATE["ledger"]))[:40]
         out["ledger_total"] = sum(l["amount"] for l in STATE["ledger"])
-        out["curated"] = STATE["curated"]
+        out["curated"] = [{**c, "title": _clean_title_display(c["title"])} for c in STATE["curated"]]
         out["subscribers"] = list(reversed(TYM["subscribers"]))[:100]
-        out["history"] = [{"id": h["id"], "yt": h["yt"], "title": h["title"],
+        out["history"] = [{"id": h["id"], "yt": h["yt"], "title": _clean_title_display(h["title"]),
                            "artist": h.get("artist", ""),
                            "ts": h.get("ts"), "played_at": h.get("played_at")} for h in STATE["history"][:10]]
         out["repeat_exceptions"] = list(STATE.get("repeat_exceptions", set()))
@@ -1586,17 +1608,17 @@ def recommendations_snapshot():
     a los demás locales mientras se espera la respuesta de YouTube."""
     s = STATE["settings"]
     counts = sorted(STATE["req_counts"].values(), key=lambda x: -x["count"])[:10]
-    mas = [{"yt": c["yt"], "title": c["title"], "artist": c["artist"]} for c in counts]
+    mas = [{"yt": c["yt"], "title": _clean_title_display(c["title"]), "artist": c["artist"]} for c in counts]
     if not mas:
-        mas = [{"yt": x["yt"], "title": x["title"], "artist": x.get("artist", "")} for x in STATE["curated"][:8]]
-    local = [{"yt": x["yt"], "title": x["title"], "artist": x.get("artist", "")} for x in STATE["curated"]]
+        mas = [{"yt": x["yt"], "title": _clean_title_display(x["title"]), "artist": x.get("artist", "")} for x in STATE["curated"][:8]]
+    local = [{"yt": x["yt"], "title": _clean_title_display(x["title"]), "artist": x.get("artist", "")} for x in STATE["curated"]]
     # Populares: canciones del historial del local (lo que ha sonado aquí)
     seen = set()
     populares = []
     for h in STATE.get("history", []):
         if not h.get("fallback") and h.get("yt") and h["yt"] not in seen:
             seen.add(h["yt"])
-            populares.append({"yt": h["yt"], "title": h["title"], "artist": h.get("artist", "")})
+            populares.append({"yt": h["yt"], "title": _clean_title_display(h["title"]), "artist": h.get("artist", "")})
     top_artists = list({c["artist"] for c in counts if c.get("artist")})[:2]
     return mas, local, populares, seen, top_artists, s["genre"]
 
@@ -1781,7 +1803,8 @@ class H(BaseHTTPRequestHandler):
             with LOCK:
                 days = min(int(self._q("days") or 3), 3)
                 cutoff = time.time() - days * 24 * 3600
-                log = [e for e in VENUES[av].get("request_log", []) if e["ts"] >= cutoff]
+                log = [dict(e, title=_clean_title_display(e.get("title", "")))
+                       for e in VENUES[av].get("request_log", []) if e["ts"] >= cutoff]
                 return self._send(200, {"log": list(reversed(log))})
         if path == "/api/tym/request_log":
             if self.authed_venue() != "*":
@@ -1794,7 +1817,8 @@ class H(BaseHTTPRequestHandler):
                 for vid, venue in VENUES.items():
                     if vid_filter and vid != vid_filter:
                         continue
-                    log = [dict(e, venue=vid, venue_name=venue["settings"]["venue_name"])
+                    log = [dict(e, venue=vid, venue_name=venue["settings"]["venue_name"],
+                                title=_clean_title_display(e.get("title", "")))
                            for e in venue.get("request_log", []) if e["ts"] >= cutoff]
                     result[vid] = {"name": venue["settings"]["venue_name"], "log": list(reversed(log))}
                 return self._send(200, result)
