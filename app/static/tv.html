@@ -202,6 +202,26 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   padding:10px 18px;border-radius:999px;font-size:14px;font-weight:700;cursor:pointer;
   display:none;align-items:center;gap:8px}
 #audioPill.show{display:flex}
+/* Catálogo local (Fase 4 — ver plan federated-knitting-lagoon.md): <video> nativo que
+   reemplaza al iframe de YouTube cuando la canción es del catálogo del bar. */
+#localMedia{position:fixed;inset:0;width:100vw;height:100vh;border:0;background:#000;display:none;object-fit:contain}
+/* Vista de solo-audio: el <video> igual reproduce el sonido (oculto), esto es la carátula +
+   fondo ambiental que se ve en su lugar mientras suena un mp3/archivo de audio. */
+#localAudioView{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,#0b0f1a,#1a1030,#0b0f1a);background-size:400% 400%;
+  animation:localAmbient 18s ease-in-out infinite}
+@keyframes localAmbient{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+#localAudioView .cover{width:340px;height:340px;border-radius:24px;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;
+  font-size:120px;box-shadow:0 20px 60px rgba(0,0,0,.6);animation:localCoverPulse 3.5s ease-in-out infinite}
+@keyframes localCoverPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+/* Overlay de permiso de carpeta — mismo espíritu que #audioOverlay: siempre un toque, siempre
+   captura el gesto del operador (showDirectoryPicker() lo necesita, igual que el audio). */
+#localFolderOverlay{position:fixed;inset:0;background:rgba(5,8,14,.95);flex-direction:column;
+  align-items:center;justify-content:center;z-index:31;cursor:pointer;text-align:center;padding:30px;display:none}
+#localFolderOverlay .lf-icon{font-size:70px;margin-bottom:20px}
+#localFolderOverlay .lf-title{font-size:30px;font-weight:800}
+#localFolderOverlay .lf-sub{font-size:16px;color:#9aa7c2;margin-top:12px;max-width:440px}
 .warn{position:fixed;top:0;left:0;right:0;background:#b45309;color:#fff;padding:12px;text-align:center;font-weight:700;font-size:16px;z-index:40}
 /* Asistencias */
 #assistZone{position:fixed;bottom:84px;right:22px;z-index:33;display:flex;flex-direction:column;gap:7px;align-items:flex-end}
@@ -238,6 +258,12 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   </div>
 </div>
 <div id="yt"></div>
+<!-- Catálogo local (Fase 4): <video> nativo, oculto salvo cuando suena algo de "local:...".
+     playsinline evita que Safari/iOS lo abra en pantalla completa nativa por su cuenta. -->
+<video id="localMedia" playsinline></video>
+<div id="localAudioView">
+  <div class="cover">🎵</div>
+</div>
 <!-- Intercepta toques sueltos sobre el video para que no disparen el play/pausa nativo del
      iframe de YouTube (pasaba con cualquier click en la pantalla) — un toque aquí solo
      revela los controles, igual que mover el mouse. -->
@@ -284,6 +310,14 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   <div class="ao-sub" id="aoSub">Activa el sonido y entra en pantalla completa</div>
 </div>
 <div id="audioPill" title="El navegador bloqueó el sonido automático — toca para activarlo">🔇 Toca para activar el sonido</div>
+
+<!-- Permiso de carpeta del catálogo local (Fase 4) — aparece solo cuando toca reproducir una
+     canción local y todavía no se concedió acceso a la carpeta en este navegador. -->
+<div id="localFolderOverlay" onclick="pickLocalFolderTv()">
+  <div class="lf-icon">📁</div>
+  <div class="lf-title">Conecta la carpeta de música del local</div>
+  <div class="lf-sub">Toca para elegir la carpeta donde están las canciones — solo hace falta una vez en este navegador.</div>
+</div>
 
 <!-- TV singleton -->
 <div id="duplModal" style="position:fixed;inset:0;background:rgba(0,0,0,.96);z-index:35;display:none;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:30px">
@@ -450,6 +484,218 @@ let _errBurst=[];const ERR_BURST_LIMIT=4,ERR_BURST_WINDOW=25000;
 let _lastDedicaId=null,_dedicaToMark=null,_dedicaTimeout=null;
 let _songMsgTimeouts=[],_songMsgNpId=null;
 const VIBES_TV=["🔥 Que todo el mundo cante","💃 Más baile","🎸 Más suave","✨ Así está perfecto"];
+
+// ==========================================================================
+// Catálogo local (Fase 4 — ver plan federated-knitting-lagoon.md): reproducción
+// real de archivos del bar (mp3/mp4) vía File System Access API, sin que TYM
+// aloje nunca el archivo. mediaCtl abstrae YouTube (player.*) vs el <video>
+// nativo #localMedia — el resto del archivo (tick/advance/etc) solo debería
+// llamar a mediaCtl.*, nunca a player.* directo, para no tener que repetir
+// cada rama YouTube-vs-local en 10 lugares distintos.
+// ==========================================================================
+const isLocalId=yt=>typeof yt==='string'&&yt.startsWith('local:');
+const localMedia=$('localMedia');
+
+// ---- Persistencia del permiso de carpeta (IndexedDB — sobrevive recargas de
+// esta pestaña/perfil de Chrome; el usuario solo lo concede una vez). ----
+const LOCAL_DIR_DB='tym_tv_local_dir',LOCAL_DIR_STORE='handles',LOCAL_DIR_KEY='dir';
+function _idbOpen(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(LOCAL_DIR_DB,1);
+    req.onupgradeneeded=()=>req.result.createObjectStore(LOCAL_DIR_STORE);
+    req.onsuccess=()=>resolve(req.result);
+    req.onerror=()=>reject(req.error);
+  });
+}
+async function idbGetDirHandle(){
+  try{
+    const db=await _idbOpen();
+    return await new Promise((resolve,reject)=>{
+      const tx=db.transaction(LOCAL_DIR_STORE,'readonly');
+      const req=tx.objectStore(LOCAL_DIR_STORE).get(LOCAL_DIR_KEY);
+      req.onsuccess=()=>resolve(req.result||null);
+      req.onerror=()=>reject(req.error);
+    });
+  }catch(e){return null;}
+}
+async function idbSetDirHandle(handle){
+  try{
+    const db=await _idbOpen();
+    await new Promise((resolve,reject)=>{
+      const tx=db.transaction(LOCAL_DIR_STORE,'readwrite');
+      tx.objectStore(LOCAL_DIR_STORE).put(handle,LOCAL_DIR_KEY);
+      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);
+    });
+  }catch(e){}
+}
+let _localRootHandle=null;
+
+// El operador toca el overlay → único punto con gesto de usuario garantizado, igual que
+// activateAudio() — showDirectoryPicker() también lo necesita.
+async function pickLocalFolderTv(){
+  try{
+    const handle=await window.showDirectoryPicker();
+    await idbSetDirHandle(handle);
+    _localRootHandle=handle;
+    $('localFolderOverlay').style.display='none';
+    hideLocalFileError();
+    curYt=null; // fuerza a que tick() vuelva a intentar cargar la canción actual
+    await tick();
+  }catch(e){/* el operador canceló el selector — se queda el overlay para reintentar */}
+}
+
+function showLocalFileError(msg){
+  let el=document.getElementById('localFileWarn');
+  if(!el){el=document.createElement('div');el.id='localFileWarn';el.className='warn';document.body.appendChild(el);}
+  el.textContent='⚠ '+msg;
+}
+function hideLocalFileError(){const el=document.getElementById('localFileWarn');if(el)el.remove();}
+
+function setLocalAudioView(show,np){
+  $('localAudioView').style.display=show?'flex':'none';
+}
+
+let _localBlobUrl=null;
+async function loadLocalFile(np){
+  // Permiso concedido pero puede haber expirado (Chrome lo revalida por handle) — sin esto,
+  // un permiso revocado a mano dejaría la pantalla intentando cargar para siempre sin avisar.
+  if(_localRootHandle){
+    try{
+      const perm=await _localRootHandle.queryPermission({mode:'read'});
+      if(perm!=='granted')_localRootHandle=null;
+    }catch(e){_localRootHandle=null;}
+  }
+  if(!_localRootHandle){
+    const saved=await idbGetDirHandle();
+    if(saved){
+      try{if(await saved.queryPermission({mode:'read'})==='granted')_localRootHandle=saved;}catch(e){}
+    }
+  }
+  if(!_localRootHandle){
+    $('localFolderOverlay').style.display='flex';
+    return;
+  }
+  $('localFolderOverlay').style.display='none';
+  const path=np.local_path;
+  if(!path){showLocalFileError('"'+(np.title||'')+'" no tiene un archivo asociado en el catálogo — revisa el catálogo local en /admin.');return;}
+  try{
+    const parts=path.split('/').filter(Boolean);
+    let dir=_localRootHandle;
+    for(let i=0;i<parts.length-1;i++)dir=await dir.getDirectoryHandle(parts[i]);
+    const fileHandle=await dir.getFileHandle(parts[parts.length-1]);
+    const file=await fileHandle.getFile();
+    if(_localBlobUrl){URL.revokeObjectURL(_localBlobUrl);_localBlobUrl=null;}
+    localMedia.src=URL.createObjectURL(file);
+    _localBlobUrl=localMedia.src;
+    localMedia.load();
+    localMedia.muted=!wantAudio;
+    localMedia.volume=1;
+    localMedia.play().catch(()=>{});
+    hideLocalFileError();
+  }catch(e){
+    showLocalFileError('No se pudo abrir "'+(np.title||'')+'" — el archivo puede haberse movido, renombrado o borrado ('+path+').');
+  }
+}
+
+// Eventos del <video> nativo — hacen lo mismo que onStateChange/onError del player de
+// YouTube, para que advance()/manualPause/el ícono de play-pausa sigan funcionando igual sin
+// importar cuál de los dos está sonando.
+localMedia.addEventListener('ended',()=>{if(isLocalId(curYt))advance();});
+localMedia.addEventListener('pause',()=>{
+  if(isLocalId(curYt)&&isPrimary)manualPause=true;
+  _syncPlayPauseIcon(false);
+});
+localMedia.addEventListener('play',()=>{
+  if(isLocalId(curYt)){manualPause=false;_errBurst=[];}
+  _syncPlayPauseIcon(true);
+});
+localMedia.addEventListener('error',()=>{
+  if(!isLocalId(curYt))return;
+  showLocalFileError('No se pudo reproducir el archivo actual — puede estar dañado o en un formato no soportado por este navegador.');
+  const now=Date.now();
+  _errBurst=_errBurst.filter(t=>now-t<ERR_BURST_WINDOW);_errBurst.push(now);
+  if(_errBurst.length>=ERR_BURST_LIMIT){
+    if(!document.getElementById('errBurstWarn')){
+      const b=document.createElement('div');b.id='errBurstWarn';b.className='warn';
+      b.style.background='#7f1d1d';
+      b.innerHTML='⚠ Varios archivos seguidos no se pudieron reproducir. Se detuvo el salto automático — revisa la carpeta o recarga la página.';
+      document.body.appendChild(b);
+    }
+    return;
+  }
+  setTimeout(()=>advance(false,true),1200);
+});
+
+const mediaCtl={
+  isLocalNow(){return isLocalId(curYt);},
+  ready(){return this.isLocalNow()?true:(ready&&!!player);},
+  playing(){
+    if(this.isLocalNow())return !localMedia.paused&&!localMedia.ended&&localMedia.readyState>2;
+    try{return ready&&player&&player.getPlayerState&&player.getPlayerState()===YT.PlayerState.PLAYING;}catch(e){return false;}
+  },
+  ended(){
+    if(this.isLocalNow())return localMedia.ended;
+    try{return ready&&player&&player.getPlayerState&&player.getPlayerState()===YT.PlayerState.ENDED;}catch(e){return false;}
+  },
+  // Estados desde los que hay que retomar la reproducción activamente (ver watchdog en el
+  // loop principal): YouTube UNSTARTED(-1)/CUED(5)/PAUSED(2, si no fue pausa manual);
+  // nativo: pausado sin haber sido pausa manual del operador.
+  needsPlay(){
+    if(!this.ready())return false;
+    if(this.isLocalNow())return localMedia.paused&&!manualPause&&!localMedia.ended&&!!localMedia.src;
+    try{const ps=player.getPlayerState();return ps===-1||ps===5||(ps===2&&!manualPause);}catch(e){return false;}
+  },
+  currentTime(){
+    if(this.isLocalNow())return localMedia.currentTime||0;
+    try{return player.getCurrentTime()||0;}catch(e){return 0;}
+  },
+  duration(){
+    if(this.isLocalNow())return localMedia.duration||0;
+    try{return player.getDuration()||0;}catch(e){return 0;}
+  },
+  play(){
+    if(this.isLocalNow()){localMedia.play().catch(()=>{});return;}
+    try{player.playVideo();}catch(e){}
+  },
+  pause(){
+    if(this.isLocalNow()){localMedia.pause();return;}
+    try{player.pauseVideo();}catch(e){}
+  },
+  stop(){
+    if(this.isLocalNow()){localMedia.pause();try{localMedia.currentTime=0;}catch(e){}return;}
+    try{player.stopVideo();}catch(e){}
+  },
+  setVolume(v){
+    if(this.isLocalNow()){localMedia.volume=Math.max(0,Math.min(1,v/100));return;}
+    try{player.setVolume(v);}catch(e){}
+  },
+  mute(){
+    if(this.isLocalNow()){localMedia.muted=true;return;}
+    try{player.mute();}catch(e){}
+  },
+  unmute(){
+    if(this.isLocalNow()){localMedia.muted=false;return;}
+    try{player.unMute();}catch(e){}
+  },
+  // Carga un ítem nuevo — despacha a YouTube o al archivo local según el prefijo del id.
+  async load(np){
+    if(isLocalId(np.yt)){
+      $('yt').style.display='none';
+      localMedia.style.display=(np.media_type==='video')?'block':'none';
+      setLocalAudioView(np.media_type!=='video',np);
+      await loadLocalFile(np);
+    }else{
+      $('yt').style.display='';
+      localMedia.style.display='none';
+      setLocalAudioView(false);
+      $('localFolderOverlay').style.display='none';
+      hideLocalFileError();
+      if(_localBlobUrl){URL.revokeObjectURL(_localBlobUrl);_localBlobUrl=null;}
+      try{localMedia.pause();localMedia.removeAttribute('src');localMedia.load();}catch(e){}
+      if(ready){try{player.loadVideoById(np.yt);}catch(e){}}
+    }
+  }
+};
 
 // Si ya inició antes en esta sesión (redeploy sin refresh), restaurar
 try{if(sessionStorage.getItem('tym_tv_started')==='1'){
@@ -687,7 +933,7 @@ try{
   _tvc.onmessage=e=>{
     if(e.data==='tv_ping'){_tvc.postMessage('tv_here');}
     if(e.data==='tv_here'){isPrimary=false;$('duplModal').style.display='flex';}
-    if(e.data==='tv_takeover'){isPrimary=false;if(player&&player.pauseVideo){try{player.pauseVideo();}catch(e){}}const w=$('duplWarn');if(w)w.style.display='';}
+    if(e.data==='tv_takeover'){isPrimary=false;mediaCtl.pause();const w=$('duplWarn');if(w)w.style.display='';}
   };
   _tvc.postMessage('tv_ping');
 }catch(e){}
@@ -775,8 +1021,11 @@ setTimeout(()=>{if(!ready){const b=document.createElement('div');b.id='ytWarn';b
 // tick()) — reseteo el contador de intentos apenas queda sincronizado, para no gastar los 3
 // intentos en un problema de arranque y dejar sin margen a uno real más adelante en la noche.
 let _stuckPolls=0;
-function _watchdogStuck(hasNp,synced){
-  if(!ready||!authok||!hasNp){_stuckPolls=0;return;}
+function _watchdogStuck(hasNp,synced,targetIsLocal){
+  // Un archivo local no necesita el SDK de YouTube (ready) — si no, un venue 100% local en
+  // una red donde YouTube esté bloqueado/lento (justo lo que este modo existe para evitar)
+  // nunca activaría este watchdog de auto-recuperación.
+  if((!ready&&!targetIsLocal)||!authok||!hasNp){_stuckPolls=0;return;}
   if(synced){_stuckPolls=0;try{sessionStorage.removeItem('tym_tv_autoreload2');}catch(e){}return;}
   _stuckPolls++;
   if(_stuckPolls<6)return; // ~12s de polls (cada 2s) sin lograr sincronizar
@@ -794,7 +1043,7 @@ async function advance(manual=false,forceSkip=false){
   if(advancingId===snapId)return;
   advancingId=snapId;
   const body={from_id:snapId};
-  if(manual&&curYt){try{body.yt=curYt;body.position=player.getCurrentTime();body.duration=player.getDuration();body.manual=true;}catch(e){}}
+  if(manual&&curYt){body.yt=curYt;body.position=mediaCtl.currentTime();body.duration=mediaCtl.duration();body.manual=true;}
   else if(forceSkip){body.manual=true;}
   try{await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});}
   finally{advancingId=undefined;}
@@ -804,21 +1053,23 @@ async function advance(manual=false,forceSkip=false){
   tick();
 }
 
-function load(np){
-  if(!np){$('titleText').textContent='Esperando canciones…';$('artist').textContent='';$('who').textContent='';curYt=null;curId=null;return;}
+async function load(np){
+  if(!np){$('titleText').textContent='Esperando canciones…';$('artist').textContent='';$('who').textContent='';curYt=null;curId=null;setLocalAudioView(false);return;}
   $('titleText').textContent=np.title;
   $('artist').textContent=np.artist||'';
   $('who').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table||''));
   curId=np.id; // siempre actualizar el ID del servidor
   if(np.yt!==curYt){
-    if(ready){
-      // Solo fijar curYt cuando el player carga el video
+    // Un archivo local no depende del SDK de YouTube (ready) para cargar — solo YouTube
+    // necesita esperar a que el player esté listo.
+    if(isLocalId(np.yt)||ready){
       curYt=np.yt;
       manualPause=false; // canción nueva: cualquier pausa manual de la anterior ya no aplica
-      player.loadVideoById(np.yt);
-      // NO llamar unMute() aquí — solo el gesto del usuario en #audioOverlay puede hacerlo
+      await mediaCtl.load(np);
+      // NO desmutar aquí — solo el gesto del usuario en #audioOverlay puede hacerlo
+      // (loadLocalFile ya respeta wantAudio; loadVideoById hereda el mute-state del player).
     }
-    // Si !ready: curYt queda null, el próximo tick() o watchdog lo reintentará
+    // Si ni local ni ready: curYt queda null, el próximo tick() o watchdog lo reintentará
     burstNow();
   }
 }
@@ -837,9 +1088,10 @@ async function activateAudio(){
   $('audioOverlay').style.display='none';
   $('audioPill').classList.remove('show');
   toggleFs();
-  if(player){try{player.setVolume(100);player.unMute();player.playVideo();}catch(e){}}
+  mediaCtl.setVolume(100);mediaCtl.unmute();mediaCtl.play();
   // Si aun no hay cancion cargada, recien aqui se pide (async esta bien: el desmuteo de
-  // arriba ya quedo aplicado dentro del gesto; loadVideoById() hereda el mute-state actual).
+  // arriba ya quedo aplicado dentro del gesto; loadVideoById()/loadLocalFile() heredan el
+  // mute-state actual).
   if(!curYt&&authok)await tick();
   burstNow();
 }
@@ -851,10 +1103,10 @@ async function forceRestart(){
   try{sessionStorage.setItem('tym_tv_started','1');localStorage.setItem('tym_tv_audio_ok','1');}catch(e){}
   $('audioOverlay').style.display='none';
   $('audioPill').classList.remove('show');
-  if(player){try{player.setVolume(100);player.unMute();}catch(e){}}
-  // Descargar el video actual para forzar recarga
+  // Ojo con el orden: setVolume/unmute/stop deben targetear el backend actual (curYt) ANTES
+  // de ponerlo en null — si no, mediaCtl no sabría a cuál de los dos apuntar.
+  mediaCtl.setVolume(100);mediaCtl.unmute();mediaCtl.stop();
   curYt=null;
-  if(player){try{player.stopVideo();}catch(e){}}
   await tick();
   burstNow();
 }
@@ -939,12 +1191,9 @@ $('fsBtn').onclick=toggleFs;
 
 // ---- Play/pausa manual (botón central + botón de esquina, mismo efecto) ----
 function togglePlayPause(){
-  if(!player||!ready||!authok)return;
-  try{
-    const ps=player.getPlayerState();
-    if(ps===YT.PlayerState.PLAYING){player.pauseVideo();manualPause=true;}
-    else{player.playVideo();manualPause=false;}
-  }catch(e){}
+  if(!authok||!mediaCtl.ready())return;
+  if(mediaCtl.playing()){mediaCtl.pause();manualPause=true;}
+  else{mediaCtl.play();manualPause=false;}
 }
 function _syncPlayPauseIcon(playing){
   const icon=playing?'⏸':'▶';
@@ -1006,7 +1255,7 @@ setInterval(async()=>{
     const lj=await lr.json();
     if(lj.owner_conflict){
       tvBlocked=true;
-      try{if(player&&player.pauseVideo)player.pauseVideo();}catch(e){}
+      mediaCtl.pause();
       // Solo se pregunta la primera vez (pantalla nueva). Si esta TV ya fue dueña y la
       // destronaron, o si el usuario ya eligió "no", se queda en espera silenciosa
       // (evita pedir confirmación en loop cada 2s o un tira-y-afloja entre pantallas).
@@ -1052,31 +1301,28 @@ setInterval(async()=>{
     }
 
     // Watchdog: nunca silencio
-    if(!s.now_playing||(ready&&player&&player.getPlayerState&&player.getPlayerState()===YT.PlayerState.ENDED)){await advance();return;}
+    if(!s.now_playing||mediaCtl.ended()){await advance();return;}
 
-    // Recuperar: si hay canción en servidor pero no está cargada en el player
-    if(s.now_playing&&ready&&s.now_playing.yt!==curYt){load(s.now_playing);}
-    _watchdogStuck(!!s.now_playing, !s.now_playing||s.now_playing.yt===curYt);
+    // Recuperar: si hay canción en servidor pero no está cargada — un archivo local no
+    // depende de "ready" (SDK de YouTube), solo YouTube lo necesita.
+    if(s.now_playing&&(ready||isLocalId(s.now_playing.yt))&&s.now_playing.yt!==curYt){load(s.now_playing);}
+    _watchdogStuck(!!s.now_playing, !s.now_playing||s.now_playing.yt===curYt, !!(s.now_playing&&isLocalId(s.now_playing.yt)));
 
-    // Recuperar player detenido/pausado/cued después de carga exitosa
-    // (ps===2/PAUSED se respeta si fue una pausa manual del operador — ver onStateChange)
-    if(s.now_playing&&ready&&player&&player.getPlayerState&&curYt===s.now_playing.yt){
-      try{const ps=player.getPlayerState();
-        if(ps===-1||ps===5||(ps===2&&!manualPause)){
-          player.playVideo();
-          if(wantAudio){try{player.unMute();player.setVolume(100);}catch(e){}}
-        }
-      }catch(e){}
+    // Recuperar reproductor detenido/pausado/cued después de carga exitosa
+    // (pausa manual del operador se respeta — ver onStateChange / evento 'pause' de #localMedia)
+    if(s.now_playing&&curYt===s.now_playing.yt&&mediaCtl.needsPlay()){
+      mediaCtl.play();
+      if(wantAudio){mediaCtl.unmute();mediaCtl.setVolume(100);}
     }
 
     // Trim APRENDIDO
     {const le=s.now_playing&&s.now_playing.learned_end||0;
-     if(le>0&&ready&&player&&player.getCurrentTime&&player.getCurrentTime()>=le&&player.getPlayerState()===YT.PlayerState.PLAYING){await advance();return;}}
+     if(le>0&&mediaCtl.currentTime()>=le&&mediaCtl.playing()){await advance();return;}}
 
     // Corte ciego opcional
     {const te=s.settings.trim_end_secs||0;
-     if(te>0&&ready&&player&&player.getDuration){const cur=player.getCurrentTime()||0,d=player.getDuration()||0;
-       if(d>30&&cur>=d-te&&player.getPlayerState()===YT.PlayerState.PLAYING){await advance();return;}}}
+     if(te>0){const cur=mediaCtl.currentTime(),d=mediaCtl.duration();
+       if(d>30&&cur>=d-te&&mediaCtl.playing()){await advance();return;}}}
 
     if(s.now_playing){
       if(s.now_playing.id!==curId)load(s.now_playing);
@@ -1147,9 +1393,9 @@ setInterval(async()=>{
 },2000);
 
 setInterval(()=>{
-  if(authok&&!tvBlocked&&ready&&player&&player.getCurrentTime&&curYt){
-    try{const pos=player.getCurrentTime(),dur=player.getDuration();
-      if(dur>0)fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:pos,duration:dur,device_id:TV_DEVICE_ID})});}catch(e){}
+  if(authok&&!tvBlocked&&curYt&&mediaCtl.ready()){
+    const pos=mediaCtl.currentTime(),dur=mediaCtl.duration();
+    if(dur>0)fetch('/api/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({position:pos,duration:dur,device_id:TV_DEVICE_ID})});
   }
 },2000);
 </script>

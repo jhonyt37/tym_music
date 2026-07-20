@@ -1306,7 +1306,8 @@ def promote_next(manual=False):
             "id": nid(), "title": s["title"], "artist": s.get("artist", ""), "yt": s["yt"],
             "table": "Lista del local", "priority": False, "status": "playing",
             "ts": now, "charged": False, "fallback": True, "played_at": now,
-            "duration": s.get("duration", DEFAULT_DUR), "position": 0} if s else None)
+            "duration": s.get("duration", DEFAULT_DUR), "position": 0,
+            "media_type": s.get("media_type"), "local_path": s.get("local_path")} if s else None)
     return STATE["now_playing"]
 
 def in_play_or_queue(yt):
@@ -1474,6 +1475,7 @@ def public_item(it, token):
             "play_status": it.get("play_status", "pending"),
             "requeue_count": it.get("requeue_count", 0),
             "ts": it.get("ts"), "played_at": it.get("played_at"),
+            "media_type": it.get("media_type"), "local_path": it.get("local_path"),
             "reactions": counts, "my_reacts": mine, "react_total": total}
 
 def public_state(token=None, admin=False, mark_dedica=None):
@@ -1500,6 +1502,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                   "fallback": np.get("fallback", False), "mine": bool(token) and np.get("token") == token,
                   "paid": np.get("charge_on_play", 0) > 0 or np.get("paid_amount", 0) > 0,
                   "duration": np.get("duration", DEFAULT_DUR), "position": np.get("position", 0),
+                  "media_type": np.get("media_type"), "local_path": np.get("local_path"),
                   "learned_end": STATE["learned_end"].get(np["yt"]),
                   "message": (np.get("message") or "") if np.get("message_status", "approved") == "approved" else "",
                   "ts": np.get("ts"), "played_at": np.get("played_at"),
@@ -2353,10 +2356,6 @@ class H(BaseHTTPRequestHandler):
                 sup = bool(d.get("super"))
                 priority = bool(d.get("priority")) or sup
                 dur = _parse_len(d.get("length")) or int(d.get("duration") or 0) or DEFAULT_DUR
-                _max_dur_min = int(STATE["settings"].get("max_song_duration_min", 0) or 0)
-                if _max_dur_min > 0 and dur > _max_dur_min * 60:
-                    return self._send(400, {"error": f"Esta canción dura más de {_max_dur_min} min, el máximo permitido en este local 🎵",
-                                            "too_long": True})
                 # yt/title/artist ya vienen resueltos si el pedido fue por link (se resolvió
                 # antes de tomar el LOCK — ver do_POST, para no bloquear el servidor con I/O de red)
                 yt = d.get("yt")
@@ -2364,6 +2363,23 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "No pude leer el link de YouTube"})
                 title = str(d.get("title") or "Canción")[:200]
                 artist = str(d.get("artist") or "")[:120]
+                # Canción local: la duración/tipo de archivo/ruta salen del catálogo curado por
+                # el admin (fuente de verdad), no de lo que mande el cliente — Fase 4 del modo
+                # sin YouTube (ver plan federated-knitting-lagoon.md), necesarios para que /tv
+                # sepa qué archivo abrir y si mostrar la vista de audio o de video. Se resuelve
+                # ANTES del chequeo de duración máxima para que aplique sobre el valor real.
+                local_media_type, local_path = None, None
+                if is_local_id(yt):
+                    _cur_entry = next((c for c in STATE["curated"] if c["yt"] == yt), None)
+                    if not _cur_entry:
+                        return self._send(400, {"error": "Esa canción ya no está en el catálogo del local — puede que la hayan quitado."})
+                    dur = _cur_entry.get("duration") or DEFAULT_DUR
+                    local_media_type = _cur_entry.get("media_type")
+                    local_path = _cur_entry.get("local_path")
+                _max_dur_min = int(STATE["settings"].get("max_song_duration_min", 0) or 0)
+                if _max_dur_min > 0 and dur > _max_dur_min * 60:
+                    return self._send(400, {"error": f"Esta canción dura más de {_max_dur_min} min, el máximo permitido en este local 🎵",
+                                            "too_long": True})
                 req_msg = (d.get("message") or "").strip()[:80]
                 now = time.time()
                 # Dedicatoria al pedir: mismo modelo anti-abuso que /api/dedica (mesa a mesa) —
@@ -2479,7 +2495,8 @@ class H(BaseHTTPRequestHandler):
                         "play_status": "pending", "played_enough": False, "requeue_count": 0,
                         "ts": time.time(), "charge_on_play": charge, "charged": bool(charge_via),
                         "charge_kind": ckind, "charge_via": charge_via, "paid_amount": paid_amount,
-                        "message": req_msg, "message_status": msg_status, "message_mod_reason": _msg_reason}
+                        "message": req_msg, "message_status": msg_status, "message_mod_reason": _msg_reason,
+                        "media_type": local_media_type, "local_path": local_path}
                 STATE["items"].append(item)
                 bump_count(yt, title, artist)
                 log_order(table, d.get("token"), mode, title, yt)   # analítica (free/premium)
