@@ -728,7 +728,7 @@ function renderResults(list, max=12){
     }else{
       const sub=[s.artist,s.length].filter(Boolean).join(' · ');
       const inQ=_queueYts.has(s.yt);
-      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc(sub)}</div></div>${inQ?'<span class="chip-queue">En cola</span>':'<div class="btn sm" style="pointer-events:none">Pedir</div>'}`;
+      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(s.title,s.artist))}</div><div class="a">${esc(sub)}</div></div>${inQ?'<span class="chip-queue">En cola</span>':'<div class="btn sm" style="pointer-events:none">Pedir</div>'}`;
       r.onclick=()=>openSheet(s);
     }
     res.appendChild(r);
@@ -1075,6 +1075,12 @@ if (_pwaBtn) _pwaBtn.onclick = async () => {
 function showSocialTab(name){
   document.querySelectorAll('.stab-row .stab').forEach(b=>b.classList.toggle('on',b.dataset.stab===name));
   document.querySelectorAll('.stab-pane').forEach(p=>p.style.display=p.id==='stab-'+name?'':'none');
+  // Como las listas ya no se reconstruyen en cada poll si no cambiaron (ver
+  // _renderIfChanged), si una fila se armó mientras este sub-tab estaba oculto (ancho 0,
+  // applyTicker no pudo medir el texto) nadie vuelve a intentarlo hasta que cambien los
+  // datos — puede tardar minutos. Reintentar aquí, igual que showTab() ya hace con los tabs
+  // principales.
+  tickify($('stab-'+name));
 }
 
 // ---------- Vibe ----------
@@ -1210,12 +1216,14 @@ function renderTopTables(tables){
 
 // ---------- Historial con bis ----------
 function renderHistorialSocial(history,bisVotes,bisThreshold,myBisVotes){
-  const box=$('historyList');if(!box)return;box.innerHTML='';
+  const box=$('historyList');if(!box)return;
+  if(!_renderIfChanged(box,JSON.stringify([history,bisVotes,bisThreshold,myBisVotes])))return;
+  box.innerHTML='';
   if(!history||!history.length){box.innerHTML='<div class="empty">Todavía no ha sonado nada.</div>';return;}
   history.forEach(it=>{
     const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
     const playedTs=it.played_at||it.ts;
-    div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.artist||'')}${playedTs?' · sonó '+hm(playedTs):''}</div></div>`;
+    div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}${playedTs?' · sonó '+hm(playedTs):''}</div></div>`;
     const react_total=it.react_total||0;
     if(react_total>=5){
       const bisCount=(bisVotes&&bisVotes[it.yt])||0;
@@ -1356,6 +1364,41 @@ function tickify(parent){
   setTimeout(()=>{
     (parent||document).querySelectorAll('.info .t:not([data-tkd])').forEach(applyTicker);
   },120);
+}
+
+// ---------- Evitar reconstruir una lista si no cambió realmente ----------
+// poll() llama a todos los render*() de listas cada 2s así haya cambiado algo o no. Antes
+// cada uno hacía box.innerHTML='' + reconstruía todas las filas SIEMPRE, lo que reiniciaba
+// el ticker (rowTick) de cada título largo en simultáneo cada 2s — se veía como si todo el
+// listado "parpadeara"/reiniciara junto. Con esta guarda, si la lista es idéntica a la ya
+// pintada, no se toca el DOM y los tickers en curso siguen su animación sin interrupción.
+function _renderIfChanged(box,sig){
+  if(!box)return false;
+  if(box.dataset.rsig===sig)return false;
+  box.dataset.rsig=sig;
+  return true;
+}
+
+// ---------- Evitar repetir el nombre del artista en el título ----------
+// Muchos títulos de YouTube ya vienen como "Artista - Canción" (o "Canción - Artista"); como
+// la tarjeta ya muestra el artista en su propia línea debajo, dejarlo también dentro del
+// título es información duplicada. Solo se recorta cuando el texto antes/después del
+// separador coincide (normalizado) con el artista — nunca a ciegas.
+function _normArtistCompare(s){
+  return (s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/ y | and |,|&/g,' ').replace(/[^a-z0-9 ]/g,'').replace(/\s+/g,' ').trim();
+}
+function stripDuplicateArtist(title,artist){
+  if(!title||!artist)return title||'';
+  const artistNorm=_normArtistCompare(artist);
+  if(!artistNorm)return title;
+  for(const sep of [' - ',' – ',' — ',' | ',': ']){
+    const first=title.indexOf(sep);
+    if(first>=0&&_normArtistCompare(title.slice(0,first))===artistNorm)return title.slice(first+sep.length).trim();
+    const last=title.lastIndexOf(sep);
+    if(last>=0&&_normArtistCompare(title.slice(last+sep.length))===artistNorm)return title.slice(0,last).trim();
+  }
+  return title;
 }
 
 // ---------- Header ticker ----------
@@ -1509,7 +1552,7 @@ function songRow(it,opts){
   const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
   const tag=it.super?'⏫ ':(it.priority?'⚡ ':'');
   const tsHtml=it.ts?` · <span style="opacity:.7">pedida ${hm(it.ts)}</span>`:'';
-  div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+esc(it.table||it.artist||'')+tsHtml}</div></div>`;
+  div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+esc(it.table||it.artist||'')+tsHtml}</div></div>`;
   if(opts&&opts.boost){
     if(!it.priority){const b=document.createElement('button');b.className='btn sm gold';b.textContent='⚡ Impulsar';b.onclick=()=>boost(it.id,it.mine);div.appendChild(b);}
     // Siempre visible (nunca oculto) — deshabilitado con el motivo en el title (tooltip) cuando
@@ -1621,7 +1664,9 @@ async function subscribe(){
   if(j.ok){toast('¡Gracias! Te avisaremos 🚀','ok');$('subEmail').value='';}else toast(j.error||'Error','err');
 }
 function renderList(elId,items,opts){
-  const box=$(elId);box.innerHTML='';
+  const box=$(elId);
+  if(!_renderIfChanged(box,elId+JSON.stringify(items)))return;
+  box.innerHTML='';
   if(!items||!items.length){box.innerHTML='<div class="empty">'+((opts&&opts.empty)||'Nada aún.')+'</div>';return;}
   const showPos=(elId==='queueList');
   items.forEach((it,i)=>{
@@ -1632,34 +1677,40 @@ function renderList(elId,items,opts){
   tickify(box);
 }
 function renderTopRequested(items){
-  const box=$('topReqList');box.innerHTML='';
+  const box=$('topReqList');
+  if(!_renderIfChanged(box,JSON.stringify(items)))return;
+  box.innerHTML='';
   if(!items||!items.length){box.innerHTML='<div class="empty">Aún sin pedidos registrados.</div>';return;}
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank tappable';
-    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love" style="color:var(--pri)">🎵 ${it.count}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love" style="color:var(--pri)">🎵 ${it.count}</div>`;
     d.onclick=()=>openSheet(it);
     box.appendChild(d);
   });
   tickify(box);
 }
 function renderMyLikes(items){
-  const box=$('myLikesList');if(!box)return;box.innerHTML='';
+  const box=$('myLikesList');if(!box)return;
+  if(!_renderIfChanged(box,JSON.stringify(items)))return;
+  box.innerHTML='';
   if(!items||!items.length){box.innerHTML='<div class="empty">Todavía no has dado likes. ¡Reacciona a las canciones!</div>';return;}
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank';
     const emojis=(it.my_reacts||[]).join(' ');
-    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love">${emojis}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love">${emojis}</div>`;
     box.appendChild(d);
   });
   tickify(box);
 }
 function renderLoved(items){
-  const box=$('lovedList');box.innerHTML='';
+  const box=$('lovedList');
+  if(!_renderIfChanged(box,JSON.stringify(items)))return;
+  box.innerHTML='';
   if(!items||!items.length){box.innerHTML='<div class="empty">Aún sin reacciones. ¡Sé el primero en reaccionar!</div>';return;}
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank';
     const tables=it.tables&&it.tables.length?it.tables.slice(0,4).join(' · ')+(it.tables.length>4?' y '+(it.tables.length-4)+' más':''):'';
-    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.artist||'')}</div>${tables?`<div style="font-size:11px;color:var(--pri);margin-top:2px">🙌 ${esc(tables)}</div>`:''}</div><div class="love">❤️ ${it.total}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div>${tables?`<div style="font-size:11px;color:var(--pri);margin-top:2px">🙌 ${esc(tables)}</div>`:''}</div><div class="love">❤️ ${it.total}</div>`;
     box.appendChild(d);
   });
   tickify(box);
