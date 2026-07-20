@@ -115,12 +115,21 @@ body{padding-bottom:80px}
 .vibe-btn.on{border-color:var(--pri);background:rgba(59,130,246,.18);color:var(--pri)}
 .vibe-count{font-size:11px;font-weight:600;opacity:.7}
 
-/* ---- Poll ---- */
-.duelo-team{display:flex;align-items:center;gap:10px;background:var(--bg2);border:2px solid var(--line);
-  border-radius:16px;padding:10px 14px;cursor:pointer;transition:border-color .2s,background .2s,transform .1s;flex-wrap:wrap;touch-action:manipulation}
+/* ---- Duelo: cara a cara, no una arriba de otra (leía como que una tenía ventaja) ---- */
+#dueloOptions{display:flex;align-items:stretch;gap:8px}
+.duelo-vs{flex:none;align-self:center;font-size:12px;font-weight:900;color:#f59e0b;opacity:.85;
+  width:26px;text-align:center;letter-spacing:.5px}
+.duelo-team{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;
+  background:var(--bg2);border:2px solid var(--line);border-radius:16px;padding:12px 8px;
+  cursor:pointer;transition:border-color .2s,background .2s,transform .1s;touch-action:manipulation}
 .duelo-team:active{transform:scale(.97)}
 .duelo-team.on{border-color:#f59e0b;background:rgba(245,158,11,.13)}
-.duelo-team .duelo-bar{height:6px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden;flex-basis:100%}
+.duelo-img{width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:10px;background:#0b0f1a}
+.duelo-info{width:100%;min-width:0}
+.duelo-info .t{font-size:13px;font-weight:700;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.duelo-info .a{font-size:11px;color:var(--mut);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.duelo-votes{font-size:11px;color:var(--mut);font-weight:700}
+.duelo-team .duelo-bar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;width:100%}
 .duelo-team .duelo-bar-fill{height:100%;background:#f59e0b;border-radius:3px;transition:width .5s}
 .duelo-team .duelo-lbl{font-size:11px;font-weight:800;color:#f59e0b;letter-spacing:.5px}
 .poll-opt{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);
@@ -276,7 +285,7 @@ body{padding-bottom:80px}
         <div id="dueloTimer" style="font-size:13px;font-weight:800;color:#f59e0b;letter-spacing:.5px"></div>
       </div>
       <div class="prog" style="margin-top:0;margin-bottom:12px"><div class="prog-fill" id="dueloTimerBar" style="background:#f59e0b"></div></div>
-      <div id="dueloOptions" style="display:flex;flex-direction:column;gap:10px"></div>
+      <div id="dueloOptions"></div>
     </div>
 
     <!-- Vibe de la noche -->
@@ -1139,9 +1148,10 @@ function renderDuelo(duelo){
   teams.forEach((team,idx)=>{
     const count=votes[team.yt]||0;const pct=Math.round(100*count/total);const on=myVote===team.yt;
     const div=document.createElement('div');div.className='duelo-team'+(on?' on':'');
-    div.innerHTML=`<div class="duelo-lbl">${idx===0?'⚔️ A':'⚔️ B'}</div><img class="mini" src="${img(team.yt)}" onerror="this.removeAttribute('src')"><div class="info" style="flex:1"><div class="t">${esc(team.title)}</div><div class="a">${esc(team.artist||'')}</div></div>${on?'<span class="vote-check">✓</span>':''}<div style="font-size:11px;color:var(--mut);font-weight:700;white-space:nowrap">${count} voto${count!==1?'s':''} · ${pct}%</div><div class="duelo-bar"><div class="duelo-bar-fill" style="width:0%"></div></div>`;
+    div.innerHTML=`<div class="duelo-lbl">${idx===0?'⚔️ A':'⚔️ B'}</div><img class="duelo-img" src="${img(team.yt)}" onerror="this.removeAttribute('src')"><div class="duelo-info"><div class="t">${esc(team.title)}</div><div class="a">${esc(team.artist||'')}</div></div>${on?'<span class="vote-check">✓</span>':''}<div class="duelo-votes">${count} voto${count!==1?'s':''} · ${pct}%</div><div class="duelo-bar"><div class="duelo-bar-fill" style="width:0%"></div></div>`;
     div.onclick=()=>voteDuelo(team.yt);
     box.appendChild(div);
+    if(idx===0){const vs=document.createElement('div');vs.className='duelo-vs';vs.textContent='VS';box.appendChild(vs);}
   });
   setTimeout(()=>{box.querySelectorAll('.duelo-bar-fill').forEach((el,i)=>{const count=votes[(teams[i]||{}).yt]||0;const pct=Math.round(100*count/total);el.style.width=pct+'%';});},50);
   tickify(box);
