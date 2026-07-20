@@ -724,6 +724,15 @@ def _parse_len(t):
 
 YT_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
+def is_local_id(yt):
+    """Identifica una canción del catálogo local del bar (Fase 1 del modo sin YouTube — ver
+    plan federated-knitting-lagoon.md) — reutiliza el mismo campo `yt` que usa todo el
+    sistema, con un prefijo distinguible, en vez de un campo paralelo. La gran mayoría del
+    código que toca `.yt` lo trata como clave opaca (cola, votos, reacciones, historial) y no
+    necesita cambios; solo los puntos que validan formato o hacen una llamada de red específica
+    de YouTube (este archivo, ~6 lugares) necesitan revisar esto explícitamente."""
+    return isinstance(yt, str) and yt.startswith("local:")
+
 def yt_id(text):
     text = (text or "").strip()
     m = re.search(r"(?:v=|youtu\.be/|/embed/|/shorts/)([A-Za-z0-9_-]{11})", text)
@@ -1237,8 +1246,17 @@ def promote_next(manual=False):
         nxt["play_status"] = "playing"
         STATE["now_playing"] = nxt
     else:
-        # Nunca silencio: fallback de la lista del local (shuffle o secuencial)
-        base_pool = STATE["curated"] if STATE["curated"] else CATALOG
+        # Nunca silencio: fallback de la lista del local (shuffle o secuencial).
+        # En modo catálogo local (content_mode=="local") NUNCA se cae a CATALOG (100%
+        # YouTube) — un venue local se queda sin música de fondo (now_playing=None, "Esperando
+        # canciones…") antes que mezclar YouTube en un local que eligió no usarlo. Además se
+        # filtra `curated` a solo entradas locales: un admin pudo haber agregado antes una
+        # canción de YouTube vía el buscador normal (esa ruta no cambia en esta fase), y esa
+        # entrada no debe colarse en la rotación de un venue que ya está en modo local.
+        if STATE["settings"].get("content_mode") == "local":
+            base_pool = [c for c in STATE["curated"] if is_local_id(c.get("yt"))]
+        else:
+            base_pool = STATE["curated"] if STATE["curated"] else CATALOG
         shuffle = STATE["settings"].get("fallback_shuffle", True)
         if shuffle:
             # Usa una copia barajada; cuando se agota, baraja de nuevo
@@ -1743,7 +1761,11 @@ def public_state(token=None, admin=False, mark_dedica=None):
     return out
 
 def _pad(lst, n=6, genre=None):
-    """Rellena con el catálogo (preferentemente del género) hasta n, sin duplicar."""
+    """Rellena con el catálogo (preferentemente del género) hasta n, sin duplicar.
+    En modo catálogo local nunca rellena con CATALOG (100% YouTube) — mejor una lista corta
+    (o vacía) que mezclar YouTube en un local que eligió no usarlo."""
+    if STATE["settings"].get("content_mode") == "local":
+        return lst
     seen = {x["yt"] for x in lst}
     pool = [c for c in CATALOG if (not genre or c["genre"] == genre)] + CATALOG
     for c in pool:
@@ -2289,7 +2311,7 @@ class H(BaseHTTPRequestHandler):
                 # yt/title/artist ya vienen resueltos si el pedido fue por link (se resolvió
                 # antes de tomar el LOCK — ver do_POST, para no bloquear el servidor con I/O de red)
                 yt = d.get("yt")
-                if not yt or not YT_ID_RE.match(yt):
+                if not yt or not (YT_ID_RE.match(yt) or is_local_id(yt)):
                     return self._send(400, {"error": "No pude leer el link de YouTube"})
                 title = str(d.get("title") or "Canción")[:200]
                 artist = str(d.get("artist") or "")[:120]
@@ -2914,15 +2936,17 @@ class H(BaseHTTPRequestHandler):
 
             if path == "/api/admin/curated":
                 act = d.get("action")
-                if act == "add" and d.get("yt") and YT_ID_RE.match(d["yt"]):
+                if act == "add" and d.get("yt") and (YT_ID_RE.match(d["yt"]) or is_local_id(d["yt"])):
                     if not any(c["yt"] == d["yt"] for c in STATE["curated"]):
+                        # genre/media_type/local_path solo se llenan para entradas del catálogo
+                        # local (Fase 2 en adelante los sube el importador) — quedan en None para
+                        # una canción de YouTube agregada normal, como siempre.
                         STATE["curated"].append({"yt": d["yt"], "title": str(d.get("title") or "Canción")[:200],
                                                  "artist": str(d.get("artist") or "")[:120],
                                                  "duration": _parse_len(d.get("length")) or DEFAULT_DUR,
-                                                 # Campos de catálogo local (modo "local" — ver plan
-                                                 # federated-knitting-lagoon): None/"" en entradas de YouTube,
-                                                 # nunca se llenan por esta rama (la del modo local es la Fase 1).
-                                                 "genre": None, "media_type": None, "local_path": None})
+                                                 "genre": (str(d.get("genre"))[:40] if d.get("genre") else None),
+                                                 "media_type": (d.get("media_type") if d.get("media_type") in ("audio", "video") else None),
+                                                 "local_path": (str(d.get("local_path"))[:500] if d.get("local_path") else None)})
                 elif act == "remove":
                     STATE["curated"] = [c for c in STATE["curated"] if c["yt"] != d.get("yt")]
                 elif act == "reorder":
