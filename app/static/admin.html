@@ -1082,7 +1082,12 @@ async function loadTables(){
     const rg=document.createElement('button');rg.className='btn ghost sm';rg.textContent='↻';rg.title='Nuevo PIN';
     rg.onclick=async()=>{await post('/api/admin/tables',{action:'regen',name:m.name});loadTables();};
     const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';
-    rm.onclick=async()=>{await post('/api/admin/tables',{action:'remove',name:m.name});loadTables();};
+    rm.onclick=async()=>{
+      if(!confirm('¿Borrar '+m.name+'? Esta acción no se puede deshacer.'))return;
+      const j=await post('/api/admin/tables',{action:'remove',name:m.name});
+      if(j.error)alert('⚠️ '+j.error);
+      loadTables();
+    };
     r.appendChild(ap);r.appendChild(mb);r.appendChild(rg);r.appendChild(rm);
     const extraPins=m.extra_pins||[];
     if(extraPins.length){

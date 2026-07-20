@@ -2649,7 +2649,13 @@ class H(BaseHTTPRequestHandler):
                         name = f"Mesa {n}"
                     STATE["tables"].append({"name": name, "pin": gen_unique_pin(), "extra_pins": []})
                 elif act == "remove":
-                    STATE["tables"] = [t for t in STATE["tables"] if t["name"] != d.get("name")]
+                    name = d.get("name")
+                    tab_total = sum(l["amount"] for l in STATE["ledger"] if l["table"] == name)
+                    if tab_total > 0:
+                        amount_fmt = f"{tab_total:,}".replace(",", ".")
+                        return self._send(400, {"error": f"{name} tiene una cuenta abierta (${amount_fmt}) — "
+                                                 "ciérrala primero desde Caja o Mesas antes de borrarla."})
+                    STATE["tables"] = [t for t in STATE["tables"] if t["name"] != name]
                 elif act == "regen":
                     for t in STATE["tables"]:
                         if t["name"] == d.get("name"):
