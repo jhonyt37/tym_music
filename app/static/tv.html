@@ -121,12 +121,22 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   border:1px solid rgba(239,68,68,.4);border-radius:12px;padding:8px 14px;font-size:14px;
   font-weight:700;color:#fca5a5;display:none;backdrop-filter:blur(6px);gap:8px;align-items:center}
 
-/* Banner de anuncios TV — card central con brillo, no franja delgada arriba (se perdia) */
+/* Banner de anuncios TV — card central con brillo, no franja delgada arriba (se perdia).
+   Más grande (se ve desde lejos, cruzando el bar) y con el mismo latido continuo que ya
+   tienen las dedicatorias (dedicaHeartbeat) — antes solo tenía la animación de entrada y
+   se quedaba quieto y chico, poco notorio comparado con el resto de la pantalla. */
 #annBanner{position:fixed;top:36px;left:50%;transform:translateX(-50%);z-index:35;
-  padding:16px 34px;border-radius:16px;font-size:22px;font-weight:800;text-align:center;color:#000;
-  display:none;letter-spacing:.2px;animation:alertIn .4s cubic-bezier(.34,1.56,.64,1);
-  box-shadow:0 0 0 3px rgba(255,255,255,.15),0 10px 40px rgba(0,0,0,.5);max-width:80vw}
+  padding:22px 46px;border-radius:20px;font-size:30px;font-weight:800;text-align:center;color:#000;
+  display:none;letter-spacing:.2px;
+  animation:alertIn .4s cubic-bezier(.34,1.56,.64,1), annHeartbeat 1.1s ease-in-out .4s infinite;
+  box-shadow:0 0 0 3px rgba(255,255,255,.15),0 10px 40px rgba(0,0,0,.5);max-width:85vw}
 @keyframes alertIn{from{transform:translateX(-50%) scale(.7);opacity:0}to{transform:translateX(-50%) scale(1);opacity:1}}
+/* Necesita su propio keyframe (no reusar dedicaHeartbeat tal cual): este banner se centra
+   con left:50%+translateX(-50%), y ese translateX hay que repetirlo en CADA keyframe de la
+   animación de latido — si no, en cuanto termina alertIn (1 sola vez) el latido se queda
+   como única animación activa sobre "transform" y, al no traer el translateX consigo,
+   el banner saltaría pegado al borde izquierdo en vez de quedar centrado. */
+@keyframes annHeartbeat{0%,100%{transform:translateX(-50%) scale(1)}50%{transform:translateX(-50%) scale(1.05)}}
 
 /* Notificacion de "alguien pidio una cancion" — mismo lenguaje visual, icono distinto */
 #newReqBanner{position:fixed;top:36px;left:50%;transform:translateX(-50%);z-index:34;
