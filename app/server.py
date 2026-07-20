@@ -2893,7 +2893,27 @@ class H(BaseHTTPRequestHandler):
                 if "theme" in d and d["theme"] in ("azul", "purpura", "verde", "rojo", "dorado", "rosa"):
                     s["theme"] = d["theme"]
                 if "content_mode" in d and d["content_mode"] in ("youtube", "local"):
+                    _prev_content_mode = s.get("content_mode")
                     s["content_mode"] = d["content_mode"]
+                    # Al pasar a modo local: una canción de YouTube que ya estaba en cola de
+                    # ANTES de activar el modo seguía sonando igual (la cola siempre tiene
+                    # prioridad sobre el fallback filtrado) — bug reportado en vivo, "sigue
+                    # cayendo en YouTube" pese a que /api/request ya rechaza pedidos NUEVOS.
+                    # Corte limpio: se saca de la cola todo lo que no sea local (reembolsando lo
+                    # ya cobrado por adelantado, ej. saldo prepago) y si estaba sonando algo de
+                    # YouTube en ese momento, se salta como un skip manual del admin (mismo
+                    # camino ya construido: reembolsa si no llegó al 80%, archiva en historial).
+                    if _prev_content_mode != "local" and s["content_mode"] == "local":
+                        _kept_items = []
+                        for _it in STATE["items"]:
+                            if is_local_id(_it.get("yt")):
+                                _kept_items.append(_it)
+                            else:
+                                refund_song_charge(_it)
+                        STATE["items"] = _kept_items
+                        _np = STATE.get("now_playing")
+                        if _np and not is_local_id(_np.get("yt")):
+                            promote_next(manual=True)
                 if "timezone" in d and str(d["timezone"]) in available_timezones():
                     s["timezone"] = str(d["timezone"])
                 for k in ("blocked_keywords", "allowed_keywords"):

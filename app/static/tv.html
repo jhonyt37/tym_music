@@ -206,15 +206,40 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
    reemplaza al iframe de YouTube cuando la canción es del catálogo del bar. */
 #localMedia{position:fixed;inset:0;width:100vw;height:100vh;border:0;background:#000;display:none;object-fit:contain}
 /* Vista de solo-audio: el <video> igual reproduce el sonido (oculto), esto es la carátula +
-   fondo ambiental que se ve en su lugar mientras suena un mp3/archivo de audio. */
-#localAudioView{position:fixed;inset:0;display:none;align-items:center;justify-content:center;
-  background:linear-gradient(135deg,#0b0f1a,#1a1030,#0b0f1a);background-size:400% 400%;
-  animation:localAmbient 18s ease-in-out infinite}
+   fondo ambiental que se ve en su lugar mientras suena un mp3/archivo de audio — pedido
+   explícito de que no quedara plana/sin color: disco girando + resplandor + ecualizador
+   animado, todo con el color del tema del local (var(--pri), el mismo que ya usa el resto
+   de /tv) para que no se vea genérico. */
+#localAudioView{position:fixed;inset:0;display:none;flex-direction:column;align-items:center;
+  justify-content:center;overflow:hidden;
+  background:linear-gradient(135deg,#0b0f1a,#1a1030,#160b28,#0b0f1a);background-size:400% 400%;
+  animation:localAmbient 14s ease-in-out infinite}
 @keyframes localAmbient{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
-#localAudioView .cover{width:340px;height:340px;border-radius:24px;background:rgba(255,255,255,.06);
-  border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;
-  font-size:120px;box-shadow:0 20px 60px rgba(0,0,0,.6);animation:localCoverPulse 3.5s ease-in-out infinite}
-@keyframes localCoverPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+#localAudioView .glow{position:absolute;width:620px;height:620px;border-radius:50%;
+  background:radial-gradient(circle,var(--pri) 0%,transparent 70%);opacity:.28;filter:blur(50px);
+  animation:localGlowMove 11s ease-in-out infinite}
+@keyframes localGlowMove{0%,100%{transform:translate(-130px,-50px) scale(1)}50%{transform:translate(130px,60px) scale(1.3)}}
+#localAudioView .cover{width:300px;height:300px;border-radius:50%;position:relative;z-index:1;
+  box-shadow:0 0 0 10px rgba(255,255,255,.04),0 0 60px 6px var(--pri),0 25px 70px rgba(0,0,0,.7);
+  animation:localDiscSpin 12s linear infinite}
+#localAudioView .disc{width:100%;height:100%;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;border:2px solid rgba(255,255,255,.08);
+  background:repeating-radial-gradient(circle,#1b2435 0,#1b2435 4px,#242f46 4px,#242f46 8px)}
+#localAudioView .disc-hole{width:92px;height:92px;border-radius:50%;background:var(--pri);
+  display:flex;align-items:center;justify-content:center;font-size:38px;
+  box-shadow:inset 0 0 20px rgba(0,0,0,.4)}
+@keyframes localDiscSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+#localAudioView .eq{display:flex;align-items:flex-end;gap:7px;height:46px;margin-top:36px;z-index:1}
+#localAudioView .eq span{width:7px;border-radius:4px;background:var(--pri);
+  box-shadow:0 0 10px var(--pri);animation:localEq .9s ease-in-out infinite}
+#localAudioView .eq span:nth-child(1){animation-delay:-.8s}
+#localAudioView .eq span:nth-child(2){animation-delay:-.5s}
+#localAudioView .eq span:nth-child(3){animation-delay:-.2s}
+#localAudioView .eq span:nth-child(4){animation-delay:-.65s}
+#localAudioView .eq span:nth-child(5){animation-delay:-.35s}
+#localAudioView .eq span:nth-child(6){animation-delay:-.1s}
+#localAudioView .eq span:nth-child(7){animation-delay:-.45s}
+@keyframes localEq{0%,100%{height:10px}50%{height:46px}}
 /* Overlay de permiso de carpeta — mismo espíritu que #audioOverlay: siempre un toque, siempre
    captura el gesto del operador (showDirectoryPicker() lo necesita, igual que el audio). */
 #localFolderOverlay{position:fixed;inset:0;background:rgba(5,8,14,.95);flex-direction:column;
@@ -262,7 +287,9 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
      playsinline evita que Safari/iOS lo abra en pantalla completa nativa por su cuenta. -->
 <video id="localMedia" playsinline></video>
 <div id="localAudioView">
-  <div class="cover">🎵</div>
+  <div class="glow"></div>
+  <div class="cover"><div class="disc"><div class="disc-hole">🎵</div></div></div>
+  <div class="eq"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
 </div>
 <!-- Intercepta toques sueltos sobre el video para que no disparen el play/pausa nativo del
      iframe de YouTube (pasaba con cualquier click en la pantalla) — un toque aquí solo
