@@ -134,6 +134,16 @@
       <div id="tableChart"><div class="empty">Sin pedidos registrados hoy.</div></div>
     </div>
 
+    <!-- Código de un solo uso para que una mesa mande una dedicatoria personalizada (no uno
+         de los predeterminados). Se genera aquí para tenerlo a la mano rápido. -->
+    <div class="card" style="margin-bottom:14px">
+      <p class="sec">🔑 Código para dedicatoria personalizada</p>
+      <div class="small" style="color:var(--mut);margin-bottom:10px">Si una mesa quiere mandar un mensaje que no es uno de los predeterminados, genera un código y dáselo — es de un solo uso.</div>
+      <button class="btn block" onclick="genDedicaCode()">Generar código</button>
+      <div id="dedicaCodeResult" style="margin-top:12px"></div>
+      <div id="dedicaCodesRecent" style="margin-top:10px"></div>
+    </div>
+
     <!-- Atenúa (no oculta) la cola/pendientes de las demás mesas para revisar rápido si una
          está pidiendo de más. El dinero (cobros, cuánto debe) vive en Caja/Mesas, no aquí. -->
     <div class="card" style="margin-bottom:14px">
@@ -668,11 +678,18 @@
     <!-- Dedicatorias -->
     <div class="card">
       <p class="sec">💌 Dedicatorias</p>
-      <div class="small" style="color:var(--mut);margin-bottom:10px">Mensajes enviados entre mesas. Puedes eliminar los inapropiados.</div>
-      <label class="opt" style="margin-bottom:14px">
-        <div><b>Moderar antes de mostrar en TV</b><div class="small">Si está apagado, los mensajes salen directo en TV sin revisión (como antes). Si lo activas, se filtran por palabras clave y los marcados quedan pendientes de tu aprobación aquí abajo.</div></div>
-        <input type="checkbox" id="dedicaModeration" style="width:22px;height:22px" onchange="post('/api/admin/settings',{dedica_moderation:$('dedicaModeration').checked}).then(()=>toast('Guardado','ok'))">
-      </label>
+      <div class="small" style="color:var(--mut);margin-bottom:14px">Mensajes enviados entre mesas. Los predeterminados de abajo pasan siempre directo a TV. Cualquier otro mensaje necesita un código de un solo uso — generarlo está en 🎚️ En vivo.</div>
+
+      <label class="small" style="display:block;margin-bottom:4px">Duración en TV (segundos)</label>
+      <input class="field" id="dedicaDisplaySecs" type="number" min="2" max="30" style="max-width:120px;margin-bottom:14px" onchange="post('/api/admin/settings',{dedica_display_secs:parseInt($('dedicaDisplaySecs').value||5)}).then(()=>toast('Guardado','ok'))">
+
+      <label class="small" style="display:block;margin-bottom:4px">Mensajes predeterminados (sin código, sin revisión)</label>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <input class="field" id="dedicaPresetInput" maxlength="80" placeholder="Ej: ¡Feliz cumpleaños! 🎂" style="margin:0;flex:1" onkeydown="if(event.key==='Enter'){addDedicaPreset();event.preventDefault()}">
+        <button class="btn sm" onclick="addDedicaPreset()">+ Agregar</button>
+      </div>
+      <div id="dedicaPresetsAdminList" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px;margin-bottom:14px"></div>
+
       <div id="dedicaAdminList"><div class="empty">Sin dedicatorias aún.</div></div>
     </div>
 
@@ -833,7 +850,7 @@ function pickTheme(t){
 // pickTheme() por sí sola NO guarda — también se usa para sincronizar los swatches con el
 // tema ya guardado al cargar la página (línea con pickTheme(s.settings.theme...)), y guardar
 // ahí generaría un POST de sobra en cada carga. Los swatches clicables llaman a esta función
-// en cambio, que sí persiste de una vez (mismo patrón que dedicaModeration).
+// en cambio, que sí persiste de una vez (mismo patrón que allowSkipVote/addDedicaPreset).
 function pickThemeAndSave(t){
   pickTheme(t);
   post('/api/admin/settings',{theme:t}).then(()=>toast('Guardado','ok'));
@@ -943,6 +960,52 @@ function addKeyword(type){
   const list=type==='blocked'?_kwBlocked:_kwAllowed;
   if(!list.includes(val))list.push(val);
   inp.value='';renderTags(type);
+}
+// Mensajes predeterminados de dedicatoria — a diferencia de las keyword tags de arriba, esto
+// persiste al toque (endpoint dedicado), no espera al botón "Guardar ajustes".
+let _dedicaPresetsCache=[];
+function renderDedicaPresetsAdmin(){
+  const box=$('dedicaPresetsAdminList');if(!box)return;
+  box.innerHTML='';
+  _dedicaPresetsCache.forEach(p=>{
+    const t=document.createElement('span');t.className='kwtag allowed';
+    t.innerHTML=`${esc(p)}<button title="Eliminar">×</button>`;
+    t.querySelector('button').onclick=()=>removeDedicaPreset(p);
+    box.appendChild(t);
+  });
+}
+async function addDedicaPreset(){
+  const inp=$('dedicaPresetInput');
+  const text=(inp.value||'').trim();
+  if(!text)return;
+  const j=await post('/api/admin/dedica_presets',{action:'add',text});
+  _dedicaPresetsCache=j.dedica_presets||_dedicaPresetsCache;
+  inp.value='';renderDedicaPresetsAdmin();
+}
+async function removeDedicaPreset(text){
+  const j=await post('/api/admin/dedica_presets',{action:'remove',text});
+  _dedicaPresetsCache=j.dedica_presets||_dedicaPresetsCache;
+  renderDedicaPresetsAdmin();
+}
+// Códigos de un solo uso para dedicatorias personalizadas — se generan desde En vivo para
+// tenerlos a mano rápido mientras el mesero espera en la mesa.
+async function genDedicaCode(){
+  const j=await post('/api/admin/dedica_codes',{action:'generate'});
+  if(j.code){
+    $('dedicaCodeResult').innerHTML=`<div class="pinrow"><span class="name">Código nuevo — dáselo a la mesa</span><span class="pin">${esc(j.code)}</span></div>`;
+    toast('Código generado','ok');
+  }
+}
+function renderDedicaCodesRecent(codes){
+  const box=$('dedicaCodesRecent');if(!box)return;
+  if(!codes.length){box.innerHTML='';return;}
+  box.innerHTML='<div class="small" style="color:var(--mut);margin-bottom:6px">Últimos códigos</div>';
+  codes.slice(0,5).forEach(c=>{
+    const r=document.createElement('div');r.className='row';
+    const status=c.used?'<span class="chip">✓ usado'+(c.used_by_table?' · '+esc(c.used_by_table):'')+'</span>':'<span class="chip pri">● sin usar</span>';
+    r.innerHTML=`<div class="info"><div class="t">${esc(c.code)}</div><div class="a small">${hm3(c.created_at)}</div></div>${status}`;
+    box.appendChild(r);
+  });
 }
 async function save(){
   const payload={
@@ -1173,7 +1236,9 @@ async function tick(){
       $('ownerEmail').value=s.owner_email||'';
       if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;
       if($('musicOnly'))$('musicOnly').checked=!!s.settings.music_only;
-      if($('dedicaModeration'))$('dedicaModeration').checked=!!s.settings.dedica_moderation;
+      if($('dedicaDisplaySecs'))$('dedicaDisplaySecs').value=s.settings.dedica_display_secs||5;
+      _dedicaPresetsCache=Array.isArray(s.settings.dedica_presets)?[...s.settings.dedica_presets]:[];
+      renderDedicaPresetsAdmin();
       if($('pollDurationSecs'))$('pollDurationSecs').value=s.settings.poll_duration_secs||120;
       if($('dueloDurationSecs'))$('dueloDurationSecs').value=s.settings.duelo_duration_secs||60;
       _schedule=Array.isArray(s.settings.schedule)?JSON.parse(JSON.stringify(s.settings.schedule)):[];
@@ -1258,6 +1323,8 @@ async function tick(){
     const atEl=$('activeTablesNum'),ttEl=$('totalTablesNum');
     if(atEl)atEl.textContent=s.active_sessions||0;
     if(ttEl)ttEl.textContent=(s.tables||[]).length;
+
+    renderDedicaCodesRecent(s.dedica_codes||[]);
 
     // Enfocar mesa (Caja): repuebla el select con las mesas del local, preservando la
     // selección, y filtra cobros del turno + movimientos + cuentas recientes a esa mesa.

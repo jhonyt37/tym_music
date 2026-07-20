@@ -306,17 +306,23 @@ body{padding-bottom:80px}
     <div class="card" id="dedicaCard" style="display:none">
       <h2>💌 Enviar dedicatoria</h2>
       <div class="small" style="color:var(--mut);margin-bottom:12px">Manda un mensaje especial a otra mesa — aparece en la pantalla del bar.</div>
-      <div class="dedica-form">
+      <label class="small" style="font-weight:700">Para:</label>
+      <select class="field" id="dedicaTo" style="margin-top:4px;margin-bottom:14px"></select>
+
+      <label class="small" style="font-weight:700">Mensajes rápidos (sin código, van directo):</label>
+      <div id="dedicaPresets" style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 4px"></div>
+
+      <button class="btn ghost block sm" style="margin-top:10px" onclick="toggleDedicaCustom()" id="dedicaCustomToggleBtn">✍️ Escribir mi propio mensaje</button>
+      <div class="dedica-form" id="dedicaCustomForm" style="display:none;margin-top:12px">
         <div>
-          <label class="small" style="font-weight:700">Para:</label>
-          <select class="field" id="dedicaTo" style="margin-top:4px"></select>
-        </div>
-        <div>
-          <label class="small" style="font-weight:700">Mensaje:</label>
-          <input class="field" id="dedicaMsg" maxlength="80" placeholder="Ej: ¡Feliz cumpleaños! 🎂" style="margin-top:4px" oninput="updateDedicaCount()">
+          <input class="field" id="dedicaMsg" maxlength="80" placeholder="Escribe tu mensaje…" oninput="updateDedicaCount()">
           <div class="dedica-char" id="dedicaChar">0/80</div>
         </div>
-        <button class="btn block" onclick="sendDedica()">💌 Enviar dedicatoria</button>
+        <div>
+          <input class="field" id="dedicaCode" maxlength="6" inputmode="numeric" placeholder="Código del admin">
+          <div class="small" style="color:var(--mut);margin-top:4px">Los mensajes personalizados necesitan un código de un solo uso — pídeselo al mesero o al admin.</div>
+        </div>
+        <button class="btn block" onclick="sendDedica()">💌 Enviar</button>
       </div>
     </div>
 
@@ -1187,7 +1193,7 @@ function updateDedicaCount(){
   const len=($('dedicaMsg').value||'').length;
   const el=$('dedicaChar');if(el)el.textContent=len+'/80';
 }
-function renderDedicaCard(tables,session){
+function renderDedicaCard(tables,session,presets){
   const card=$('dedicaCard');if(!card)return;
   if(!session){card.style.display='none';return;}
   card.style.display='';
@@ -1198,15 +1204,38 @@ function renderDedicaCard(tables,session){
     const o=document.createElement('option');o.value=t;o.textContent=t;sel.appendChild(o);
   });
   if(prev&&[...sel.options].some(o=>o.value===prev))sel.value=prev;
+  const pbox=$('dedicaPresets');
+  if(pbox&&pbox.dataset.rendered!==JSON.stringify(presets||[])){
+    pbox.dataset.rendered=JSON.stringify(presets||[]);
+    pbox.innerHTML='';
+    (presets||[]).forEach(p=>{
+      const b=document.createElement('button');b.className='btn ghost sm';b.textContent=p;b.type='button';
+      b.onclick=()=>sendDedicaPreset(p);
+      pbox.appendChild(b);
+    });
+  }
+}
+function toggleDedicaCustom(){
+  const f=$('dedicaCustomForm');if(!f)return;
+  f.style.display=f.style.display==='none'?'':'none';
+}
+async function sendDedicaPreset(message){
+  if(!token){toast('Ingresa el código de tu mesa','err');return;}
+  const to_table=$('dedicaTo').value;
+  if(!to_table){toast('Selecciona una mesa destino','err');return;}
+  const j=await (await fetch('/api/dedica',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,to_table,message})})).json();
+  if(j.ok)toast('💌 ¡Dedicatoria enviada!','ok');
+  else toast(j.error||'Error','err');
 }
 async function sendDedica(){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
   const to_table=$('dedicaTo').value;
   const message=($('dedicaMsg').value||'').trim();
+  const code=($('dedicaCode').value||'').trim();
   if(!to_table){toast('Selecciona una mesa destino','err');return;}
   if(!message){toast('Escribe un mensaje','err');return;}
-  const j=await (await fetch('/api/dedica',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,to_table,message})})).json();
-  if(j.ok){toast('💌 ¡Dedicatoria enviada!','ok');$('dedicaMsg').value='';updateDedicaCount();}
+  const j=await (await fetch('/api/dedica',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,to_table,message,code})})).json();
+  if(j.ok){toast('💌 ¡Dedicatoria enviada!','ok');$('dedicaMsg').value='';$('dedicaCode').value='';updateDedicaCount();}
   else toast(j.error||'Error','err');
 }
 
@@ -1712,7 +1741,7 @@ async function poll(){
     }
     _lastPollActive=_pollNowActive;
     renderVibe(s.vibe);
-    renderDedicaCard(s.tables,s.session);
+    renderDedicaCard(s.tables,s.session,s.settings.dedica_presets);
 
     // Badges de navegación
     $('badgeQ').style.display=s.queue_count?'':'none';$('badgeQ').textContent=s.queue_count;

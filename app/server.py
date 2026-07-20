@@ -331,9 +331,16 @@ def make_venue(name):
             "max_priority_queue_min": 0,   # bloquear nuevas prioridades si cola premium > N min (0=off)
             "max_song_duration_min": 0,    # rechazar pedidos de canciones más largas que N min (0=off)
             "music_only": False,           # rechazar pedidos que la IA clasifique como no-música
-            "dedica_moderation": False,    # moderar dedicatorias (mesa a mesa) antes de mostrarlas en TV (off=pasan directo)
-            "song_message_moderation": False,  # moderar el mensaje al pedir canción (separado de dedica_moderation)
+            "song_message_moderation": False,  # moderar el mensaje al pedir canción (separado de dedicatorias)
             "dedica_price": 0,             # cargo extra si el pedido incluye mensaje (0=gratis, se suma al precio de la canción)
+            "dedica_display_secs": 5,      # cuánto dura el overlay de dedicatoria mesa a mesa en /tv
+            "dedica_presets": [             # mensajes predeterminados: pasan SIEMPRE sin código ni moderación
+                "🎉 ¡Qué buen ambiente!",
+                "🎂 ¡Feliz cumpleaños!",
+                "🔥 ¡Esta rola está buenísima!",
+                "💃 ¡A bailar se ha dicho!",
+                "🙌 Saludos para toda la mesa",
+            ],
             "fallback_shuffle": True,       # lista del local en orden aleatorio
             "theme": "azul",               # tema de color: azul | purpura | verde | rojo | dorado | rosa
             "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
@@ -370,6 +377,8 @@ def make_venue(name):
         "tv_owner": None,          # {"id": device_id, "last_seen": ts} — dueño actual de la TV (anti 2 TVs a la vez)
         "qr_force_until": 0,       # timestamp: si es futuro, /tv fuerza el QR visible (botón "Mostrar QR ya")
         "dedicas": [],             # [{id, from_table, to_table, message, ts, shown_tv}]
+        "dedica_codes": [],        # [{code, created_at, used, used_at, used_by_table}] — códigos de un
+                                    # solo uso que el admin genera para aprobar mensajes personalizados
         "bis_votes": {},           # {yt: set(tokens)} — votos de bis por canción
         "poll": None,              # {options, votes, active, created_at, ends_at, triggered_by_np_id, auto}
         "poll_launched_for_id": None,  # np.id para el que se lanzó/cerró el último poll
@@ -1461,8 +1470,9 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
-                                       "show_tym_brand", "music_only", "dedica_moderation",
-                                       "song_message_moderation", "dedica_price")},
+                                       "show_tym_brand", "music_only",
+                                       "song_message_moderation", "dedica_price", "dedica_display_secs",
+                                       "dedica_presets")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
@@ -1536,6 +1546,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                            "ts": h.get("ts"), "played_at": h.get("played_at")} for h in STATE["history"][:10]]
         out["repeat_exceptions"] = list(STATE.get("repeat_exceptions", set()))
         out["all_dedicas"] = list(reversed(STATE.get("dedicas", [])))[:30]
+        out["dedica_codes"] = list(reversed(STATE.get("dedica_codes", [])))[:15]
         out["all_announcements"] = list(reversed(STATE.get("announcements", [])))
         _msg_pool = (([np] if np else []) + STATE["items"])
         out["pending_song_messages"] = [
@@ -1895,6 +1906,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/duelo", "/api/admin/duelo/close",
                        "/api/admin/announcement", "/api/admin/show_qr",
                        "/api/admin/dedica/delete", "/api/admin/dedica/approve", "/api/admin/dedica/reject",
+                       "/api/admin/dedica_presets", "/api/admin/dedica_codes",
                        "/api/admin/song_message/approve", "/api/admin/song_message/reject",
                        "/api/admin/change_password", "/api/admin/update_email")
         vid = self.resolve_vid(d)
@@ -2527,7 +2539,10 @@ class H(BaseHTTPRequestHandler):
                     if k in d:
                         try: s[k] = max(0, int(d[k]))
                         except Exception: pass
-                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote", "music_only", "dedica_moderation", "song_message_moderation"):
+                if "dedica_display_secs" in d:
+                    try: s["dedica_display_secs"] = max(2, min(30, int(d["dedica_display_secs"])))
+                    except Exception: pass
+                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote", "music_only", "song_message_moderation"):
                     if k in d:
                         s[k] = bool(d[k])
                 if "min_direct_pay" in d:
@@ -2684,6 +2699,35 @@ class H(BaseHTTPRequestHandler):
                     STATE["curated"].sort(key=lambda c: pos.get(c["yt"], 999999))
                 return self._send(200, {"ok": True, "curated": STATE["curated"]})
 
+            if path == "/api/admin/dedica_presets":
+                act = d.get("action")
+                presets = STATE["settings"].setdefault("dedica_presets", [])
+                if act == "add":
+                    text = str(d.get("text") or "").strip()[:80]
+                    if text and text not in presets and len(presets) < 20:
+                        presets.append(text)
+                elif act == "remove":
+                    STATE["settings"]["dedica_presets"] = [p for p in presets if p != d.get("text")]
+                return self._send(200, {"ok": True, "dedica_presets": STATE["settings"]["dedica_presets"]})
+
+            if path == "/api/admin/dedica_codes":
+                if d.get("action") == "generate":
+                    used = {c["code"] for c in STATE.get("dedica_codes", []) if not c["used"]}
+                    code = gen_pin()
+                    for _ in range(200):
+                        if code not in used:
+                            break
+                        code = gen_pin()
+                    entry = {"code": code, "created_at": time.time(), "used": False,
+                             "used_at": None, "used_by_table": None}
+                    STATE.setdefault("dedica_codes", []).append(entry)
+                    # No necesitamos historial ilimitado — solo lo suficiente para que el admin
+                    # vea los últimos códigos entregados y si ya se usaron.
+                    if len(STATE["dedica_codes"]) > 100:
+                        STATE["dedica_codes"] = STATE["dedica_codes"][-100:]
+                    return self._send(200, {"ok": True, "code": code})
+                return self._send(400, {"error": "Acción inválida"})
+
             if path == "/api/admin/add":
                 yt = (d.get("yt") or "").strip()
                 title = str(d.get("title") or "Canción")[:120]
@@ -2808,10 +2852,22 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "El mensaje no puede estar vacío."})
                 if len(message) > 80:
                     return self._send(400, {"error": "El mensaje no puede tener más de 80 caracteres."})
-                if STATE["settings"].get("dedica_moderation"):
-                    _approved, mod_reason = _moderate_message(message)
-                    status = "approved" if _approved else "pending"
+                # Mensajes predeterminados (configurados por el admin) pasan siempre sin revisión.
+                # Cualquier otro texto necesita un código de un solo uso que el admin genera desde
+                # /admin — el código ES la moderación: reemplaza el filtro por palabras clave.
+                if message in STATE["settings"].get("dedica_presets", []):
+                    status, mod_reason = "approved", ""
                 else:
+                    code = str(d.get("code") or "").strip()
+                    entry = next((c for c in STATE.get("dedica_codes", [])
+                                 if c["code"] == code and not c["used"]), None)
+                    if not entry:
+                        return self._send(400, {"error": "Ese mensaje no es uno de los predeterminados. "
+                                                 "Pídele al mesero o al admin un código para enviarlo.",
+                                                 "needs_code": True})
+                    entry["used"] = True
+                    entry["used_at"] = time.time()
+                    entry["used_by_table"] = sess["table"]
                     status, mod_reason = "approved", ""
                 ded = {"id": nid(), "from_table": sess["table"], "to_table": to_table,
                        "message": message, "ts": time.time(), "shown_tv": False,
