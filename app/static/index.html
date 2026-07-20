@@ -135,6 +135,10 @@ body{padding-bottom:80px}
 .poll-opt{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);
   border-radius:12px;padding:10px 12px;margin-top:8px;cursor:pointer;touch-action:manipulation;transition:border-color .2s,background .2s,transform .1s}
 .poll-opt:active{transform:scale(.97)}
+/* .mini solo se dimensiona dentro de .row/.rank (regla de style.css) — .poll-opt no calzaba
+   con ninguna de las dos, así que la miniatura salía a su tamaño natural de YouTube (320x180),
+   gigante, y tapaba que esto era una votación en vez de un listado de canciones. */
+.poll-opt img.mini{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none;background:#0b0f1a}
 .poll-opt.on{border-color:var(--pri);background:rgba(59,130,246,.15)}
 .poll-bar{height:5px;background:var(--line);border-radius:3px;margin-top:6px;overflow:hidden;flex-basis:100%}
 .poll-bar-fill{height:100%;background:var(--pri);border-radius:3px;transition:width .5s}
