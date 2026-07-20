@@ -1568,9 +1568,23 @@ function spawnEmoji(e){
 }
 async function react(id,emoji){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
-  spawnEmoji(emoji);
-  toast(emoji+(_likePub?' ¡Reaccionaste! (visible con tu mesa)':' ¡Reaccionaste! (incógnito)'),'ok');
-  await fetch('/api/react',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id,emoji,public:_likePub})});poll();
+  // Antes mostraba "¡Reaccionaste!" y la animación SIEMPRE, sin importar si el servidor
+  // aceptó la reacción — si el POST fallaba (ej. rechazo por autolike a tu propia canción,
+  // límite de tasa, sesión vencida) el cliente igual decía que sí, y nunca quedaba registrada
+  // (ni visible en /tv, que lee la reacción real del servidor). Ahora se espera la respuesta.
+  let j;
+  try{
+    const r=await fetch('/api/react',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,id,emoji,public:_likePub})});
+    j=await r.json();
+  }catch(e){toast('No se pudo registrar tu reacción — revisa tu conexión','err');return;}
+  if(!j.ok){toast(j.error||'No se pudo registrar tu reacción','err');return;}
+  if((j.my_reacts||[]).includes(emoji)){
+    spawnEmoji(emoji);
+    toast(emoji+(_likePub?' ¡Reaccionaste! (visible con tu mesa)':' ¡Reaccionaste! (incógnito)'),'ok');
+  }else{
+    toast(emoji+' Quitaste tu reacción','ok');
+  }
+  poll();
 }
 function boost(id, isMine){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
