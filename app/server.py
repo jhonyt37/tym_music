@@ -2361,6 +2361,15 @@ class H(BaseHTTPRequestHandler):
                 yt = d.get("yt")
                 if not yt or not (YT_ID_RE.match(yt) or is_local_id(yt)):
                     return self._send(400, {"error": "No pude leer el link de YouTube"})
+                # En modo catálogo local, un id de YouTube se rechaza acá — es el único punto
+                # por el que TODO pedido pasa (cliente, link pegado, o el admin arrastrando algo
+                # de "Recomendadas del local" a la cola en vivo), así que cierra la puerta sin
+                # importar por dónde se intente. Antes solo el buscador del cliente evitaba
+                # mostrar YouTube (Fase 3) — pero nada bloqueaba que igual se colara un pedido
+                # real, bug reportado en vivo con un local real.
+                if STATE["settings"].get("content_mode") == "local" and not is_local_id(yt):
+                    return self._send(400, {"error": "Este local solo pide música de su catálogo propio — busca en 'Del local' 🎵",
+                                            "content_blocked": True})
                 title = str(d.get("title") or "Canción")[:200]
                 artist = str(d.get("artist") or "")[:120]
                 # Canción local: la duración/tipo de archivo/ruta salen del catálogo curado por
