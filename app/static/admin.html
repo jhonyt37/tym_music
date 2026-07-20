@@ -706,9 +706,9 @@
     <!-- Dedicatorias -->
     <div class="card">
       <p class="sec">💌 Dedicatorias</p>
-      <div class="small" style="color:var(--mut);margin-bottom:14px">Mensajes enviados entre mesas. Los predeterminados de abajo pasan siempre directo a TV. Cualquier otro mensaje necesita un código de un solo uso — generarlo está en 🎚️ En vivo.</div>
+      <div class="small" style="color:var(--mut);margin-bottom:14px">Mensajes enviados entre mesas, o como dedicatoria al pedir una canción. En ambos casos, los predeterminados de abajo pasan siempre directo a TV; cualquier otro mensaje necesita un código de un solo uso — generarlo está en 🎚️ En vivo.</div>
 
-      <label class="small" style="display:block;margin-bottom:4px">Duración en TV (segundos)</label>
+      <label class="small" style="display:block;margin-bottom:4px">Duración en TV (segundos) — aplica a ambos tipos de dedicatoria</label>
       <input class="field" id="dedicaDisplaySecs" type="number" min="2" max="30" style="max-width:120px;margin-bottom:14px" onchange="post('/api/admin/settings',{dedica_display_secs:parseInt($('dedicaDisplaySecs').value||5)}).then(()=>toast('Guardado','ok'))">
 
       <label class="small" style="display:block;margin-bottom:4px">Mensajes predeterminados (sin código, sin revisión)</label>

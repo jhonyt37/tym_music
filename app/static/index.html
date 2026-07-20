@@ -462,10 +462,15 @@ body{padding-bottom:80px}
     <div style="margin-top:14px" id="sheetDedicaBox">
       <button type="button" class="btn ghost block sm" id="sheetDedicaOpenBtn" onclick="toggleSheetDedica(true)">💌 Agregar dedicatoria (opcional)</button>
       <div id="sheetDedicaOpen" style="display:none">
-        <div class="small" style="color:var(--mut);margin-bottom:8px">Tu mensaje aparece junto a la canción cuando suene. Elige uno de los del bar (van directo) o escribe el tuyo.</div>
+        <div class="small" style="color:var(--mut);margin-bottom:8px">Tu mensaje aparece junto a la canción cuando suene. Elige uno de los del bar (van directo, sin código) o escribe el tuyo (necesita código del admin).</div>
         <div id="sheetDedicaPresets" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>
         <label style="font-size:12px;color:var(--mut);font-weight:700">Tu mensaje</label>
-        <input class="field" id="sheetDedicaMsg" maxlength="80" placeholder="Ej: ¡Feliz cumpleaños María! 🎂" style="margin-top:4px" oninput="updateDedicaPriceHint()">
+        <input class="field" id="sheetDedicaMsg" maxlength="80" placeholder="Elige uno de arriba, o escribe el tuyo ↓" style="margin-top:4px" readonly oninput="updateDedicaPriceHint()">
+        <button type="button" class="btn ghost block sm" style="margin-top:8px" id="sheetDedicaCustomBtn" onclick="sheetDedicaSetCustom(true)">✍️ Escribir mi propio mensaje</button>
+        <div id="sheetDedicaCodeBox" style="display:none;margin-top:8px">
+          <input class="field" id="sheetDedicaCode" maxlength="6" inputmode="numeric" placeholder="Código del admin" style="margin:0">
+          <div class="small" style="color:var(--mut);margin-top:4px">Los mensajes propios necesitan un código de un solo uso — pídeselo al mesero o al admin.</div>
+        </div>
         <div class="small" id="sheetDedicaPriceHint" style="margin-top:4px;color:var(--gold);font-weight:700;display:none"></div>
         <button type="button" class="btn ghost block sm" style="margin-top:10px" onclick="toggleSheetDedica(false)">✕ Pedir sin dedicatoria</button>
       </div>
@@ -856,7 +861,22 @@ function toggleSheetDedica(open){
   openBox.style.display=open?'':'none';
   openBtn.style.display=open?'none':'';
   if(!open){try{$('sheetDedicaMsg').value='';}catch(e){}}
+  sheetDedicaSetCustom(false);
   updateDedicaPriceHint();
+}
+// Un mensaje predeterminado del bar "va directo" (según el propio texto de ayuda) — pero el
+// campo era el mismo <input> editable que el texto libre, así que nada impedía elegir un
+// preset y luego cambiarlo por cualquier otra cosa (bug reportado). Ahora el campo queda
+// bloqueado (readonly) al elegir un preset; solo se desbloquea con este botón explícito, que
+// además exige el código del admin (mismo modelo anti-abuso que la dedicatoria mesa a mesa).
+function sheetDedicaSetCustom(custom){
+  const inp=$('sheetDedicaMsg'),codeBox=$('sheetDedicaCodeBox'),btn=$('sheetDedicaCustomBtn');
+  if(!inp)return;
+  inp.readOnly=!custom;
+  if(codeBox)codeBox.style.display=custom?'':'none';
+  if(btn)btn.style.display=custom?'none':'';
+  if(custom){inp.value='';inp.placeholder='Escribe tu mensaje…';inp.focus();}
+  else{inp.placeholder='Elige uno de arriba, o escribe el tuyo ↓';try{$('sheetDedicaCode').value='';}catch(e){}}
 }
 function renderSheetDedicaPresets(presets){
   const box=$('sheetDedicaPresets');if(!box)return;
@@ -866,7 +886,7 @@ function renderSheetDedicaPresets(presets){
   box.innerHTML='';
   (presets||[]).forEach(p=>{
     const b=document.createElement('button');b.type='button';b.className='btn ghost sm';b.textContent=p;
-    b.onclick=()=>{$('sheetDedicaMsg').value=p;updateDedicaPriceHint();};
+    b.onclick=()=>{sheetDedicaSetCustom(false);$('sheetDedicaMsg').value=p;updateDedicaPriceHint();};
     box.appendChild(b);
   });
 }
@@ -933,13 +953,15 @@ let _reqInFlight=false;
 async function doReq(payMethod){
   if(_reqInFlight)return;
   _reqInFlight=true;
-  // Capturar el mensaje ANTES de closeSheet(): ahora limpia el campo al cerrar (para que el
-  // sheet vuelva colapsado/vacío la próxima vez que se abra), así que leerlo después mandaría
-  // siempre vacío.
+  // Capturar el mensaje (y el código, si es texto libre) ANTES de closeSheet(): ahora limpia
+  // ambos campos al cerrar (para que el sheet vuelva colapsado/vacío la próxima vez que se
+  // abra), así que leerlos después mandaría siempre vacío.
   const sheetMsg=($('sheetDedicaMsg').value||'').trim().slice(0,80);
+  const sheetCode=($('sheetDedicaCode').value||'').trim();
   closeSheet();
   try{
     const body=Object.assign({},chosen,{priority:mode==='pri',super:mode==='super',token,message:sheetMsg||undefined});
+    if(sheetCode)body.dedica_code=sheetCode;
     if(payMethod)body.pay_method=payMethod;
     const r=await fetch('/api/request',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const j=await r.json();

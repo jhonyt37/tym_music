@@ -2341,6 +2341,21 @@ class H(BaseHTTPRequestHandler):
                 artist = str(d.get("artist") or "")[:120]
                 req_msg = (d.get("message") or "").strip()[:80]
                 now = time.time()
+                # Dedicatoria al pedir: mismo modelo anti-abuso que /api/dedica (mesa a mesa) —
+                # un mensaje predeterminado del bar (settings.dedica_presets) va directo, pero
+                # CUALQUIER otro texto (antes se podía editar libremente el campo aunque el
+                # cliente hubiera elegido un preset — bug reportado) necesita un código de un
+                # solo uso que el admin genera desde /admin. El código ES la moderación acá,
+                # igual que en /api/dedica — reemplaza el filtro heurístico para texto libre.
+                dedica_code_entry = None
+                if req_msg and req_msg not in STATE["settings"].get("dedica_presets", []):
+                    _code = str(d.get("dedica_code") or "").strip()
+                    dedica_code_entry = next((c for c in STATE.get("dedica_codes", [])
+                                              if c["code"] == _code and not c["used"]), None)
+                    if not dedica_code_entry:
+                        return self._send(400, {"error": "Ese mensaje no es uno de los predeterminados del bar. "
+                                                 "Pídele al mesero o al admin un código para enviarlo.",
+                                                 "needs_code": True})
                 # "Solo música" (settings.music_only): heurística de palabras clave + duración.
                 if STATE["settings"].get("music_only") and not is_music_content(title, artist, dur):
                     return self._send(400, {"error": "Esto no parece ser una canción — este local solo permite música 🎵",
@@ -2418,10 +2433,16 @@ class H(BaseHTTPRequestHandler):
                     charge_via, paid_amount, charge = via, charge, 0
                 if mode in ("salto", "single"):
                     record_priority_purchase(table, now)
-                # Moderación del mensaje (independiente de la moderación de dedicatorias mesa a
-                # mesa) — heurística de palabras clave; si lo marca, el mensaje NO se muestra en
-                # TV hasta que el admin lo apruebe (la canción sí suena normal mientras tanto).
-                if req_msg and STATE["settings"].get("song_message_moderation"):
+                # Punto de no retorno para el mensaje: recién acá se consume el código (si el
+                # mensaje era texto libre) — no antes, para no gastarlo si el pedido termina
+                # rechazado por otra razón (canción bloqueada, etc). Un código consumido
+                # reemplaza la moderación heurística, igual que en /api/dedica.
+                if dedica_code_entry:
+                    dedica_code_entry["used"] = True
+                    dedica_code_entry["used_at"] = now
+                    dedica_code_entry["used_by_table"] = table
+                    msg_status, _msg_reason = "approved", ""
+                elif req_msg and STATE["settings"].get("song_message_moderation"):
                     _msg_approved, _msg_reason = _moderate_message(req_msg)
                     msg_status = "approved" if _msg_approved else "pending"
                 else:
