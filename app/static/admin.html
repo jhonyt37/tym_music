@@ -6,6 +6,7 @@
 <title>TYM · Panel del dueño</title>
 <link rel="stylesheet" href="/style.css">
 <style>
+.btn.icon{width:34px;height:34px;padding:0;font-size:16px;flex:none;border-radius:10px}
 .pinrow{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .pinrow .name{flex:1;font-weight:600}
 .pinrow .pin{font-size:22px;font-weight:800;letter-spacing:3px;color:var(--gold)}
@@ -107,14 +108,42 @@
     <!-- Strip resumen de hoy -->
     <div id="todayStrip" class="kpis" style="margin-bottom:14px;display:none"></div>
 
-    <!-- Enfocar la cola/pendientes en una sola mesa. El dinero de cada mesa (cobros, cuánto
-         debe) vive en la pestaña Mesas — no hace falta duplicarlo aquí. -->
-    <div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-      <span class="small" style="color:var(--mut)">🔍 Enfocar mesa</span>
-      <select class="field" id="liveMesaFilter" style="margin:0;width:170px;padding:6px 8px" onchange="_liveMesaFilter=this.value;tick()">
-        <option value="">Todas las mesas</option>
-      </select>
-      <span class="small" id="liveMesaFilterHint" style="color:var(--mut)"></span>
+    <!-- Mesas activas ahora (con sesión reciente) vs. total de mesas configuradas del local.
+         Se actualiza en cada tick(), no depende de recargar la página. -->
+    <div class="card" style="margin-bottom:14px;display:flex;align-items:center;gap:16px">
+      <div style="text-align:center">
+        <div class="kpi" id="activeTablesNum" style="font-size:26px;color:var(--pri)">0</div>
+        <div class="small" style="color:var(--mut)">Mesas activas ahora</div>
+      </div>
+      <div style="font-size:20px;color:var(--mut);opacity:.5">/</div>
+      <div style="text-align:center">
+        <div class="kpi" id="totalTablesNum" style="font-size:26px">0</div>
+        <div class="small" style="color:var(--mut)">Mesas totales</div>
+      </div>
+    </div>
+
+    <!-- Qué mesas piden más música hoy, por plata y por cantidad de pedidos -->
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+        <p class="sec" style="margin:0">📊 Mesas: quién pide más hoy</p>
+        <div style="display:flex;gap:6px;margin-left:auto">
+          <button class="btn sm ghost active" onclick="setTableChartMetric('money')" id="tcm-money">💰 Por plata</button>
+          <button class="btn sm ghost" onclick="setTableChartMetric('count')" id="tcm-count">🎵 Por pedidos</button>
+        </div>
+      </div>
+      <div id="tableChart"><div class="empty">Sin pedidos registrados hoy.</div></div>
+    </div>
+
+    <!-- Atenúa (no oculta) la cola/pendientes de las demás mesas para revisar rápido si una
+         está pidiendo de más. El dinero (cobros, cuánto debe) vive en Caja/Mesas, no aquí. -->
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span class="small" style="color:var(--mut)">👁 Ver cola de una mesa</span>
+        <select class="field" id="liveMesaFilter" style="margin:0;width:170px;padding:6px 8px" onchange="_liveMesaFilter=this.value;tick()">
+          <option value="">Todas las mesas</option>
+        </select>
+      </div>
+      <div class="small" id="liveMesaFilterHint" style="color:var(--mut);margin-top:6px"></div>
     </div>
 
     <!-- Actividad activa ahora -->
@@ -712,7 +741,30 @@ let editing=false, formLoaded=false, curTimer=null, packages=[], pass_obj={minut
 let _liveMesaFilter='';
 let _cajaMesaFilter='';
 let _byTCache={},_acctsCache=[];
+let _tableChartData=[],_tableChartMetric='money';
 let VENUE_TZ='America/Bogota';
+function setTableChartMetric(m){
+  _tableChartMetric=m;
+  $('tcm-money').classList.toggle('active',m==='money');
+  $('tcm-count').classList.toggle('active',m==='count');
+  renderTableChart();
+}
+function renderTableChart(){
+  const box=$('tableChart');if(!box)return;
+  const rows=[..._tableChartData].sort((a,b)=>
+    _tableChartMetric==='money'?b.total-a.total:b.songs-a.songs);
+  if(!rows.length){box.innerHTML='<div class="empty">Sin pedidos registrados hoy.</div>';return;}
+  const vals=rows.map(t=>_tableChartMetric==='money'?t.total:t.songs);
+  const max=Math.max(1,...vals);
+  box.innerHTML='';
+  rows.forEach(t=>{
+    const val=_tableChartMetric==='money'?t.total:t.songs;
+    const lbl=_tableChartMetric==='money'?cop(t.total):t.songs+' pedido'+(t.songs!==1?'s':'');
+    const row=document.createElement('div');row.className='abar';
+    row.innerHTML=`<span class="lbl" style="width:70px;text-align:left">${esc(t.table)}</span><div class="fill" style="width:${Math.round(180*val/max)}px"></div><span class="small">${lbl}</span>`;
+    box.appendChild(row);
+  });
+}
 // El filtro "Enfocar mesa" de Caja también maneja el filtro de mesa de la sección Pedidos
 // (histTableFilter) para que toda la pestaña quede consistente con una sola selección.
 function syncCajaMesaFilter(){
@@ -1196,8 +1248,16 @@ async function tick(){
       }
       lmf.value=_liveMesaFilter;
       const hintEl=$('liveMesaFilterHint');
-      if(hintEl)hintEl.textContent=_liveMesaFilter?'Mostrando pendientes de '+_liveMesaFilter+' · la cola se atenúa para las demás':'';
+      if(hintEl)hintEl.textContent=_liveMesaFilter
+        ?'Resaltando pendientes y cola de '+_liveMesaFilter+' — las demás mesas se atenúan (no se ocultan) para que sigas viendo toda la cola.'
+        :'Elige una mesa para revisar rápido cuánto está pidiendo, sin perder de vista el resto de la cola. El dinero de cada mesa está en Caja/Mesas.';
     }
+
+    // Mesas activas ahora (con sesión en las últimas 2h, mismo cálculo que el umbral de
+    // skip-vote) vs. total de mesas configuradas — siempre en vivo, cada 2.5s.
+    const atEl=$('activeTablesNum'),ttEl=$('totalTablesNum');
+    if(atEl)atEl.textContent=s.active_sessions||0;
+    if(ttEl)ttEl.textContent=(s.tables||[]).length;
 
     // Enfocar mesa (Caja): repuebla el select con las mesas del local, preservando la
     // selección, y filtra cobros del turno + movimientos + cuentas recientes a esa mesa.
@@ -1357,10 +1417,10 @@ async function tick(){
         const exc=reptExc.has(h.yt);
         const hTs=h.played_at||h.ts;
         r.innerHTML=`<span class="drag-handle" style="opacity:.6">⠿</span><img class="mini" src="${img(h.yt)}"><div class="info"><div class="t">${esc(h.title)}</div><div class="a small">${esc(h.artist||'')}${hTs?' · '+hm3(hTs):''}</div></div>`;
-        const addBtn=document.createElement('button');addBtn.className='btn green sm';addBtn.textContent='+ Cola';addBtn.title='Agregar de nuevo a la cola';
+        const addBtn=document.createElement('button');addBtn.className='btn green icon';addBtn.textContent='➕';addBtn.title='Agregar de nuevo a la cola';
         addBtn.onclick=()=>adminAddSong(h.yt,h.title,h.artist,h.duration,null);
         r.appendChild(addBtn);
-        const rb=document.createElement('button');rb.className='btn sm';rb.style.background=exc?'var(--green)':'var(--bg2)';rb.style.border='1px solid var(--line)';rb.style.color=exc?'#fff':'var(--mut)';rb.textContent=exc?'🔁 Repetir OK':'🔁 Bloquear';rb.title='Permitir/bloquear repetición';
+        const rb=document.createElement('button');rb.className='btn icon';rb.style.background=exc?'var(--green)':'var(--bg2)';rb.style.border='1px solid var(--line)';rb.style.color=exc?'#fff':'var(--mut)';rb.textContent='🔁';rb.title=exc?'Repetición permitida — clic para bloquear':'Repetición bloqueada — clic para permitir';
         rb.onclick=async()=>{const j=await post('/api/admin/allow_repeat',{yt:h.yt});toast(j.allowed?'Repetición permitida':'Repetición bloqueada');tick();};
         r.appendChild(rb);
         r.addEventListener('dragstart',e=>{
@@ -1513,6 +1573,11 @@ async function loadAnalytics(days){
         tpbox.appendChild(r);
       });}
     }
+    // Gráfica "Mesas: quién pide más" en En vivo — mismos datos que tonight_per_table
+    // (canciones prioritarias de hoy), cacheados para poder redibujar solo con el toggle
+    // de métrica sin esperar al próximo fetch de analytics.
+    _tableChartData=d.tonight_per_table||[];
+    renderTableChart();
     // ---- Strip resumen de hoy en tab En vivo ----
     const strip=$('todayStrip');
     if(strip){
