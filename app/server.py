@@ -1938,6 +1938,26 @@ class H(BaseHTTPRequestHandler):
                 return self._send(429, {"error": "Demasiadas búsquedas. Espera un momento."})
             q = self._q("q")[:150]
             return self._send(200, yt_search(q))
+        if path == "/api/search_local":
+            # Fase 3 del modo catálogo local (ver plan federated-knitting-lagoon.md) — busca por
+            # texto sobre STATE["curated"] filtrado a entradas locales, sin llamar nunca a
+            # YouTube. Búsqueda vacía devuelve el catálogo completo (hasta el límite), para que
+            # la pantalla de "Pedir" tenga algo que mostrar por defecto en modo local (donde las
+            # recomendaciones basadas en YouTube no aplican).
+            ip = self.client_address[0]
+            if not _rate_ok(ip, "search"):
+                return self._send(429, {"error": "Demasiadas búsquedas. Espera un momento."})
+            q = self._q("q")[:150].strip().lower()
+            with LOCK:
+                self.set_venue(self.resolve_vid())
+                pool = [c for c in STATE["curated"] if is_local_id(c.get("yt"))]
+                if q:
+                    pool = [c for c in pool
+                            if q in (c["title"] + " " + (c.get("artist") or "")).lower()]
+                out = [{"yt": c["yt"], "title": c["title"], "artist": c.get("artist", ""),
+                        "duration": c.get("duration") or DEFAULT_DUR,
+                        "media_type": c.get("media_type")} for c in pool[:40]]
+            return self._send(200, out)
         if path == "/api/genre":
             ip = self.client_address[0]
             if not _rate_ok(ip, "search"):

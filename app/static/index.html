@@ -598,6 +598,8 @@ let _npState=null;
 let _queueYts=new Set();
 const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
+const isLocalId=yt=>typeof yt==='string'&&yt.startsWith('local:');
+let CONTENT_MODE='youtube', _defaultViewMode=null;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const mm=s=>{s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -707,7 +709,13 @@ function changeTable(){
 // ---------- Recomendadas ----------
 const RECO_TABS=[['mas_pedido','Más pedido aquí'],['del_local','Del local'],['populares','Populares'],['genero','Por género']];
 async function loadReco(){
+  // Recomendadas son 100% YouTube (req_counts/yt_search/CATALOG) — no aplican en modo catálogo
+  // local. Sin este guard, esta llamada (disparada una vez al cargar la página) podía resolver
+  // DESPUÉS de que poll() ya hubiera puesto la vista local correcta, y pisarla de nuevo con
+  // recomendadas de YouTube.
+  if(CONTENT_MODE==='local')return;
   try{reco=await (await fetch('/api/recommendations?v='+encodeURIComponent(VENUE))).json();}catch(e){reco={};}
+  if(CONTENT_MODE==='local')return;
   renderChips(); if(!$('q').value.trim()) renderReco();
 }
 function renderChips(){
@@ -727,6 +735,14 @@ function renderReco(){
 const YT_RE=/youtu\.?be|youtube\.com\/(watch|shorts|embed)/i;
 function onSearch(term){
   clearTimeout(searchTimer);
+  // Modo catálogo local: nada de YouTube — ni buscador de link, ni recomendadas basadas en
+  // YouTube (Más pedido/Populares/Por género). Una búsqueda vacía lista el catálogo completo
+  // del bar en vez de las tarjetas de recomendación (que no aplican en este modo).
+  if(CONTENT_MODE==='local'){
+    $('recoChips').style.display='none';
+    searchLocalCatalog(term.trim());
+    return;
+  }
   if(!term.trim()){
     $('recoChips').style.display='flex';renderReco();return;
   }
@@ -740,10 +756,24 @@ function onSearch(term){
     }catch(e){$('results').innerHTML='<div class="empty">No se pudo buscar. Intenta de nuevo.</div>';}
   },350);
 }
+function searchLocalCatalog(term){
+  $('results').innerHTML='<div class="empty">Buscando…</div>';
+  lastTerm=term;
+  searchTimer=setTimeout(async()=>{
+    try{const list=await (await fetch('/api/search_local?v='+encodeURIComponent(VENUE)+'&q='+encodeURIComponent(term))).json();
+      if(term!==lastTerm)return; renderResults(list);
+    }catch(e){$('results').innerHTML='<div class="empty">No se pudo buscar. Intenta de nuevo.</div>';}
+  },350);
+}
 function renderResults(list, max=12){
   lastList=list;lastMax=max;
   const res=$('results');res.innerHTML='';
-  if(!list||!list.length){res.innerHTML='<div class="empty">Sin resultados. Prueba otro nombre o pega un link de YouTube.</div>';return;}
+  if(!list||!list.length){
+    res.innerHTML=CONTENT_MODE==='local'
+      ?'<div class="empty">El bar todavía no cargó su catálogo — pídele al mesero.</div>'
+      :'<div class="empty">Sin resultados. Prueba otro nombre o pega un link de YouTube.</div>';
+    return;
+  }
   list.slice(0,max).forEach(s=>{
     const r=document.createElement('div');r.className='row tappable';
     if(s._link){
@@ -752,7 +782,10 @@ function renderResults(list, max=12){
     }else{
       const sub=[s.artist,s.length].filter(Boolean).join(' · ');
       const inQ=_queueYts.has(s.yt);
-      r.innerHTML=`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(s.title,s.artist))}</div><div class="a">${esc(sub)}</div></div>${inQ?'<span class="chip-queue">En cola</span>':'<div class="btn sm" style="pointer-events:none">Pedir</div>'}`;
+      const thumb=isLocalId(s.yt)
+        ?`<div class="mini" style="display:flex;align-items:center;justify-content:center;font-size:20px">${s.media_type==='video'?'🎬':'🎵'}</div>`
+        :`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null">`;
+      r.innerHTML=`${thumb}<div class="info"><div class="t">${esc(stripDuplicateArtist(s.title,s.artist))}</div><div class="a">${esc(sub)}</div></div>${inQ?'<span class="chip-queue">En cola</span>':'<div class="btn sm" style="pointer-events:none">Pedir</div>'}`;
       r.onclick=()=>openSheet(s);
     }
     res.appendChild(r);
@@ -838,7 +871,9 @@ async function loadSimilar(artists,genres,recentTitles){
 
 // ---------- Pedir ----------
 function openSheet(s){
-  chosen={yt:s.yt,title:s.title,artist:s.artist||'',length:s.length||''};mode='normal';
+  // duration (segundos) viaja además de length (string "M:SS") — el catálogo local manda
+  // duration pero no length; /api/request acepta cualquiera de los dos.
+  chosen={yt:s.yt,title:s.title,artist:s.artist||'',length:s.length||'',duration:s.duration||undefined};mode='normal';
   $('sTitle').textContent=s.title;$('sArtist').textContent=s.artist||'';
   $('optNormal').classList.add('sel');$('optPri').classList.remove('sel');$('optSuper').classList.remove('sel');
   updatePriOption();toggleSheetDedica(false);$('confirmBtn').textContent='Pedir canción';$('confirmBtn').classList.remove('gold');
@@ -1825,6 +1860,17 @@ async function poll(){
     jumpAvail=!!s.jump_available;jumpPrice=(s.jump_price_now!=null?s.jump_price_now:(s.jump_price||0));price_queue_min=s.priority_queue_min||0;jumpReason=s.jump_unavailable_reason||'';
     priorityAbuseMult=s.priority_abuse_mult_now||1;priorityAbuseResetAt=s.priority_abuse_reset_at||0;
     allowSelfReact=!!s.settings.allow_self_react;
+    CONTENT_MODE=s.settings.content_mode||'youtube';
+    // La vista por defecto (búsqueda vacía) depende del modo — se decide en loadReco()/onSearch
+    // al cargar la página, PERO CONTENT_MODE recién se conoce después del primer poll (carrera
+    // posible: el venue es "local" pero el primer render ya mostró recomendadas de YouTube).
+    // Esto corrige la vista apenas se sabe el modo real, y también si el admin lo cambia en vivo
+    // mientras el cliente tiene la búsqueda vacía.
+    if(!$('q').value.trim() && _defaultViewMode!==CONTENT_MODE){
+      _defaultViewMode=CONTENT_MODE;
+      if(CONTENT_MODE==='local'){$('recoChips').style.display='none';searchLocalCatalog('');}
+      else{$('recoChips').style.display='flex';renderReco();}
+    }
     // Si el sheet de pedir está abierto, refresca el precio/cuenta regresiva del multiplicador
     // en vivo (poll corre cada 2s) en vez de dejarlos congelados desde que se abrió el sheet.
     if($('sheet').classList.contains('open'))updatePriOption();
