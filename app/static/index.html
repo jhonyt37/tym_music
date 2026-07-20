@@ -1819,9 +1819,11 @@ async function poll(){
     // Banner "tu canción es la siguiente"
     $('myNextBanner').style.display=(s.my_pos===1)?'flex':'none';
 
-    // Skip democrático
+    // Skip democrático — aplica a la lista del local y a canciones gratis, nunca a una
+    // pagada (el servidor también lo bloquea en /api/skip_vote; esto solo evita mostrar
+    // un botón que va a fallar).
     const skipEl=$('skipBtn');
-    if(s.settings&&s.settings.allow_skip_vote&&np&&!np.fallback){
+    if(s.settings&&s.settings.allow_skip_vote&&np&&!np.paid){
       skipEl.style.display='';
       const cnt=s.skip_votes_count||0, thr=s.skip_threshold||2;
       skipEl.textContent=s.my_skip_vote?`⏭ Voté saltar (${cnt}/${thr}) — quitar voto`:`⏭ Votar saltar esta canción (${cnt}/${thr})`;

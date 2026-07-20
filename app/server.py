@@ -520,6 +520,28 @@ def wallet_spend(customer, amount, kind, title):
     hist.insert(0, {"title": title, "amount": -amount, "kind": kind, "ts": time.time(), "type": "spend"})
     customer["wallet_history"] = hist[:20]
 
+def refund_song_charge(item):
+    """El admin saltó a mano una canción PAGADA (prioridad/salto al #1) que no alcanzó el
+    80% de su duración — se le devuelve el dinero al cliente, cubriendo los 2 caminos de
+    cobro posibles: saldo prepago (ya se descontó al pedir el impulso, vía try_charge_prepaid)
+    o cuenta de mesa (se cobra recién al sonar, vía log_charge en promote_next)."""
+    paid_amount = item.get("paid_amount", 0)
+    if item.get("charge_via") in ("wallet", "direct") and paid_amount > 0:
+        sess = get_session(item.get("token"))
+        customer = get_customer(sess) if sess else None
+        if customer:
+            customer["balance"] = customer.get("balance", 0) + paid_amount
+            hist = customer.setdefault("wallet_history", [])
+            hist.insert(0, {"title": item.get("title", ""), "amount": paid_amount,
+                            "kind": "reembolso — el bar saltó la canción", "ts": time.time(), "type": "refund"})
+            customer["wallet_history"] = hist[:20]
+    elif item.get("charged") and item.get("charge_on_play", 0) > 0:
+        STATE["ledger"].append({"table": item.get("charge_table") or item.get("table", ""),
+                                 "title": item.get("title", ""), "amount": -item["charge_on_play"],
+                                 "kind": "reembolso — el bar saltó la canción", "ts": time.time()})
+    item["refunded"] = True
+    _redis_last_save[0] = 0
+
 def try_charge_prepaid(sess, amount, kind, title, pay_method, min_direct_pay):
     """Unico punto de gateo para buy/request/boost/jump en modo prepago.
     Devuelve (ok, via, error_dict); no muta nada si ok=False."""
@@ -1126,6 +1148,15 @@ def promote_next(manual=False):
         elif manual or old.get("played_enough") or old.get("requeue_count", 0) >= 2:
             # Sonó suficiente, admin la saltó, o ya re-encolamos 2 veces: finalizar
             old["play_status"] = "skipped" if (manual and not old.get("played_enough")) else "played"
+            # Salto manual de una canción PAGADA que no llegó al 80% de su duración: se
+            # reembolsa — el cliente no paga por algo que el bar decidió cortar. El skip por
+            # votación NUNCA llega hasta acá con una canción pagada (se bloquea antes, en
+            # /api/skip_vote), así que esto solo puede dispararse desde el botón ⏭ del admin.
+            was_paid = old.get("charge_on_play", 0) > 0 or old.get("paid_amount", 0) > 0
+            if manual and was_paid and not old.get("refunded"):
+                dur = old.get("duration") or DEFAULT_DUR
+                if dur > 0 and (old.get("position", 0) / dur) < 0.8:
+                    refund_song_charge(old)
             STATE["history"].insert(0, old); STATE["history"] = STATE["history"][:30]
         else:
             # No sonó suficiente (< 50%) y no fue salto manual: re-encolar
@@ -1378,6 +1409,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         np_pub = {"id": np["id"], "title": _clean_title_display(np["title"]), "artist": np.get("artist", ""), "yt": np["yt"],
                   "table": np.get("table", ""), "priority": np.get("priority", False),
                   "fallback": np.get("fallback", False),
+                  "paid": np.get("charge_on_play", 0) > 0 or np.get("paid_amount", 0) > 0,
                   "duration": np.get("duration", DEFAULT_DUR), "position": np.get("position", 0),
                   "learned_end": STATE["learned_end"].get(np["yt"]),
                   "message": (np.get("message") or "") if np.get("message_status", "approved") == "approved" else "",
@@ -3078,8 +3110,12 @@ class H(BaseHTTPRequestHandler):
                 if not STATE["settings"].get("allow_skip_vote"):
                     return self._send(400, {"error": "El skip por votación no está activado en este local."})
                 np_sv = STATE.get("now_playing")
-                if not np_sv or np_sv.get("fallback"):
-                    return self._send(400, {"error": "No hay canción de cliente sonando ahora."})
+                if not np_sv:
+                    return self._send(400, {"error": "No hay ninguna canción sonando ahora."})
+                # Aplica a la lista del local y a las canciones gratis — nunca a una pagada
+                # (prioridad o salto al #1): sería injusto para quien pagó por sonar.
+                if np_sv.get("charge_on_play", 0) > 0 or np_sv.get("paid_amount", 0) > 0:
+                    return self._send(400, {"error": "Esta canción fue pagada — el skip por votación no aplica a canciones pagadas."})
                 sess_sv = get_session(d.get("token"))
                 if not sess_sv:
                     return self._send(400, {"error": "Ingresa el código de tu mesa primero."})

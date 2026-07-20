@@ -879,8 +879,19 @@ function toast(t,type,ms,onClick){
 async function approve(id){await post('/api/admin/approve',{id});tick();}
 async function reject(id){await post('/api/admin/reject',{id});tick();}
 async function remove(id){await post('/api/admin/remove',{id});tick();}
-async function skip(){
-  if(!confirm('¿Saltar esta canción? Pasa a la siguiente en la cola (o a la lista del local si está vacía).'))return;
+async function skip(np){
+  // Si la canción actual fue pagada (prioridad o salto al #1), se avisa explícitamente
+  // antes de saltarla — el dueño debe estar seguro de lo que va a hacer. Si no llegó al 80%
+  // de su duración, el servidor la reembolsa sola (ver refund_song_charge en server.py); si
+  // ya pasó el 80%, no se reembolsa (el cliente ya recibió casi toda la canción).
+  let msg='¿Saltar esta canción? Pasa a la siguiente en la cola (o a la lista del local si está vacía).';
+  if(np&&np.paid){
+    const pct=Math.round(100*(np.position||0)/(np.duration||1));
+    msg='⚠️ Esta canción fue PAGADA por '+(np.table||'un cliente')+' (lleva '+pct+'% sonada).\n\n'
+       +(pct<80?'Se le reembolsará automáticamente porque no llegó al 80%.':'No se reembolsa: ya pasó el 80% de la canción.')
+       +'\n\n¿Seguro que quieres saltarla?';
+  }
+  if(!confirm(msg))return;
   // manual:true es obligatorio: sin esto el servidor trata el salto como "¿sonó lo
   // suficiente?" (heurística pensada para el auto-recovery, no para un salto deliberado del
   // dueño) y RE-ENCOLA la misma canción si no llegó al 50% — el botón parecía no hacer nada y
@@ -1411,7 +1422,7 @@ async function tick(){
       if(_liveMesaFilter&&np.table!==_liveMesaFilter)r.style.opacity='.35';
       const npTs=np.played_at||np.ts;
       r.innerHTML=`<span class="pulse"></span><img class="mini" src="${img(np.yt)}"><div class="info"><div class="t">${esc(np.title)}</div><div class="a">${np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table))}${npTs?' · sonando desde '+hm3(npTs):''}</div></div>`;
-      const sk=document.createElement('button');sk.className='btn ghost sm';sk.textContent='⏭';sk.onclick=skip;r.appendChild(sk);Q.appendChild(r);
+      const sk=document.createElement('button');sk.className='btn ghost sm';sk.textContent='⏭';sk.onclick=()=>skip(np);r.appendChild(sk);Q.appendChild(r);
     }
     const q=s.queue||[];
     _qSnapshot=q.map(x=>x.id);
