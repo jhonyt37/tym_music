@@ -507,7 +507,7 @@ body{padding-bottom:80px}
     <h3>¿Cómo usar TYM Music? 🎵</h3>
     <div style="display:flex;flex-direction:column;gap:14px;margin-top:14px">
       <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:26px;flex-none">🔎</span><div><b>Pedir</b><div class="small" style="margin-top:3px">Busca tu canción o artista y pídela. Aparece en la cola del bar.</div></div></div>
-      <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:26px;flex-none">▶️</span><div><b>Ahora</b><div class="small" style="margin-top:3px">Ve qué suena y qué viene en cola. Toca la miniatura para ver el detalle. Reacciona con ❤️🔥👍 e impulsa canciones.</div></div></div>
+      <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:26px;flex-none">▶️</span><div><b>Ahora</b><div class="small" style="margin-top:3px">Ve qué suena y qué viene en cola. Toca la miniatura para ver el detalle. Reacciona con ❤️🔥👍💃🎉 e impulsa canciones.</div></div></div>
       <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:26px;flex-none">❤️</span><div><b>Social</b><div class="small" style="margin-top:3px">Las más queridas y pedidas de la noche. Mira qué le gustó a todos y tus propias reacciones.</div></div></div>
       <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:26px;flex-none">⚡</span><div><b>Prioridad</b><div class="small" style="margin-top:3px">Haz que tu canción suene antes comprando prioridad. Se suma a la cuenta de tu mesa.</div></div></div>
       <div style="display:flex;gap:12px;align-items:flex-start"><span style="font-size:26px;flex-none">🔔</span><div><b>Campana flotante</b><div class="small" style="margin-top:3px">Toca para llamar al personal. Toca de nuevo para avisar (zumbido). Mantén presionada para cancelar.</div></div></div>
@@ -1541,7 +1541,7 @@ function updateLikePubBtn(){
   btn.style.borderColor=_likePub?'var(--pri)':'var(--line)';
 }
 
-const EMOJIS=['❤️','🔥','👍'];
+const EMOJIS=['❤️','🔥','👍','💃','🎉'];
 function reactHtml(it){
   if(!it||it.id==null)return '';
   return EMOJIS.map(e=>{
@@ -1875,15 +1875,24 @@ async function poll(){
     $('myNextBanner').style.display=(s.my_pos===1)?'flex':'none';
 
     // Skip democrático — aplica a la lista del local y a canciones gratis, nunca a una
-    // pagada (el servidor también lo bloquea en /api/skip_vote; esto solo evita mostrar
-    // un botón que va a fallar).
+    // pagada. Antes el botón simplemente desaparecía en una canción pagada — el cliente no
+    // tenía forma de saber POR QUÉ no podía votar saltar. Ahora se queda visible mostrando
+    // el motivo, deshabilitado (el servidor igual lo bloquea en /api/skip_vote, esto es solo
+    // para que el cliente entienda sin tener que adivinar).
     const skipEl=$('skipBtn');
-    if(s.settings&&s.settings.allow_skip_vote&&np&&!np.paid){
+    if(s.settings&&s.settings.allow_skip_vote&&np){
       skipEl.style.display='';
-      const cnt=s.skip_votes_count||0, thr=s.skip_threshold||2;
-      skipEl.textContent=s.my_skip_vote?`⏭ Voté saltar (${cnt}/${thr}) — quitar voto`:`⏭ Votar saltar esta canción (${cnt}/${thr})`;
-      skipEl.className='skip-btn'+(s.my_skip_vote?' voted':'');
-    }else{skipEl.style.display='none';}
+      if(np.paid){
+        skipEl.textContent='🔒 No se puede saltar — esta canción fue pagada';
+        skipEl.className='skip-btn';
+        skipEl.disabled=true;
+      }else{
+        const cnt=s.skip_votes_count||0, thr=s.skip_threshold||2;
+        skipEl.textContent=s.my_skip_vote?`⏭ Voté saltar (${cnt}/${thr}) — quitar voto`:`⏭ Votar saltar esta canción (${cnt}/${thr})`;
+        skipEl.className='skip-btn'+(s.my_skip_vote?' voted':'');
+        skipEl.disabled=false;
+      }
+    }else{skipEl.style.display='none';skipEl.disabled=false;}
 
     // Reacciones + social
     $('nowReacts').innerHTML = np ? reactHtml(np) : '';

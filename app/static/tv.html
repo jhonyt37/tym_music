@@ -69,6 +69,17 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #dedicaBox .dedica-msg{font-size:38px;font-weight:800;color:#fff;text-shadow:0 2px 14px rgba(0,0,0,.9);line-height:1.2}
 #dedicaBox .dedica-to{font-size:20px;color:var(--gold);font-weight:700;margin-top:8px}
 
+/* Celebración: una canción entró al Top de Hoy — lluvia de reacciones cayendo + tarjeta */
+.rain-emoji{position:fixed;top:-80px;z-index:52;pointer-events:none;will-change:transform,opacity;
+  animation:rainFall linear forwards;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}
+@keyframes rainFall{0%{transform:translateY(0) rotate(0deg);opacity:0}8%{opacity:1}88%{opacity:1}100%{transform:translateY(112vh) rotate(340deg);opacity:0}}
+#lovedCelebration{position:fixed;inset:0;z-index:51;display:none;align-items:center;justify-content:center;pointer-events:none}
+#lovedCelebration .box{background:rgba(10,14,22,.9);border:3px solid #ff5a7a;border-radius:28px;
+  padding:38px 56px;text-align:center;backdrop-filter:blur(10px);box-shadow:0 0 70px rgba(255,90,122,.55);
+  animation:dedicaIn .5s cubic-bezier(.34,1.56,.64,1), dedicaHeartbeat 1.1s ease-in-out .5s infinite}
+#lovedCelebration .title{font-size:40px;font-weight:900;color:#ff5a7a;text-shadow:0 2px 14px rgba(0,0,0,.85)}
+#lovedCelebration .sub{font-size:24px;font-weight:700;color:#fff;margin-top:10px}
+
 /* Mensaje de canción (dedicatoria inline al pedir) */
 #songMsg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:19;padding:30px}
 #songMsgText{font-size:54px;font-weight:800;color:#fff;text-shadow:0 3px 18px rgba(0,0,0,.95);text-align:center;opacity:0;max-width:80%}
@@ -326,6 +337,14 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   </div>
 </div>
 
+<!-- Celebración: canción que entró al Top de Hoy -->
+<div id="lovedCelebration">
+  <div class="box">
+    <div class="title">🎉 ¡Entró al Top de Hoy! 🎉</div>
+    <div class="sub" id="lovedCelebrationSub"></div>
+  </div>
+</div>
+
 <!-- Mensaje de canción (dedicatoria inline) -->
 <div id="songMsg"><div id="songMsgText"></div></div>
 
@@ -500,7 +519,7 @@ async function forgotPassword(){
   if(ready)tick();
 })();
 
-const EMO=['❤️','🔥','👍'];
+const EMO=['❤️','🔥','👍','💃','🎉'];
 function spawnReact(emoji,table){
   const s=document.createElement('div');s.className='fxe';
   s.style.left=(6+Math.random()*64)+'%';
@@ -509,6 +528,28 @@ function spawnReact(emoji,table){
   if(table){s.innerHTML='<div>'+emoji+'</div><div style="font-size:13px;font-weight:800;text-align:center;color:#fff;text-shadow:0 1px 5px rgba(0,0,0,.9);margin-top:-4px">'+esc(table)+'</div>';}
   else s.textContent=emoji;
   document.getElementById('fx').appendChild(s);setTimeout(()=>s.remove(),4300);
+}
+
+// ---- Celebración: canción que entró al Top de Hoy ----
+const RAIN_EMOJIS=['❤️','🔥','👍','💃','🎉'];
+function spawnRainDrop(){
+  const s=document.createElement('div');s.className='rain-emoji';
+  s.textContent=RAIN_EMOJIS[Math.floor(Math.random()*RAIN_EMOJIS.length)];
+  s.style.left=(Math.random()*94)+'%';
+  s.style.fontSize=(30+Math.random()*30)+'px';
+  const dur=3+Math.random()*2.2;
+  s.style.animationDuration=dur+'s';
+  document.body.appendChild(s);
+  setTimeout(()=>s.remove(),dur*1000+300);
+}
+let _lastLovedCelebrationTs=0,_rainTimer=null;
+function showLovedCelebration(c){
+  $('lovedCelebrationSub').textContent=(c.title||'')+(c.artist?' · '+c.artist:'');
+  $('lovedCelebration').style.display='flex';
+  clearInterval(_rainTimer);
+  let n=0;
+  _rainTimer=setInterval(()=>{spawnRainDrop();n++;if(n>=45){clearInterval(_rainTimer);_rainTimer=null;}},110);
+  setTimeout(()=>{$('lovedCelebration').style.display='none';},6500);
 }
 
 // ---- Dedicatoria overlay ----
@@ -1035,7 +1076,21 @@ setInterval(async()=>{
       lastReactTotal=tot;
       if(s.now_playing.id!==lastReactId){lastReactId=s.now_playing.id;_lastReactTs=0;}
       const newReacts=(s.now_playing.recent_reacts||[]).filter(rx=>rx.ts>_lastReactTs);
-      if(newReacts.length){newReacts.sort((a,b)=>a.ts-b.ts).forEach((rx,i)=>setTimeout(()=>spawnReact(rx.emoji,rx.table||null),i*200));_lastReactTs=Math.max(...newReacts.map(rx=>rx.ts));}
+      if(newReacts.length){
+        newReacts.sort((a,b)=>a.ts-b.ts).forEach((rx,i)=>setTimeout(()=>spawnReact(rx.emoji,rx.table||null),i*200));
+        _lastReactTs=Math.max(...newReacts.map(rx=>rx.ts));
+        // Antes el conteo de reacciones (#reactPanel) solo aparecía en su ventana fija del
+        // ciclo de 90s (11s de cada 90) — si nadie miraba la TV justo en ese momento, una
+        // reacción real podía quedar sin verse nunca en pantalla. Ahora, además del ciclo,
+        // una reacción NUEVA de verdad la muestra al toque.
+        burst($('reactPanel'),11000);
+      }
+    }
+    // Celebración: una canción acumuló suficientes reacciones hoy y entró al Top — el
+    // servidor manda esto una sola vez por canción (ts nuevo cada vez que se dispara).
+    if(s.loved_celebration&&s.loved_celebration.ts>_lastLovedCelebrationTs){
+      _lastLovedCelebrationTs=s.loved_celebration.ts;
+      showLovedCelebration(s.loved_celebration);
     }
     topLoved=s.top_loved||[];
     $('lovedItems').innerHTML=topLoved.slice(0,5).map((it,i)=>`<div class="it">${i+1}. ${esc(it.title)}<span class="love">❤️ ${it.total}</span></div>`).join('');

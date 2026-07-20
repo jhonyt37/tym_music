@@ -46,6 +46,7 @@ header.bar{
 /* ---- Botón skip vote ---- */
 .skip-btn{width:100%;margin-top:12px;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--bg2);color:var(--mut);font-size:13px;font-weight:700;cursor:pointer;touch-action:manipulation;transition:background .15s,color .15s,border-color .15s}
 .skip-btn.voted{border-color:var(--red);color:var(--red);background:rgba(239,68,68,.1)}
+.skip-btn:disabled{opacity:.55;cursor:not-allowed}
 .prog{height:8px;background:#2a3550;border-radius:4px;overflow:hidden;margin-top:12px}
 .prog-fill{height:100%;background:var(--pri);width:0%;transition:width .45s linear}
 .pulse{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--green);

@@ -37,7 +37,8 @@ REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY   = "tym_state"
 DEFAULT_DUR = 210  # 3:30 si no se conoce la duracion
 TV_OWNER_TIMEOUT = 8  # seg sin ping del dueño actual de la TV -> se libera (4x el intervalo de ping de 2s)
-EMOJIS = ["❤️", "🔥", "👍"]  # reacciones positivas
+EMOJIS = ["❤️", "🔥", "👍", "💃", "🎉"]  # reacciones positivas
+LOVED_CELEBRATION_THRESHOLD = 5  # reacciones acumuladas (todos los emojis) para "entró al top de hoy"
 VIBES = ["🔥 Que todo el mundo cante", "💃 Más baile", "🎸 Más suave", "✨ Así está perfecto"]
 BIS_THRESHOLD = 3
 
@@ -120,6 +121,17 @@ def remove_solid_bg(data_uri):
     DENTRO del logo, solo lo que es alcanzable desde afuera). Si la imagen ya tiene
     transparencia real, o el borde no es uniforme (foto, degradado, diseño sin fondo
     sólido), el color de fondo se deja intacto — "en caso de que aplique", nunca a ciegas.
+    (3) Limpia el halo de anti-aliasing: el borde del dibujo original está mezclado con el
+    fondo (para que se vea suave), así que tras el flood-fill queda un anillo delgado de
+    píxeles OPACOS con un color intermedio — se ve como un contorno claro alrededor del logo
+    en pantallas oscuras. Segunda pasada: cualquier píxel opaco pegado a uno recién vuelto
+    transparente, si su color todavía se parece bastante al fondo (tolerancia más ancha),
+    también se vuelve transparente.
+    (4) Recorta al rectángulo real del contenido (bbox de los píxeles no transparentes) — sin
+    esto, el margen vacío que dejó el fondo removido queda guardado como si fuera parte del
+    logo, y en pantalla (limitado por altura, ej. 56px) el dibujo real ocupa solo una fracción
+    chica de esa altura porque el resto es aire transparente. Bug reportado en vivo: un logo
+    real con bastante margen blanco se veía diminuto en TV y cliente pese a procesarse bien.
     """
     try:
         from PIL import Image
@@ -152,6 +164,7 @@ def remove_solid_bg(data_uri):
                 TOL = 40
                 from collections import deque
                 seen = bytearray(w * h)
+                made_transparent = bytearray(w * h)
                 q = deque()
                 for x in range(w):
                     q.append((x, 0)); q.append((x, h - 1))
@@ -169,7 +182,29 @@ def remove_solid_bg(data_uri):
                     if dist((r, g, b), base) > TOL:
                         continue
                     px[x, y] = (r, g, b, 0)
+                    made_transparent[idx] = 1
                     q.append((x - 1, y)); q.append((x + 1, y)); q.append((x, y - 1)); q.append((x, y + 1))
+                TOL2 = TOL * 2.2
+                for y in range(h):
+                    for x in range(w):
+                        idx = y * w + x
+                        if made_transparent[idx]:
+                            continue
+                        r, g, b, a = px[x, y]
+                        if a == 0:
+                            continue
+                        near_transparent = False
+                        for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                            if 0 <= nx < w and 0 <= ny < h and made_transparent[ny * w + nx]:
+                                near_transparent = True
+                                break
+                        if near_transparent and dist((r, g, b), base) <= TOL2:
+                            px[x, y] = (r, g, b, 0)
+        bbox = im.getbbox()
+        if bbox and bbox != (0, 0, w, h):
+            pad = 4
+            l, t, r2, b2 = bbox
+            im = im.crop((max(0, l - pad), max(0, t - pad), min(w, r2 + pad), min(h, b2 + pad)))
         buf = io.BytesIO()
         im.save(buf, "PNG")
         return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
@@ -462,6 +497,11 @@ def make_venue(name):
         "announcements": [],       # [{id, text, color, created_at, active}]
         "vibe_votes": {},          # {emoji: set(tokens)} — votos de vibe
         "skip_votes": set(),       # set de tokens que votaron para saltar la canción actual
+        "celebrated_loved": set(),      # yt IDs ya celebrados hoy (entrada al top de "lo más querido") —
+                                         # en memoria nomás, no se persiste: perderlo en un redeploy solo
+                                         # significa que una canción se puede volver a celebrar una vez, sin costo real
+        "loved_celebration": None,      # {"yt","title","artist","total","ts"} — última celebración, la TV
+                                         # se guía por el "ts" para no repetir la animación en cada poll
         "_id": 0, "_fb": 0,
     }
 
@@ -1638,6 +1678,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         "my_wait_secs": my_wait,
         "history": history,
         "top_loved": top_loved,
+        "loved_celebration": STATE.get("loved_celebration"),
         "top_requested": top_requested,
         "top_tables": top_tables,
         "dedica_pending": dedica_pending,
@@ -2405,6 +2446,24 @@ class H(BaseHTTPRequestHandler):
                     log.append({"emoji": emoji, "table": sess["table"] if pub else None,
                                 "ts": now_ts, "item_id": item_id})
                     STATE["react_log"] = [e for e in log if now_ts - e["ts"] < 60]
+                    # Celebración "entró al top de hoy": si esta reacción hace que el total
+                    # acumulado de la canción (sumado entre todas sus veces sonada hoy —
+                    # now_playing+cola+historial, igual que el ranking "Lo más querido") cruce
+                    # el umbral por primera vez, se dispara la animación en el TV. Una sola vez
+                    # por canción por noche (celebrated_loved).
+                    if _react_item and _react_item["yt"] not in STATE["celebrated_loved"]:
+                        yt = _react_item["yt"]
+                        yt_total = sum(
+                            react_counts(it["id"])[2]
+                            for it in (([_np_r] if _np_r else []) + STATE["items"] + STATE["history"])
+                            if it["yt"] == yt
+                        )
+                        if yt_total >= LOVED_CELEBRATION_THRESHOLD:
+                            STATE["celebrated_loved"].add(yt)
+                            STATE["loved_celebration"] = {
+                                "yt": yt, "title": _clean_title_display(_react_item["title"]),
+                                "artist": _react_item.get("artist", ""), "total": yt_total, "ts": now_ts,
+                            }
                 counts, mine, total = react_counts(item_id, tok)
                 return self._send(200, {"ok": True, "reactions": counts, "my_reacts": mine, "react_total": total})
 
@@ -2995,6 +3054,8 @@ class H(BaseHTTPRequestHandler):
                 STATE["vibe_votes"] = {}
                 STATE["skip_votes"] = set()
                 STATE["priority_abuse"] = {}
+                STATE["celebrated_loved"] = set()
+                STATE["loved_celebration"] = None
                 _id[0] = 0
                 FB_IDX[0] = 0
                 return self._send(200, {"ok": True})
@@ -3412,15 +3473,6 @@ def venue_snapshot(v):
         snap["duelo"] = None
     return snap
 
-def _redis_strip_logos(data):
-    """Copia del estado sin logos base64 (pueden ser muy pesados para Redis free)."""
-    import copy
-    d = copy.deepcopy(data)
-    d.get("tym", {}).pop("tym_logo", None)
-    for v in d.get("venues", {}).values():
-        v.get("settings", {}).pop("venue_logo", None)
-    return d
-
 def redis_save(data):
     """Guarda en Upstash Redis vía REST API (sin dependencias extra)."""
     if not REDIS_URL or not REDIS_TOKEN:
@@ -3462,11 +3514,17 @@ def save_state():
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         os.replace(tmp, DATA_FILE)
-        # Backup a Redis: máx una vez por minuto, en hilo separado para no bloquear
+        # Backup a Redis: máx una vez por minuto, en hilo separado para no bloquear.
+        # Los logos (venue_logo/tym_logo) SÍ viajan en este backup — antes se excluían por
+        # miedo a que fueran muy pesados para el free tier de Redis, pero desde que
+        # remove_solid_bg() recorta y redimensiona (ver más arriba) un logo real pesa unos
+        # 50-150KB, no varios MB — dejar el logo afuera del backup significa que un redeploy
+        # de Render (disco efímero, sin data.json local) lo perdía y el admin tenía que
+        # volver a subirlo cada vez.
         now = time.time()
         if REDIS_URL and REDIS_TOKEN and now - _redis_last_save[0] > 60:
             _redis_last_save[0] = now
-            threading.Thread(target=redis_save, args=(_redis_strip_logos(data),), daemon=True).start()
+            threading.Thread(target=redis_save, args=(data,), daemon=True).start()
     except Exception as e:
         print("save_state error:", e)
 
