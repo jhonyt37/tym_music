@@ -466,6 +466,8 @@ def make_venue(name):
             "show_tym_brand": False,   # mostrar el logo/texto "TYM Music" en /tv (off por defecto, tema legal)
             "content_mode": "youtube",  # "youtube" (buscador/catálogo ilimitado, hoy) | "local" (catálogo propio
                                          # del bar, archivos que TYM nunca aloja — ver plan federated-knitting-lagoon)
+            "allow_self_react": False,  # ON: dejar que quien pidió una canción reaccione a la suya propia
+                                         # (bloqueado por defecto — ver /api/react)
         },
         "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4, "extra_pins": []} for i in range(1, 6)],  # PINs 1111..5555
         "stations": [],   # ["Caja 1","Silla 2",...] — opcional, sin PIN; vacío = no aplica (modo prepago)
@@ -1495,7 +1497,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         ncounts, nmine, ntotal = react_counts(np["id"], token)
         np_pub = {"id": np["id"], "title": _clean_title_display(np["title"]), "artist": np.get("artist", ""), "yt": np["yt"],
                   "table": np.get("table", ""), "priority": np.get("priority", False),
-                  "fallback": np.get("fallback", False),
+                  "fallback": np.get("fallback", False), "mine": bool(token) and np.get("token") == token,
                   "paid": np.get("charge_on_play", 0) > 0 or np.get("paid_amount", 0) > 0,
                   "duration": np.get("duration", DEFAULT_DUR), "position": np.get("position", 0),
                   "learned_end": STATE["learned_end"].get(np["yt"]),
@@ -1687,7 +1689,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
                                        "show_tym_brand", "music_only", "content_mode",
                                        "song_message_moderation", "dedica_price", "dedica_display_secs",
-                                       "dedica_presets")},
+                                       "dedica_presets", "allow_self_react")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
@@ -1745,11 +1747,14 @@ def public_state(token=None, admin=False, mark_dedica=None):
             customer = get_customer(sess)
             out["wallet_balance"] = customer.get("balance", 0) if customer else 0
             out["wallet_history"] = customer.get("wallet_history", [])[:20] if customer else []
-        # total de reacciones a las canciones que pidió esta sesión (para avisar al autor)
+        # total de reacciones a las canciones que pidió esta sesión (para avisar al autor) —
+        # excluye SIEMPRE tus propias reacciones a tu propia canción (relevante si el admin
+        # habilitó allow_self_react; si no, mine siempre viene vacío y esto no cambia nada).
         likes = 0
         for it in (([np] if np else []) + STATE["items"] + STATE["history"]):
             if it.get("token") == token:
-                likes += react_counts(it["id"])[2]
+                _counts, _mine, _total = react_counts(it["id"], token)
+                likes += _total - len(_mine)
         out["my_likes_total"] = likes
         # canciones que este usuario ha reaccionado (para "Mis likes" en social)
         my_liked = []
@@ -2490,14 +2495,18 @@ class H(BaseHTTPRequestHandler):
                 if emoji not in EMOJIS or item_id is None:
                     return self._send(400, {"error": "Reacción inválida"})
                 tok = d.get("token")
-                # Anti-autolike: quien pidió la canción no puede reaccionarle a la suya propia —
-                # antes sí contaba, e inflaba "my_likes_total" haciéndole creer al cliente que
-                # OTRAS personas reaccionaron cuando en realidad se dio like a sí mismo.
+                # Anti-autolike: por defecto quien pidió la canción no puede reaccionarle a la
+                # suya propia — bloqueado, no silencioso (settings.allow_self_react, apagado por
+                # defecto, lo habilita el admin). "my_likes_total" (el aviso "a N les gusta tu
+                # música") SIEMPRE excluye tus propias reacciones a tu propia canción, esté
+                # permitido el autolike o no — ver public_state(), si no se inflaría haciéndole
+                # creer al cliente que OTRAS personas reaccionaron cuando se dio like a sí mismo.
                 _np_r = STATE["now_playing"]
                 _react_item = next((it for it in (([_np_r] if _np_r else []) + STATE["items"] + STATE["history"])
                                      if it["id"] == item_id), None)
-                if _react_item and _react_item.get("token") == tok:
-                    return self._send(400, {"error": "No puedes reaccionar a tu propia canción."})
+                if (_react_item and _react_item.get("token") == tok
+                        and not STATE["settings"].get("allow_self_react")):
+                    return self._send(400, {"error": "No puedes reaccionar a tu propia canción.", "self_react_blocked": True})
                 r = STATE["reactions"].setdefault(item_id, {e: set() for e in EMOJIS})
                 rp = STATE["reaction_pub"].setdefault(item_id, {e: set() for e in EMOJIS})
                 pub = bool(d.get("public", True))
@@ -2829,7 +2838,7 @@ class H(BaseHTTPRequestHandler):
                 if "dedica_display_secs" in d:
                     try: s["dedica_display_secs"] = max(2, min(30, int(d["dedica_display_secs"])))
                     except Exception: pass
-                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote", "music_only", "song_message_moderation"):
+                for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote", "music_only", "song_message_moderation", "allow_self_react"):
                     if k in d:
                         s[k] = bool(d[k])
                 if "min_direct_pay" in d:

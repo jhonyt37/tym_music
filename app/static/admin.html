@@ -696,6 +696,15 @@
       </label>
     </div>
 
+    <!-- Reacciones -->
+    <div class="card" style="margin-bottom:14px">
+      <p class="sec">❤️ Reacciones</p>
+      <label class="opt">
+        <div><b>Permitir autolike</b><div class="small">Por defecto, quien pide una canción no puede reaccionarle a la suya propia — apagado evita que alguien infle sus propios likes.</div></div>
+        <input type="checkbox" id="allowSelfReact" style="width:22px;height:22px" onchange="post('/api/admin/settings',{allow_self_react:$('allowSelfReact').checked}).then(()=>toast('Guardado','ok'))">
+      </label>
+    </div>
+
     <!-- Vibe -->
     <div class="card">
       <p class="sec">🎭 Encuesta de vibe</p>
@@ -1535,6 +1544,7 @@ async function tick(){
       $('showTymBrand').checked=s.settings.show_tym_brand||false;
       $('ownerEmail').value=s.owner_email||'';
       if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;
+      if($('allowSelfReact'))$('allowSelfReact').checked=!!s.settings.allow_self_react;
       if($('musicOnly'))$('musicOnly').checked=!!s.settings.music_only;
       if($('dedicaDisplaySecs'))$('dedicaDisplaySecs').value=s.settings.dedica_display_secs||5;
       _dedicaPresetsCache=Array.isArray(s.settings.dedica_presets)?[...s.settings.dedica_presets]:[];

@@ -1575,8 +1575,15 @@ function updateLikePubBtn(){
 }
 
 const EMOJIS=['❤️','🔥','👍','💃','🎉'];
+let allowSelfReact=false;
 function reactHtml(it){
   if(!it||it.id==null)return '';
+  // Antes esto solo se sabía al hacer click (toast de error DESPUÉS de intentar) — ahora,
+  // si el local no habilitó el autolike (Ajustes → admin), se lo decimos de una vez en vez
+  // de mostrar botones que van a rechazar el click.
+  if(it.mine&&!allowSelfReact){
+    return '<div class="small" style="color:var(--mut)">🔒 No puedes reaccionar a tu propia canción</div>';
+  }
   return EMOJIS.map(e=>{
     const c=(it.reactions&&it.reactions[e])||0;const on=(it.my_reacts||[]).includes(e);
     return `<button class="rbtn${on?' on':''}" onclick="react(${it.id},'${e}')">${e}${c?'<span>'+c+'</span>':''}</button>`;
@@ -1817,6 +1824,7 @@ async function poll(){
     dedicaPrice=s.settings.dedica_price||0;
     jumpAvail=!!s.jump_available;jumpPrice=(s.jump_price_now!=null?s.jump_price_now:(s.jump_price||0));price_queue_min=s.priority_queue_min||0;jumpReason=s.jump_unavailable_reason||'';
     priorityAbuseMult=s.priority_abuse_mult_now||1;priorityAbuseResetAt=s.priority_abuse_reset_at||0;
+    allowSelfReact=!!s.settings.allow_self_react;
     // Si el sheet de pedir está abierto, refresca el precio/cuenta regresiva del multiplicador
     // en vivo (poll corre cada 2s) en vez de dejarlos congelados desde que se abrió el sheet.
     if($('sheet').classList.contains('open'))updatePriOption();
