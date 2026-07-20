@@ -340,6 +340,16 @@
       </details>
 
       <details class="settingsSection">
+        <summary><span class="sec">Catálogo de canciones</span><span class="chev">▸</span></summary>
+        <div class="secBody">
+      <label class="opt" style="margin-top:10px">
+        <div><b>Modo catálogo local (en construcción)</b><div class="small">En vez de buscar en YouTube, los clientes piden solo del catálogo propio del local (archivos que el bar ya tiene) — evita el bloqueo de embed de YouTube y no depende de un tercero. Todavía no hay forma de cargar canciones al catálogo local, activarlo no tiene efecto por ahora.</div></div>
+        <input type="checkbox" id="contentModeLocal" style="width:22px;height:22px">
+      </label>
+        </div>
+      </details>
+
+      <details class="settingsSection">
         <summary><span class="sec">Límites y premium</span><span class="chev">▸</span></summary>
         <div class="secBody">
       <div class="pkgrow"><span class="small" style="flex:1">Canciones gratis por mesa</span><input class="field" id="freeN" type="number"></div>
@@ -1053,6 +1063,7 @@ async function save(){
     song_message_moderation:$('songMessageModeration').checked,
     fallback_shuffle:$('fbShuffle').checked,
     prepaid_mode:$('prepaid').checked, min_direct_pay:parseInt($('minDirectPay').value||0),
+    content_mode:$('contentModeLocal').checked?'local':'youtube',
     show_tym_brand:$('showTymBrand').checked,
     theme:curTheme,
     blocked_keywords:[..._kwBlocked],
@@ -1275,6 +1286,7 @@ async function tick(){
       $('fbShuffle').checked=s.settings.fallback_shuffle!==false;
       $('prepaid').checked=s.settings.prepaid_mode||false;
       $('minDirectPay').value=s.settings.min_direct_pay||700;
+      $('contentModeLocal').checked=s.settings.content_mode==='local';
       $('showTymBrand').checked=s.settings.show_tym_brand||false;
       $('ownerEmail').value=s.owner_email||'';
       if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;

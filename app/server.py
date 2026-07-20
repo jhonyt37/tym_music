@@ -464,6 +464,8 @@ def make_venue(name):
             "prepaid_mode": False,     # ON: saldo prepago por cliente en vez de cuenta de mesa
             "min_direct_pay": 700,     # piso para pago directo sin wallet (evita que la pasarela se coma el monto)
             "show_tym_brand": False,   # mostrar el logo/texto "TYM Music" en /tv (off por defecto, tema legal)
+            "content_mode": "youtube",  # "youtube" (buscador/catálogo ilimitado, hoy) | "local" (catálogo propio
+                                         # del bar, archivos que TYM nunca aloja — ver plan federated-knitting-lagoon)
         },
         "tables": [{"name": f"Mesa {i}", "pin": str(i) * 4, "extra_pins": []} for i in range(1, 6)],  # PINs 1111..5555
         "stations": [],   # ["Caja 1","Silla 2",...] — opcional, sin PIN; vacío = no aplica (modo prepago)
@@ -1650,7 +1652,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
-                                       "show_tym_brand", "music_only",
+                                       "show_tym_brand", "music_only", "content_mode",
                                        "song_message_moderation", "dedica_price", "dedica_display_secs",
                                        "dedica_presets")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
@@ -2768,6 +2770,8 @@ class H(BaseHTTPRequestHandler):
                     except Exception: pass
                 if "theme" in d and d["theme"] in ("azul", "purpura", "verde", "rojo", "dorado", "rosa"):
                     s["theme"] = d["theme"]
+                if "content_mode" in d and d["content_mode"] in ("youtube", "local"):
+                    s["content_mode"] = d["content_mode"]
                 if "timezone" in d and str(d["timezone"]) in available_timezones():
                     s["timezone"] = str(d["timezone"])
                 for k in ("blocked_keywords", "allowed_keywords"):
@@ -2914,7 +2918,11 @@ class H(BaseHTTPRequestHandler):
                     if not any(c["yt"] == d["yt"] for c in STATE["curated"]):
                         STATE["curated"].append({"yt": d["yt"], "title": str(d.get("title") or "Canción")[:200],
                                                  "artist": str(d.get("artist") or "")[:120],
-                                                 "duration": _parse_len(d.get("length")) or DEFAULT_DUR})
+                                                 "duration": _parse_len(d.get("length")) or DEFAULT_DUR,
+                                                 # Campos de catálogo local (modo "local" — ver plan
+                                                 # federated-knitting-lagoon): None/"" en entradas de YouTube,
+                                                 # nunca se llenan por esta rama (la del modo local es la Fase 1).
+                                                 "genre": None, "media_type": None, "local_path": None})
                 elif act == "remove":
                     STATE["curated"] = [c for c in STATE["curated"] if c["yt"] != d.get("yt")]
                 elif act == "reorder":
