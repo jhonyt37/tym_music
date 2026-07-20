@@ -254,7 +254,7 @@ body{padding-bottom:80px}
       <div class="now">
         <img class="thumb" id="nowImg" alt="" onerror="this.removeAttribute('src')" onclick="openNowDetail()" title="Ver detalle">
         <div style="flex:1;min-width:0">
-          <div class="t" id="nowT">—</div>
+          <div class="t" id="nowT" style="display:flex;align-items:center;gap:8px"><img id="nowLogo" alt="" style="display:none;height:22px;max-width:60px;object-fit:contain;flex:none;border-radius:4px"><span id="nowTText" style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">—</span></div>
           <div class="a" id="nowA"></div>
           <div class="who" id="nowW"></div>
         </div>
@@ -1800,10 +1800,14 @@ async function poll(){
     }else if(!np){$('simBox').style.display='none';_simLoadedForId=null;}
 
     // Now playing
-    if(np){$('nowImg').src=img(np.yt);$('nowT').textContent=np.title;$('nowA').textContent=np.artist||'';
+    // Logo del bar antes del nombre de la canción (mismo lugar donde la gente ya mira) —
+    // se actualiza junto con el resto de settings, no solo cuando cambia la canción.
+    const vlogo=s.settings.venue_logo;
+    if(vlogo){$('nowLogo').src=vlogo;$('nowLogo').style.display='';}else{$('nowLogo').style.display='none';}
+    if(np){$('nowImg').src=img(np.yt);$('nowTText').textContent=np.title;$('nowA').textContent=np.artist||'';
       $('nowW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table));
       _npState={pos0:np.position||0,t0:Date.now()/1000,dur:np.duration||1};
-    }else{_npState=null;$('nowT').textContent='—';$('nowA').textContent='Nadie ha puesto música aún';$('nowW').textContent='';
+    }else{_npState=null;$('nowTText').textContent='—';$('nowA').textContent='Nadie ha puesto música aún';$('nowW').textContent='';
       $('nowImg').removeAttribute('src');$('progFill').style.width='0%';$('nowPos').textContent='0:00';$('nowRem').textContent='';}
 
     // Cola

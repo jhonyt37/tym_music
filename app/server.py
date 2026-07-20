@@ -105,6 +105,66 @@ def gen_unique_pin():
 def gen_token():
     return secrets.token_hex(16)
 
+def remove_solid_bg(data_uri):
+    """Si un logo subido (data URI base64) tiene fondo de color sólido/uniforme, lo vuelve
+    transparente — así en el TV/la app no se ve un rectángulo de color alrededor del logo,
+    solo el logo. Heurística: si los 4 bordes del PNG/JPG son del mismo color (dentro de una
+    tolerancia), se hace flood-fill de ese color desde el borde hacia adentro (nunca borra
+    zonas del mismo color que estén DENTRO del logo, solo lo que es alcanzable desde afuera).
+    Si la imagen ya tiene transparencia real, o el borde no es uniforme (foto, degradado,
+    diseño sin fondo sólido), se devuelve intacta — "en caso de que aplique", nunca a ciegas.
+    """
+    try:
+        from PIL import Image
+    except ImportError:
+        return data_uri
+    try:
+        header, _, b64 = data_uri.partition(",")
+        if not b64:
+            return data_uri
+        import base64, io
+        raw = base64.b64decode(b64)
+        im = Image.open(io.BytesIO(raw)).convert("RGBA")
+        w, h = im.size
+        if w < 4 or h < 4 or w * h > 4_000_000:  # logos gigantes: no vale el costo, se deja igual
+            return data_uri
+        px = im.load()
+        if any(px[x, y][3] < 250 for x in (0, w - 1) for y in (0, h - 1)):
+            return data_uri  # ya tiene transparencia real en las esquinas, no tocar
+        corners = [px[0, 0][:3], px[w - 1, 0][:3], px[0, h - 1][:3], px[w - 1, h - 1][:3]]
+        def dist(a, b):
+            return sum((a[i] - b[i]) ** 2 for i in range(3)) ** 0.5
+        base = corners[0]
+        if any(dist(base, c) > 30 for c in corners[1:]):
+            return data_uri  # esquinas no coinciden entre sí: no hay un fondo sólido claro
+        TOL = 40
+        from collections import deque
+        seen = bytearray(w * h)
+        q = deque()
+        for x in range(w):
+            q.append((x, 0)); q.append((x, h - 1))
+        for y in range(h):
+            q.append((0, y)); q.append((w - 1, y))
+        while q:
+            x, y = q.popleft()
+            if x < 0 or x >= w or y < 0 or y >= h:
+                continue
+            idx = y * w + x
+            if seen[idx]:
+                continue
+            seen[idx] = 1
+            r, g, b, a = px[x, y]
+            if dist((r, g, b), base) > TOL:
+                continue
+            px[x, y] = (r, g, b, 0)
+            q.append((x - 1, y)); q.append((x + 1, y)); q.append((x, y - 1)); q.append((x, y + 1))
+        buf = io.BytesIO()
+        im.save(buf, "PNG")
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception as e:
+        print("remove_solid_bg error:", e)
+        return data_uri
+
 # ---- Seguridad: contraseñas ----
 PBKDF2_ITERS = 200_000
 
@@ -2597,7 +2657,7 @@ class H(BaseHTTPRequestHandler):
                     if k in d and isinstance(d[k], list):
                         s[k] = [str(w).strip().lower()[:50] for w in d[k] if str(w).strip()][:30]
                 if "venue_logo" in d:                       # logo del BAR
-                    s["venue_logo"] = str(d["venue_logo"])[:700000]
+                    s["venue_logo"] = remove_solid_bg(str(d["venue_logo"]))[:700000]
                 if "tym_logo" in d:                          # logo de TYM (global)
                     TYM["tym_logo"] = str(d["tym_logo"])[:700000]
                 if "socials" in d and isinstance(d["socials"], dict):  # redes de TYM (global)

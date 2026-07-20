@@ -1035,7 +1035,13 @@ async function save(){
     schedule:_schedule};
   if(tymLogoData)payload.tym_logo=tymLogoData;
   if(venueLogoData)payload.venue_logo=venueLogoData;
+  const hadNewLogo=!!(tymLogoData||venueLogoData);
   await post('/api/admin/settings',payload);
+  // El servidor puede haberle quitado el fondo sólido al logo (remove_solid_bg) — la
+  // vista previa local (venueLogoData, tal cual salió del FileReader) ya no es la versión
+  // final. Se limpia para que renderLogoPrev() vuelva a curSettings y se refresque con la
+  // imagen ya procesada en el próximo tick().
+  if(hadNewLogo){tymLogoData=null;venueLogoData=null;setTimeout(tick,300);}
   toast('Ajustes guardados');editing=false;
 }
 async function reset(){

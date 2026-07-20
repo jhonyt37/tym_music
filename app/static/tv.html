@@ -27,7 +27,8 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #now{left:0;right:0;bottom:0;padding:90px 40px 40px;
   background:linear-gradient(transparent,rgba(0,0,0,.55) 35%,rgba(0,0,0,.92))}
 #now .lbl{font-size:15px;letter-spacing:3px;text-transform:uppercase;color:#9aa7c2;font-weight:700}
-#now .title{font-size:54px;font-weight:800;line-height:1.05;margin-top:6px;text-shadow:0 2px 12px rgba(0,0,0,.85)}
+#now .title{font-size:54px;font-weight:800;line-height:1.05;margin-top:6px;text-shadow:0 2px 12px rgba(0,0,0,.85);display:flex;align-items:center;gap:16px}
+#now .title #titleLogo{height:56px;max-width:180px;object-fit:contain;flex:none;filter:drop-shadow(0 2px 8px rgba(0,0,0,.6))}
 #now .artist{font-size:27px;color:#cfd8ec;margin-top:4px}
 #now .who{display:inline-block;margin-top:12px;font-size:21px;font-weight:700;color:var(--gold)}
 /* A continuacion */
@@ -235,7 +236,7 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 </div>
 <div class="panel" id="now">
   <div class="lbl">● Sonando ahora</div>
-  <div class="title" id="title">Esperando canciones…</div>
+  <div class="title" id="title"><img id="titleLogo" alt="" style="display:none"><span id="titleText">Esperando canciones…</span></div>
   <div class="artist" id="artist"></div>
   <div class="who" id="who"></div>
 </div>
@@ -751,8 +752,8 @@ async function advance(manual=false,forceSkip=false){
 }
 
 function load(np){
-  if(!np){$('title').textContent='Esperando canciones…';$('artist').textContent='';$('who').textContent='';curYt=null;curId=null;return;}
-  $('title').textContent=np.title;
+  if(!np){$('titleText').textContent='Esperando canciones…';$('artist').textContent='';$('who').textContent='';curYt=null;curId=null;return;}
+  $('titleText').textContent=np.title;
   $('artist').textContent=np.artist||'';
   $('who').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table||''));
   curId=np.id; // siempre actualizar el ID del servidor
@@ -818,6 +819,9 @@ function applyBrand(set){
   else if(set.show_tym_brand){$('tymLogo').style.display='none';$('tymText').style.display='';}
   else{$('tymLogo').style.display='none';$('tymText').style.display='none';}
   if(vl){$('venueLogo').src=vl;$('venueLogo').style.display='';}else{$('venueLogo').style.display='none';}
+  // Mismo logo, ahora también pegado al nombre de la canción que suena — refuerza la marca
+  // justo donde la gente mira, no solo en el panel chico de la esquina.
+  if(vl){$('titleLogo').src=vl;$('titleLogo').style.display='';}else{$('titleLogo').style.display='none';}
 }
 function paintNext(q,count){
   count=count||0;
