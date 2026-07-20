@@ -594,10 +594,18 @@ def yt_id(text):
     return None
 
 def yt_title(vid):
+    """Usado cuando el cliente PEGA un link de YouTube en vez de buscar — a diferencia de
+    /api/search, este título/artista nunca pasaba por _clean_title_display()/enrich_artists(),
+    así que quedaba con basura tipo "(Official Video)" y con el CANAL de YouTube como artista
+    en vez del artista real (mismo bug que se arregló para búsqueda en 5695c3a, pero este
+    camino se quedó fuera). Se limpia y se intenta iTunes igual que el resto de la app."""
     try:
         u = "https://www.youtube.com/oembed?format=json&url=https://youtu.be/" + vid
         d = json.loads(urllib.request.urlopen(urllib.request.Request(u, headers={"User-Agent": "Mozilla/5.0"}), timeout=8).read())
-        return d.get("title", "Canción"), d.get("author_name", "")
+        title = _clean_title_display(d.get("title", "Canción"))
+        channel = d.get("author_name", "") or "YouTube"
+        artist = _lookup_real_artist(_clean_for_lookup(title)) or channel
+        return title, artist
     except Exception:
         return "Canción", "YouTube"
 
@@ -633,12 +641,13 @@ def _make_icon_png(size):
 # que es agresivo porque solo alimenta una busqueda; aqui hay que conservar info util
 # como "(Remix)"/"(Live)"/"(feat. X)" y solo quitar basura de subida tipo "Video Oficial"/"Lyrics"). ----
 _JUNK_PHRASES = [
-    "official music video", "official video", "official audio",
+    "official music video", "official video", "official audio", "official lyric video",
     "video oficial", "vídeo oficial", "audio oficial",
     "video lirico", "video lírico", "vídeo lírico", "lirico", "lírico",
     "lyric video", "lyrics video", "video lyrics", "lyrics", "letra oficial",
     "letra completa", "letra", "visualizer", "karaoke",
-    "video clip oficial", "videoclip oficial", "videoclip",
+    "video clip oficial", "videoclip oficial", "videoclip", "clip officiel",
+    "audio", "video", "mv",
 ]
 _BRACKET_RE = re.compile(r"[\(\[\{]([^()\[\]{}]*)[\)\]\}]")
 _JUNK_WORD_RE = re.compile(r"\b(hd|4k|hq|official|oficial)\b", re.IGNORECASE)
