@@ -2276,6 +2276,33 @@ class H(BaseHTTPRequestHandler):
     def _q(self, name, default=""):
         return parse_qs(urlparse(self.path).query).get(name, [default])[0]
 
+    def _client_ip(self):
+        """IP real del cliente para rate limiting.
+
+        En Render (runtime nativo, sin Docker/TCP passthrough) las conexiones le
+        llegan a este proceso desde el proxy HTTP interno de Render, no desde el
+        navegador — self.client_address[0] es SIEMPRE la IP del proxy, la misma
+        para todo el tráfico de todos los bares. Sin leer X-Forwarded-For, todos
+        los límites de _rate_ok() terminaban compartidos entre TODOS los clientes
+        de TODOS los venues en vez de ser por-cliente (encontrado investigando un
+        reporte de "Por si te gustó no carga en Safari, sí en Chrome, mismo
+        celular": Chrome agotaba el cupo de "search" y Safari, con la misma IP de
+        proxy, heredaba el bloqueo).
+
+        Usamos el ÚLTIMO valor de X-Forwarded-For, no el primero: cualquier
+        cliente puede mandar ese header con lo que quiera, así que el primer
+        valor NO es confiable (dejaría bypassear el rate limit rotando un valor
+        falso en cada request). El único hop que no se puede falsificar es el
+        que agrega el propio proxy de Render justo antes de reenviar — ese
+        siempre queda al final de la cadena.
+        """
+        xff = self.headers.get("X-Forwarded-For", "")
+        if xff:
+            last = xff.split(",")[-1].strip()
+            if last:
+                return last
+        return self.client_address[0]
+
     def get_cookie(self, name):
         for part in (self.headers.get("Cookie", "") or "").split(";"):
             if "=" in part:
@@ -2340,7 +2367,7 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/catalog":
             return self._send(200, CATALOG)
         if path == "/api/search":
-            ip = self.client_address[0]
+            ip = self._client_ip()
             if not _rate_ok(ip, "search"):
                 return self._send(429, {"error": "Demasiadas búsquedas. Espera un momento."})
             q = self._q("q")[:150]
@@ -2349,7 +2376,7 @@ class H(BaseHTTPRequestHandler):
             # Fase 3 del modo catálogo local (ver plan federated-knitting-lagoon.md) — busca por
             # texto sobre STATE["curated"] filtrado a entradas locales, sin llamar nunca a
             # YouTube.
-            ip = self.client_address[0]
+            ip = self._client_ip()
             if not _rate_ok(ip, "search"):
                 return self._send(429, {"error": "Demasiadas búsquedas. Espera un momento."})
             q = self._q("q")[:150].strip().lower()
@@ -2392,7 +2419,7 @@ class H(BaseHTTPRequestHandler):
                         "featured": bool(c.get("featured"))} for c in pool[:40]]
             return self._send(200, out)
         if path == "/api/genre":
-            ip = self.client_address[0]
+            ip = self._client_ip()
             if not _rate_ok(ip, "search"):
                 return self._send(429, {"error": "Demasiadas búsquedas. Espera un momento."})
             genre = itunes_genre(self._q("artist"), self._q("title"))
@@ -2589,7 +2616,7 @@ class H(BaseHTTPRequestHandler):
         d = self._body()
         # ---- Login / logout (dueños TYM) ----
         if path == "/api/login":
-            ip = self.client_address[0]
+            ip = self._client_ip()
             if not _rate_ok(ip, "login"):
                 return self._send(429, {"error": "Demasiados intentos. Espera un momento."})
             u = (d.get("user") or "").strip()
@@ -2618,7 +2645,7 @@ class H(BaseHTTPRequestHandler):
             save_state()
             return self._send(200, {"ok": True})
         if path == "/api/forgot_password":
-            ip = self.client_address[0]
+            ip = self._client_ip()
             if not _rate_ok(ip, "forgot"):
                 return self._send(429, {"error": "Demasiados intentos. Espera unos minutos."})
             u = (d.get("user") or "").strip()
@@ -2692,7 +2719,7 @@ class H(BaseHTTPRequestHandler):
             self.set_venue(vid)
             # ---- Sesion de mesa ----
             if path == "/api/session":
-                if not _rate_ok(self.client_address[0], "session"):
+                if not _rate_ok(self._client_ip(), "session"):
                     return self._send(429, {"error": "Demasiados intentos. Espera un momento."})
                 table = find_table_by_pin(d.get("pin"))
                 if not table:
@@ -2716,7 +2743,7 @@ class H(BaseHTTPRequestHandler):
             # El registro por celular (nombre+telefono) solo se pide despues, en el momento
             # de pagar algo (try_charge_prepaid -> needs_registration), no de entrada. ----
             if path == "/api/anon_session":
-                if not _rate_ok(self.client_address[0], "session"):
+                if not _rate_ok(self._client_ip(), "session"):
                     return self._send(429, {"error": "Demasiados intentos. Espera un momento."})
                 if not STATE["settings"].get("prepaid_mode"):
                     return self._send(400, {"error": "Este local no usa registro por celular."})
@@ -2730,7 +2757,7 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Registro por celular (reemplaza el PIN en modo prepago) ----
             if path == "/api/register":
-                if not _rate_ok(self.client_address[0], "session"):
+                if not _rate_ok(self._client_ip(), "session"):
                     return self._send(429, {"error": "Demasiados intentos. Espera un momento."})
                 if not STATE["settings"].get("prepaid_mode"):
                     return self._send(400, {"error": "Este local no usa registro por celular."})
@@ -2815,7 +2842,7 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Pedir cancion ----
             if path == "/api/request":
-                if not _rate_ok(self.client_address[0], "request"):
+                if not _rate_ok(self._client_ip(), "request"):
                     return self._send(429, {"error": "Demasiadas solicitudes. Espera un momento."})
                 sess = get_session(d.get("token"))
                 if not sess:
@@ -3012,7 +3039,7 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Reaccionar (positivo) ----
             if path == "/api/react":
-                if not _rate_ok(self.client_address[0], "social"):
+                if not _rate_ok(self._client_ip(), "social"):
                     return self._send(429, {"error": "Demasiadas reacciones. Espera un momento."})
                 sess = get_session(d.get("token"))
                 if not sess:
@@ -3985,7 +4012,7 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Dedicatorias ----
             if path == "/api/dedica":
-                if not _rate_ok(self.client_address[0], "social"):
+                if not _rate_ok(self._client_ip(), "social"):
                     return self._send(429, {"error": "Demasiadas solicitudes. Espera un momento."})
                 sess = get_session(d.get("token"))
                 if not sess:
@@ -4028,7 +4055,7 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Solicitar bis ----
             if path == "/api/bis":
-                if not _rate_ok(self.client_address[0], "social"):
+                if not _rate_ok(self._client_ip(), "social"):
                     return self._send(429, {"error": "Demasiadas solicitudes. Espera un momento."})
                 sess = get_session(d.get("token"))
                 if not sess:
@@ -4115,7 +4142,7 @@ class H(BaseHTTPRequestHandler):
 
             # ---- Vibe ----
             if path == "/api/skip_vote":
-                if not _rate_ok(self.client_address[0], "social"):
+                if not _rate_ok(self._client_ip(), "social"):
                     return self._send(429, {"error": "Demasiadas solicitudes. Espera un momento."})
                 if not STATE["settings"].get("allow_skip_vote"):
                     return self._send(400, {"error": "El skip por votación no está activado en este local."})
@@ -4147,7 +4174,7 @@ class H(BaseHTTPRequestHandler):
                                         "threshold": threshold, "skipped": skipped})
 
             if path == "/api/vibe":
-                if not _rate_ok(self.client_address[0], "social"):
+                if not _rate_ok(self._client_ip(), "social"):
                     return self._send(429, {"error": "Demasiadas solicitudes. Espera un momento."})
                 sess = get_session(d.get("token"))
                 if not sess:
