@@ -466,6 +466,9 @@ def make_venue(name):
             "theme": "azul",               # tema de color: azul | purpura | verde | rojo | dorado | rosa
             "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
             "allowed_keywords": [],        # si hay entradas, la canción DEBE tener al menos una
+            "blocked_yt_ids": [],          # videos exactos bloqueados a mano (botón "🚫 Bloquear"
+                                            # sobre la canción sonando) — no se expone en el
+                                            # settings público, solo se usa server-side en /api/request
             "allow_skip_vote": False,      # permite que las mesas voten para saltar la canción
             "poll_duration_secs": 120,     # duración del timer de la votación (segundos)
             "duelo_duration_secs": 60,     # duración del timer del duelo (segundos)
@@ -2737,7 +2740,8 @@ class H(BaseHTTPRequestHandler):
         ADMIN_PATHS = ("/api/advance", "/api/progress", "/api/admin/approve", "/api/admin/reject",
                        "/api/admin/remove", "/api/admin/settings", "/api/admin/tables", "/api/admin/stations",
                        "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset",
-                       "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/move", "/api/admin/reorder",
+                       "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/content_block",
+                       "/api/admin/move", "/api/admin/reorder",
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
                        "/api/admin/duelo", "/api/admin/duelo/close",
                        "/api/admin/announcement", "/api/admin/show_qr",
@@ -2982,6 +2986,11 @@ class H(BaseHTTPRequestHandler):
                 if STATE["settings"].get("music_only") and not is_music_content(title, artist, dur):
                     return self._send(400, {"error": "Esto no parece ser una canción — este local solo permite música 🎵",
                                             "not_music": True})
+                # Bloqueo por video exacto (pedido explícito: botón "🚫 Bloquear" sobre la
+                # canción sonando, en admin.html) — chequeo barato, antes que el filtro por
+                # palabras (que sí puede depender de género resuelto por red).
+                if yt in STATE["settings"].get("blocked_yt_ids", []):
+                    return self._send(400, {"error": "Esta canción fue bloqueada por el local 🚫", "content_blocked": True})
                 # Filtro de contenido: palabras bloqueadas / permitidas — compara contra
                 # título+artista+género real (resuelto antes del LOCK arriba, ver "_genre"),
                 # con alias para términos coloquiales que no coinciden con la etiqueta de
@@ -4032,6 +4041,35 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True, "allowed": False})
                 exc.add(yt)
                 return self._send(200, {"ok": True, "allowed": True})
+
+            if path == "/api/admin/content_block":
+                # "🚫 Bloquear" sobre la canción sonando (modo YouTube, pedido explícito) —
+                # persiste al toque, no espera al botón "Guardar ajustes" (mismo patrón que
+                # dedica_presets): bloquear algo tiene que sentirse inmediato y definitivo.
+                act = d.get("action")
+                if act == "block_video":
+                    yt = (d.get("yt") or "").strip()
+                    if not yt:
+                        return self._send(400, {"error": "Falta yt"})
+                    lst = STATE["settings"].setdefault("blocked_yt_ids", [])
+                    if yt not in lst:
+                        lst.append(yt)
+                    save_state()
+                    return self._send(200, {"ok": True, "blocked_yt_ids": lst})
+                # "block_channel" reusa blocked_keywords (el "canal" que ve TYM es solo el texto
+                # de artist/uploader de la búsqueda de YouTube, no un ID estable) — mismo
+                # mecanismo que ya usa /api/request, así que también aparece/se puede quitar
+                # desde Ajustes → Filtro de contenido, sin una segunda lista que mantener.
+                if act in ("block_channel", "block_keyword"):
+                    kw = str(d.get("keyword") or "").strip().lower()
+                    if not kw:
+                        return self._send(400, {"error": "Falta keyword"})
+                    lst = STATE["settings"].setdefault("blocked_keywords", [])
+                    if kw not in lst:
+                        lst.append(kw)
+                    save_state()
+                    return self._send(200, {"ok": True, "blocked_keywords": lst})
+                return self._send(400, {"error": "Acción inválida"})
 
             if path == "/api/admin/move":
                 item_id = d.get("id")

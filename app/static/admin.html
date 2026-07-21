@@ -202,6 +202,7 @@
             <button type="button" class="btn sm ghost" id="requeueLastBtn" style="display:none" onclick="requeueLast()" title="Por si se saltó una por error — no toca lo que suena ahora ni ningún cobro/reembolso ya hecho">⏮ Reponer última</button>
           </div>
           <div class="list" id="queue"><div class="empty">Nada en cola.</div></div>
+          <div id="blockSuggestBox" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"></div>
         </div>
 
         <!-- Historial reciente / Canciones del bar — pedido explícito: no 2 tablas apiladas,
@@ -1456,6 +1457,56 @@ async function requeueLast(){
   const h=_lastHistory[0];
   if(!h)return;
   await adminAddSong(h.yt,h.title,h.artist,h.duration,1);
+}
+
+// "🚫 Bloquear para siempre" (pedido explícito) — 3 pasos, cada uno opcional/independiente:
+// (1) el video exacto, siempre; (2) el canal completo, con confirmación aparte mostrando el
+// nombre (el "canal" acá es solo el texto de artist/uploader, no un ID estable — bloquearlo
+// entero tiene más alcance del que parece, por eso la confirmación separada); (3) sugerencias
+// de palabras sueltas del título para bloquear a mano, una por una (nunca automático).
+let _lastNP=null;
+const BLOCK_SUGGEST_STOP=new Set(['de','la','el','los','las','un','una','y','ft','feat',
+  'featuring','official','oficial','video','letra','lyrics','hd','mv','remix','cover','audio',
+  'en','vivo','live','music','clip','vevo','the','of','a']);
+function suggestBlockKeywords(title,artist){
+  const artistWords=new Set((artist||'').toLowerCase().split(/[^a-z0-9áéíóúñ]+/i).filter(Boolean));
+  const words=(title||'').toLowerCase().split(/[^a-z0-9áéíóúñ]+/i)
+    .filter(w=>w.length>=3&&!BLOCK_SUGGEST_STOP.has(w)&&!artistWords.has(w)&&!_kwBlocked.includes(w));
+  return [...new Set(words)].slice(0,8);
+}
+function renderBlockSuggestions(words){
+  const box=$('blockSuggestBox');
+  if(!words.length){box.style.display='none';return;}
+  box.innerHTML='<div class="small" style="color:var(--mut);margin-bottom:6px">¿Alguna de estas palabras también debería bloquear siempre? (toca para bloquear una por una)</div>';
+  const wrap=document.createElement('div');wrap.style.cssText='display:flex;flex-wrap:wrap;gap:6px';
+  words.forEach(w=>{
+    const chip=document.createElement('button');chip.type='button';chip.className='subtab';chip.textContent=w;
+    chip.onclick=async()=>{
+      chip.disabled=true;
+      await post('/api/admin/content_block',{action:'block_keyword',keyword:w});
+      _kwBlocked.push(w);
+      chip.textContent='✓ '+w;chip.style.opacity='.5';
+    };
+    wrap.appendChild(chip);
+  });
+  box.appendChild(wrap);
+  box.style.display='';
+}
+async function blockCurrentSong(){
+  const np=_lastNP;
+  if(!np||!np.yt)return;
+  if(!confirm(`¿Bloquear "${np.title}" para siempre? No volverá a sonar en este local, la pida quien la pida.`))return;
+  const r=await post('/api/admin/content_block',{action:'block_video',yt:np.yt});
+  if(!r.ok){toast(r.error||'Error al bloquear','err');return;}
+  toast('🚫 Video bloqueado para siempre','ok');
+  if(np.artist&&confirm(`¿Bloquear también todo lo demás del canal "${np.artist}"? Cualquier otro video que suba ese mismo canal quedará bloqueado también — más alcance que solo esta canción.`)){
+    const kw=np.artist.trim().toLowerCase();
+    await post('/api/admin/content_block',{action:'block_channel',keyword:kw});
+    if(!_kwBlocked.includes(kw))_kwBlocked.push(kw);
+    toast('🚫 Canal bloqueado','ok');
+  }
+  renderBlockSuggestions(suggestBlockKeywords(np.title,np.artist));
+  tick();
 }
 function setLiveSubTab(tab){
   _liveSubTab=tab;
@@ -2720,6 +2771,7 @@ async function tick(){
       }
     };
     const np=s.now_playing;
+    _lastNP=np;
     const q=s.queue||[];
     _qSnapshot=q.map(x=>x.id);   // usado por el drop-to-reorder — se actualiza siempre, aunque no se redibuje
     // Firma SOLO con los campos que de verdad se muestran acá — np.position avanza cada
@@ -2737,6 +2789,13 @@ async function tick(){
         if(_liveMesaFilter&&np.table!==_liveMesaFilter)r.style.opacity='.35';
         const npTs=np.played_at||np.ts;
         r.innerHTML=`<span class="pulse"></span>${miniThumbHtml(np.yt,np.media_type,np.cover)}<div class="info"><div class="t">${esc(np.title)}</div><div class="a">${np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table))}${npTs?' · sonando desde '+hm3(npTs):''}</div></div>`;
+        // "🚫 Bloquear" (pedido explícito, solo tiene sentido para YouTube — un id local ya
+        // tiene su propio mecanismo de exclusión en el catálogo, ver "excluded" en Modo local).
+        if(!isLocalId(np.yt)){
+          const bl=document.createElement('button');bl.className='btn ghost sm';bl.textContent='🚫';bl.title='Bloquear esta canción para siempre';
+          bl.onclick=()=>blockCurrentSong();
+          r.appendChild(bl);
+        }
         const sk=document.createElement('button');sk.className='btn ghost sm';sk.textContent='⏭';sk.onclick=()=>skip(np);r.appendChild(sk);Q.appendChild(r);
       }
       if(!q.length&&!np)Q.innerHTML='<div class="empty">Nada en cola.</div>';
