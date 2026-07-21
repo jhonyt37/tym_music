@@ -581,6 +581,10 @@
       <div id="missingReview" style="margin-top:10px"></div>
 
       <h2 style="margin-top:16px;font-size:14px;font-weight:700">En el catálogo</h2>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:10px">
+        <div class="kpi" id="localCatBigCount" style="font-size:34px;font-weight:800;color:var(--pri)">0</div>
+        <div class="small" style="color:var(--mut)">canción(es) que tus clientes pueden pedir ahora mismo</div>
+      </div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;align-items:center">
         <div class="search-wrap" style="flex:1;min-width:200px">
           <input class="search" id="localCatSearch" placeholder="Buscar por título, artista o género…" autocomplete="off" oninput="_localCatFilter=fold(this.value.trim());_localCatPage=0;renderLocalCatalog(window._fullCurated)">
@@ -2048,7 +2052,14 @@ function renderLocalCatalog(fullCurated){
   // predefinido"). Mientras el foco esté DENTRO de esta lista, no se re-dibuja nada — el
   // campo se guarda solo al salir (evento 'change'), y ahí sí se refresca en el próximo poll.
   if(box.contains(document.activeElement))return;
-  let list=window._fullCurated.filter(c=>c.yt&&c.yt.startsWith('local:'))
+  const localAll=window._fullCurated.filter(c=>c.yt&&c.yt.startsWith('local:'));
+  // Pedido explícito: número grande de cuántas canciones hay AHORA en el catálogo — cuenta
+  // todo lo local menos "missing" (archivo que ya no está, no es de verdad parte del catálogo
+  // ahora mismo). Se calcula sobre el total, no sobre `list` (que además filtra por el
+  // buscador) — así no cambia mientras el admin escribe en el buscador, y sí se actualiza
+  // solo después de un borrado masivo o un nuevo escaneo (ambos llaman a esta función).
+  $('localCatBigCount').textContent=localAll.filter(c=>!c.missing).length;
+  let list=localAll
     .filter(c=>{
       if(!_localCatFilter)return true;
       return fold(c.title+' '+(c.artist||'')+' '+(c.genre||'')+' '+(c.local_path||'')).includes(_localCatFilter);
