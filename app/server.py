@@ -2201,9 +2201,17 @@ def public_state(token=None, admin=False, mark_dedica=None):
         out["ledger_total"] = sum(l["amount"] for l in STATE["ledger"])
         out["curated"] = [{**c, "title": _clean_title_display(c["title"])} for c in STATE["curated"]]
         out["subscribers"] = list(reversed(TYM["subscribers"]))[:100]
+        # media_type/cover/duration/local_path faltaban acá — quedó de antes de que existieran
+        # esos campos (mismo tipo de bug ya encontrado en #nowImg del cliente: una vista fija
+        # que nunca se actualizó cuando se agregó soporte de carátulas). Sin esto, el historial
+        # de admin.html se veía sin carátula Y el botón ➕ "agregar de nuevo" mandaba
+        # duration=undefined (para YouTube, /api/admin/add cae al DEFAULT_DUR en vez de la
+        # duración real — para local no afectaba, esa rama saca la duración del catálogo por yt).
         out["history"] = [{"id": h["id"], "yt": h["yt"], "title": _clean_title_display(h["title"]),
                            "artist": h.get("artist", ""),
-                           "ts": h.get("ts"), "played_at": h.get("played_at")} for h in STATE["history"][:10]]
+                           "ts": h.get("ts"), "played_at": h.get("played_at"),
+                           "media_type": h.get("media_type"), "cover": h.get("cover"),
+                           "duration": h.get("duration"), "local_path": h.get("local_path")} for h in STATE["history"][:10]]
         out["repeat_exceptions"] = list(STATE.get("repeat_exceptions", set()))
         out["all_dedicas"] = list(reversed(STATE.get("dedicas", [])))[:30]
         out["dedica_codes"] = list(reversed(STATE.get("dedica_codes", [])))[:15]

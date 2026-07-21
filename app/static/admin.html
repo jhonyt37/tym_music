@@ -197,7 +197,10 @@
 
         <!-- Sonando ahora & cola -->
         <div class="card">
-          <p class="sec">Sonando ahora &amp; cola</p>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <p class="sec" style="margin:0;border:none;padding:0;flex:1">Sonando ahora &amp; cola</p>
+            <button type="button" class="btn sm ghost" id="requeueLastBtn" style="display:none" onclick="requeueLast()" title="Por si se saltó una por error — no toca lo que suena ahora ni ningún cobro/reembolso ya hecho">⏮ Reponer última</button>
+          </div>
           <div class="list" id="queue"><div class="empty">Nada en cola.</div></div>
         </div>
 
@@ -1443,6 +1446,17 @@ function renderCurated(fullList){
 // navegar+agregar (sin drag&drop ni quitar) — reordenar/quitar destacadas sigue siendo cosa
 // del tab Contenido, acá solo hace falta un vistazo rápido para meter algo a la cola en vivo.
 let _liveSubTab='hist';
+// ⏮ "Reponer última" (pedido explícito, alternativa segura a un rewind de verdad): mete de
+// nuevo la última canción sonada al FRENTE de la cola (position:1 en /api/admin/add, suena
+// siguiente) — nunca toca now_playing/history ni ningún cobro/reembolso ya aplicado por un
+// salto manual (ver refund_song_charge() en server.py), a propósito, para no arriesgar un
+// cobro duplicado o un reembolso mal revertido.
+let _lastHistory=[];
+async function requeueLast(){
+  const h=_lastHistory[0];
+  if(!h)return;
+  await adminAddSong(h.yt,h.title,h.artist,h.duration,1);
+}
 function setLiveSubTab(tab){
   _liveSubTab=tab;
   $('liveSubHist').classList.toggle('on',tab==='hist');
@@ -2800,6 +2814,8 @@ async function tick(){
     // La tarjeta se muestra si CUALQUIERA de las 2 listas tiene contenido, no solo el historial
     // — antes de agregar el sub-tab, alcanzaba con mirar hist.length porque era la única lista.
     const hist=s.history||[];
+    _lastHistory=hist;
+    $('requeueLastBtn').style.display=hist.length?'':'none';
     const reptExc=new Set(s.repeat_exceptions||[]);
     const HC=$('recentHistCard');const HL=$('recentHistList');
     const featuredCount=(s.curated||[]).filter(c=>window._curatedIsLocal
