@@ -957,8 +957,14 @@ async function loadSimilarLocal(artists,genres,recentTitles){
   $('simLabel').textContent=[...unique,...uniqueGenres].filter(Boolean).join(' · ');
   $('simList').innerHTML='<div class="empty" style="font-size:13px">Buscando…</div>';
   try{
-    const artistQ=unique.map(a=>fetch('/api/search_local?q='+encodeURIComponent(a)).then(r=>r.json()).catch(()=>[]));
-    const genreQ=uniqueGenres.map(g=>fetch('/api/search_local?genre='+encodeURIComponent(g)).then(r=>r.json()).catch(()=>[]));
+    // v=VENUE es obligatorio acá — sin esto, /api/search_local cae en resolve_vid() al venue
+    // demo por defecto (bardemo) para cualquier cliente sin cookie de admin (bug real
+    // encontrado: en un iPhone con el dueño logueado en Chrome en OTRA pestaña, esa cookie de
+    // admin resolvía el venue correcto "por accidente" y ocultaba el bug; en Safari, sin esa
+    // cookie, siempre caía al venue equivocado y la sección se veía vacía/oculta).
+    const vq='v='+encodeURIComponent(VENUE);
+    const artistQ=unique.map(a=>fetch('/api/search_local?'+vq+'&q='+encodeURIComponent(a)).then(r=>r.json()).catch(()=>[]));
+    const genreQ=uniqueGenres.map(g=>fetch('/api/search_local?'+vq+'&genre='+encodeURIComponent(g)).then(r=>r.json()).catch(()=>[]));
     const perQuery=await Promise.all([...artistQ,...genreQ]);
     const seenYt=new Set([_nowYt]);
     const seenTitle=new Set((recentTitles||[]).map(normTitle).filter(Boolean));
