@@ -124,6 +124,11 @@ header.bar{
 .local-swap-btn{background:transparent;border:1px solid var(--line);color:var(--mut);
   border-radius:8px;width:30px;height:34px;cursor:pointer;font-size:15px;flex:none}
 .local-swap-btn:hover{color:var(--txt);border-color:var(--pri)}
+/* Barra de progreso indeterminada (escaneo de carpeta — no se sabe el total hasta terminar de
+   recorrerla) — franja que se desliza en vez de un ancho fijo, para no mentir un porcentaje
+   que no existe todavía. */
+#scanProgressBar.indeterminate{width:30%!important;animation:scanIndeterminate 1.2s ease-in-out infinite}
+@keyframes scanIndeterminate{0%{margin-left:-30%}100%{margin-left:100%}}
 @media(max-width:700px){
   .local-cat-actions{flex-basis:100%;justify-content:flex-end;margin-top:2px}
   /* En una sola columna, cada botón ⇄ cae en su propia fila entre los campos — centrado y

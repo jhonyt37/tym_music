@@ -3370,15 +3370,37 @@ class H(BaseHTTPRequestHandler):
                 yt = (d.get("yt") or "").strip()
                 title = str(d.get("title") or "Canción")[:120]
                 artist = str(d.get("artist") or "")[:80]
-                dur = _parse_len(d.get("length")) or DEFAULT_DUR
                 if not yt:
                     return self._send(400, {"error": "Falta yt"})
+                # Mismo criterio que /api/request: en modo catálogo local, este es OTRO punto
+                # por el que se puede colar un pedido — el admin agregando directo a la cola en
+                # vivo no debe poder meter YouTube si el local eligió no usarlo.
+                if STATE["settings"].get("content_mode") == "local" and not is_local_id(yt):
+                    return self._send(400, {"error": "Este local solo pide música de su catálogo propio."})
+                local_media_type, local_path, local_genre, local_cover = None, None, None, None
+                if is_local_id(yt):
+                    _cur_entry = next((c for c in STATE["curated"] if c["yt"] == yt), None)
+                    if not _cur_entry:
+                        return self._send(400, {"error": "Esa canción ya no está en el catálogo del local."})
+                    if _cur_entry.get("missing"):
+                        return self._send(400, {"error": "Ese archivo ya no está en la carpeta del local."})
+                    if _cur_entry.get("excluded"):
+                        return self._send(400, {"error": "Esa canción fue descartada del catálogo."})
+                    dur = _cur_entry.get("duration") or DEFAULT_DUR
+                    local_media_type = _cur_entry.get("media_type")
+                    local_path = _cur_entry.get("local_path")
+                    local_genre = _cur_entry.get("genre")
+                    local_cover = _cur_entry.get("cover")
+                else:
+                    dur = _parse_len(d.get("length")) or DEFAULT_DUR
                 pos = d.get("position")
                 item = {"id": nid(), "title": title, "artist": artist, "yt": yt,
                         "token": None, "table": "Admin", "priority": False, "super": False,
                         "mode": "normal", "duration": dur, "status": "approved",
                         "play_status": "pending", "played_enough": False, "requeue_count": 0,
-                        "ts": time.time(), "charge_on_play": 0, "charged": False, "charge_kind": ""}
+                        "ts": time.time(), "charge_on_play": 0, "charged": False, "charge_kind": "",
+                        "media_type": local_media_type, "local_path": local_path,
+                        "genre": local_genre, "cover": local_cover}
                 q = [i for i in STATE["items"] if i["status"] == "approved"]
                 pending = [i for i in STATE["items"] if i["status"] != "approved"]
                 if pos is None:
