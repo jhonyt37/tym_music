@@ -455,16 +455,19 @@
   <div class="wrap wide">
     <div class="grid2" style="align-items:start">
 
-      <!-- Curated playlist -->
+      <!-- Curated playlist — mode-aware: en modo YouTube busca/agrega de YouTube (como
+           siempre); en modo local busca DENTRO de tu propio catálogo (tab Modo local) y solo
+           marca "featured" en vez de crear una entrada nueva — ver syncCuratedCardMode(). -->
       <div class="card">
-        <p class="sec">Recomendadas del local</p>
+        <p class="sec" id="curSecTitle">Recomendadas del local</p>
+        <div class="small" style="color:var(--mut);margin-bottom:8px" id="curSecHint"></div>
         <div class="search-wrap">
           <input class="search" id="curq" placeholder="Buscar para añadir…" autocomplete="off">
           <button type="button" class="search-clear" id="curqClear" aria-label="Borrar búsqueda">✕</button>
         </div>
         <div class="list" id="curResults" style="margin-top:8px;max-height:170px;overflow:auto"></div>
         <h2 style="margin-top:14px;font-size:14px;font-weight:700">En tu lista</h2>
-        <div class="small" style="color:var(--mut);margin-bottom:6px">Arrastra ⠿ para reordenar — así suena en modo fallback, cuando nadie está pidiendo canciones.</div>
+        <div class="small" style="color:var(--mut);margin-bottom:6px" id="curListHint">Arrastra ⠿ para reordenar — así suena en modo fallback, cuando nadie está pidiendo canciones.</div>
         <div class="list" id="curList"></div>
 
         <label class="opt" style="margin-top:14px">
@@ -1152,6 +1155,7 @@ async function save(){
   // imagen ya procesada en el próximo tick().
   if(hadNewLogo){tymLogoData=null;venueLogoData=null;setTimeout(tick,300);}
   syncLocalTabVisibility(payload.content_mode==='local');
+  syncCuratedCardMode(payload.content_mode==='local');
   toast('Ajustes guardados');editing=false;
 }
 // Todas las opciones del catálogo local (Fase 2+) viven en su propio tab — solo tiene sentido
@@ -1164,6 +1168,25 @@ function syncLocalTabVisibility(isLocal){
   if(!isLocal&&document.getElementById('tab-local')&&document.getElementById('tab-local').classList.contains('active')){
     showTab('content');
   }
+}
+// Pedido explícito: "el tab de contenido debería ser o de youtube o de local" — la tarjeta
+// "Recomendadas del local" es la única parte de Contenido que en verdad depende del modo
+// (Marca y redes no cambia). En modo local, además, "estar en el catálogo" (pedible por
+// clientes, tab Modo local) y "estar en esta lista" (lo que suena de fondo) son cosas
+// DISTINTAS — antes todo el catálogo sonaba de fondo sin poder elegir un subconjunto.
+window._curatedIsLocal=false;
+function syncCuratedCardMode(isLocal){
+  window._curatedIsLocal=isLocal;
+  $('curSecTitle').textContent=isLocal?'🌟 Destacadas para sonar de fondo':'Recomendadas del local';
+  $('curSecHint').textContent=isLocal
+    ?'Elige canciones de TU catálogo (tab 🗂️ Modo local) para armar la playlist que suena cuando nadie está pidiendo nada. El resto del catálogo se puede pedir igual — solo no suena de fondo por defecto.'
+    :'Busca en YouTube para armar la playlist que suena cuando nadie está pidiendo nada.';
+  $('curq').placeholder=isLocal?'Buscar en tu catálogo local…':'Buscar para añadir…';
+  $('curListHint').textContent=isLocal
+    ?'Arrastra ⠿ para reordenar — así suena de fondo. Quitar de acá no las saca del catálogo, solo deja de sonar de fondo.'
+    :'Arrastra ⠿ para reordenar — así suena en modo fallback, cuando nadie está pidiendo canciones.';
+  $('curResults').innerHTML='';$('curq').value='';
+  renderCurated(window._fullCurated||[]);
 }
 async function reset(){
   if(confirm('¿Reiniciar la demo? Borra cola, cobros y sesiones.')){
@@ -1246,18 +1269,34 @@ function initSearchClear(inputId,btnId){
 ['adminQ','curq','pollSearch','dueloSearchA','dueloSearchB','custq','localCatSearch'].forEach(id=>initSearchClear(id,id+'Clear'));
 ['lgPass','newPass','newPassConfirm'].forEach(initPasswordToggle);
 
-// Curadas
+// Curadas — buscador y "+ Añadir" bifurcan por modo (ver syncCuratedCardMode): YouTube busca
+// en YouTube y crea una entrada nueva en curated; local busca DENTRO del catálogo ya escaneado
+// y solo marca featured=true en la entrada que ya existe (nunca duplica ni crea nada).
+function adminThumbHtml(c){
+  if(c.cover)return`<img class="mini" src="${esc(c.cover)}">`;
+  return`<div class="mini" style="display:flex;align-items:center;justify-content:center;font-size:18px;background:var(--bg2)">${c.media_type==='video'?'🎬':'🎵'}</div>`;
+}
 $('curq').addEventListener('input',e=>{
   clearTimeout(curTimer);const term=e.target.value.trim();
   if(!term){$('curResults').innerHTML='';return;}
   curTimer=setTimeout(async()=>{
-    const list=await (await fetch('/api/search?q='+encodeURIComponent(term))).json();
+    const isLocal=window._curatedIsLocal;
+    const list=await (await fetch((isLocal?'/api/search_local':'/api/search')+'?q='+encodeURIComponent(term))).json();
     const box=$('curResults');box.innerHTML='';
     list.slice(0,8).forEach(s=>{
       const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<img class="mini" src="${img(s.yt)}"><div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist||'')}</div></div>`;
-      const a=document.createElement('button');a.className='btn green sm';a.textContent='+ Añadir';
-      a.onclick=async()=>{await post('/api/admin/curated',{action:'add',yt:s.yt,title:s.title,artist:s.artist,length:s.length});toast('Añadida');renderCurated(window._cur||[]);tick();};
+      const thumb=isLocal?adminThumbHtml(s):`<img class="mini" src="${img(s.yt)}">`;
+      r.innerHTML=`${thumb}<div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist||'')}</div></div>`;
+      const a=document.createElement('button');a.className='btn green sm';
+      if(isLocal&&s.featured){a.textContent='✓ Ya está';a.disabled=true;}
+      else{
+        a.textContent='+ Añadir';
+        a.onclick=async()=>{
+          if(isLocal)await post('/api/admin/local_catalog',{action:'edit',yt:s.yt,featured:true});
+          else await post('/api/admin/curated',{action:'add',yt:s.yt,title:s.title,artist:s.artist,length:s.length});
+          toast('Añadida');renderCurated(window._fullCurated||[]);tick();
+        };
+      }
       r.appendChild(a);box.appendChild(r);
     });
     tickify(box);
@@ -1269,17 +1308,28 @@ async function reorderCurated(order){
   tick();
 }
 function renderCurated(fullList){
-  // El catálogo local (prefijo "local:") tiene su propio tab ("🗂️ Modo local") — esta
-  // sigue siendo solo YouTube, como siempre.
-  const list=(fullList||[]).filter(c=>!(c.yt&&c.yt.startsWith('local:')));
+  window._fullCurated=fullList||[];
+  const isLocal=window._curatedIsLocal;
+  // Modo YouTube: el catálogo local tiene su propio tab ("🗂️ Modo local"), esta lista sigue
+  // siendo solo YouTube. Modo local: solo las entradas del catálogo marcadas featured=true —
+  // el resto del catálogo sigue siendo pedible, solo no suena de fondo (ver syncCuratedCardMode).
+  const list=isLocal
+    ?(fullList||[]).filter(c=>c.yt&&c.yt.startsWith('local:')&&c.featured)
+    :(fullList||[]).filter(c=>!(c.yt&&c.yt.startsWith('local:')));
   window._cur=list;const box=$('curList');box.innerHTML='';
-  if(!list.length){box.innerHTML='<div class="empty">Aún no has añadido recomendadas.</div>';return;}
+  if(!list.length){box.innerHTML=`<div class="empty">${isLocal?'Aún no has destacado ninguna del catálogo.':'Aún no has añadido recomendadas.'}</div>`;return;}
   _curSnapshot=list.map(c=>c.yt);
   list.forEach(c=>{
     const r=document.createElement('div');r.className='row';r.draggable=true;r.title='Arrastra para reordenar aquí, o suéltala en la cola en vivo para agregarla';
-    r.innerHTML=`<span class="drag-handle" title="Arrastra para reordenar o agregar a la cola">⠿</span><img class="mini" src="${img(c.yt)}"><div class="info"><div class="t">${esc(c.title)}</div><div class="a">${esc(c.artist||'')}</div></div>`;
+    const thumb=isLocal?adminThumbHtml(c):`<img class="mini" src="${img(c.yt)}">`;
+    r.innerHTML=`<span class="drag-handle" title="Arrastra para reordenar o agregar a la cola">⠿</span>${thumb}<div class="info"><div class="t">${esc(c.title)}</div><div class="a">${esc(c.artist||'')}</div></div>`;
     const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';
-    x.onclick=async()=>{await post('/api/admin/curated',{action:'remove',yt:c.yt});tick();};
+    x.title=isLocal?'Quitar de la lista de fondo (sigue en el catálogo, pedible)':'Quitar de recomendadas';
+    x.onclick=async()=>{
+      if(isLocal)await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,featured:false});
+      else await post('/api/admin/curated',{action:'remove',yt:c.yt});
+      tick();
+    };
     r.appendChild(x);
     r.addEventListener('dragstart',e=>{
       // Doble propósito: soltar dentro de esta misma lista reordena (_dragCurYt, patrón
@@ -1786,7 +1836,7 @@ function renderLocalCatalog(fullCurated){
     // archivo que ya no está) pero se queda visible acá para que el admin la revise/borre;
     // reaparece sola si el archivo vuelve a estar (ej. un disco de red que se desconectó).
     const missingBadge=c.missing?'<span class="small" style="color:#ef4444;font-weight:700;display:block;margin-bottom:2px">⚠ Archivo no encontrado — oculta para los clientes</span>':'';
-    r.innerHTML=`<span style="font-size:20px">${c.media_type==='video'?'🎬':'🎵'}</span>
+    r.innerHTML=`${adminThumbHtml(c)}
       <div class="info" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0">
         ${autoBadge}${lockedBadge}${missingBadge}
         ${localTrackFieldsHtml(c)}
@@ -1825,8 +1875,12 @@ function renderLocalCatalog(fullCurated){
         r.querySelector('[data-f="title"]').value=cl.title;
         r.querySelector('[data-f="artist"]').value=cl.artist;
         r.querySelector('[data-f="genre"]').value=cl.genre||'';
-        await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,title:cl.title,artist:cl.artist,genre:cl.genre});
-        toast('Actualizado con iTunes','ok');
+        // cover: carátula real vía iTunes (pedido explícito) — nunca un archivo subido, solo
+        // la URL que ya cruzó classify_track por título/artista.
+        c.cover=cl.cover||c.cover;
+        await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,title:cl.title,artist:cl.artist,genre:cl.genre,cover:cl.cover});
+        toast(cl.cover?'Actualizado con iTunes (con carátula)':'Actualizado con iTunes','ok');
+        renderLocalCatalog(window._fullCurated);
       }
       itunesBtn.disabled=false;
     };
@@ -1899,6 +1953,7 @@ async function tick(){
       $('minDirectPay').value=s.settings.min_direct_pay||700;
       $('contentModeLocal').checked=s.settings.content_mode==='local';
       syncLocalTabVisibility(s.settings.content_mode==='local');
+      syncCuratedCardMode(s.settings.content_mode==='local');
       $('showTymBrand').checked=s.settings.show_tym_brand||false;
       $('ownerEmail').value=s.owner_email||'';
       if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;

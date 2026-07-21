@@ -1050,6 +1050,38 @@ def itunes_genre(artist, title):
             del _genre_cache[k]
     return genre
 
+_cover_cache = {}
+
+def itunes_cover(artist, title):
+    """Carátula real del álbum/sencillo vía iTunes (pedido explícito: para catálogo local, ni
+    tags embebidos en el archivo ni un fotograma del video — la carátula oficial, cruzando por
+    título/artista igual que itunes_genre(). Nunca sube el archivo a ningún lado, solo hace la
+    misma búsqueda de texto que ya se hace para el género."""
+    artist = (artist or "").strip()[:80]
+    title = (title or "").strip()[:150]
+    if not artist and not title:
+        return None
+    key = (artist.lower(), title.lower())
+    now = time.time()
+    hit = _cover_cache.get(key)
+    if hit and now - hit[0] < GENRE_TTL:
+        return hit[1]
+    clean_title = _clean_for_lookup(title)
+    results = _itunes_query(f"{artist} {clean_title}".strip(), "song")
+    al = artist.lower()
+    match = next((r for r in results if al and (al in (r.get("artistName") or "").lower()
+                  or (r.get("artistName") or "").lower() in al)), None)
+    art = (match or (results[0] if results else {})).get("artworkUrl100")
+    # iTunes sirve 100x100 por defecto — el mismo path acepta cualquier tamaño en el nombre,
+    # 600x600 se ve bien hasta en la pantalla grande del TV sin pedir nada especial.
+    cover = art.replace("100x100bb", "600x600bb") if art else None
+    _cover_cache[key] = (now, cover)
+    if len(_cover_cache) > 3000:
+        stale = [k for k, v in _cover_cache.items() if now - v[0] > GENRE_TTL]
+        for k in stale:
+            del _cover_cache[k]
+    return cover
+
 # ---- Moderación de dedicatorias — heurística de palabras clave (sin IA, sin costo, sin
 # dependencias externas). Menos precisa que un modelo de lenguaje (no entiende contexto,
 # sarcasmo, ni faltas de ortografía intencionales), pero es gratis, instantánea, y no depende
@@ -1273,7 +1305,15 @@ def promote_next(manual=False):
         if STATE["settings"].get("content_mode") == "local":
             # missing: el último re-escaneo (por canción, ver maybeRescanFolder en tv.html) no
             # encontró el archivo en disco — nunca debe sonar solo desde el fallback.
-            base_pool = [c for c in STATE["curated"] if is_local_id(c.get("yt")) and not c.get("missing")]
+            local_pool = [c for c in STATE["curated"] if is_local_id(c.get("yt")) and not c.get("missing")]
+            # "featured" (pedido explícito): estar en el catálogo completo (pedible por
+            # clientes) es distinto de estar en la lista de fondo — un admin puede elegir un
+            # subconjunto, igual que "Recomendadas del local" ya funciona en modo YouTube.
+            # Mientras nadie haya marcado ninguna, sigue sonando el catálogo entero (nunca
+            # silencio, ni tampoco un cambio de comportamiento para un venue que ya estaba en
+            # producción antes de que existiera este flag).
+            featured_pool = [c for c in local_pool if c.get("featured")]
+            base_pool = featured_pool if featured_pool else local_pool
         else:
             base_pool = STATE["curated"] if STATE["curated"] else CATALOG
         shuffle = STATE["settings"].get("fallback_shuffle", True)
@@ -1946,9 +1986,7 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/search_local":
             # Fase 3 del modo catálogo local (ver plan federated-knitting-lagoon.md) — busca por
             # texto sobre STATE["curated"] filtrado a entradas locales, sin llamar nunca a
-            # YouTube. Búsqueda vacía devuelve el catálogo completo (hasta el límite), para que
-            # la pantalla de "Pedir" tenga algo que mostrar por defecto en modo local (donde las
-            # recomendaciones basadas en YouTube no aplican).
+            # YouTube.
             ip = self.client_address[0]
             if not _rate_ok(ip, "search"):
                 return self._send(429, {"error": "Demasiadas búsquedas. Espera un momento."})
@@ -1959,11 +1997,22 @@ class H(BaseHTTPRequestHandler):
                 # ofrece a los clientes (verían el pedido fallar en /tv al querer sonar).
                 pool = [c for c in STATE["curated"] if is_local_id(c.get("yt")) and not c.get("missing")]
                 if q:
+                    # Con texto, se busca en TODO el catálogo — el cliente tiene que poder pedir
+                    # cualquier cosa que el bar tenga, esté o no destacada.
                     pool = [c for c in pool
                             if q in (c["title"] + " " + (c.get("artist") or "")).lower()]
+                else:
+                    # Sin texto (pantalla de "Pedir" recién abierta): pedido explícito — lo que
+                    # se sugiere por defecto debe ser lo que el bar destacó (featured, ver
+                    # "Recomendadas del local" en /admin cuando content_mode=="local"), no un
+                    # corte arbitrario de todo el catálogo. Si nadie ha destacado nada todavía,
+                    # se cae al catálogo completo — nunca una pantalla vacía.
+                    featured = [c for c in pool if c.get("featured")]
+                    pool = featured if featured else pool
                 out = [{"yt": c["yt"], "title": c["title"], "artist": c.get("artist", ""),
                         "duration": c.get("duration") or DEFAULT_DUR,
-                        "media_type": c.get("media_type")} for c in pool[:40]]
+                        "media_type": c.get("media_type"), "cover": c.get("cover"),
+                        "featured": bool(c.get("featured"))} for c in pool[:40]]
             return self._send(200, out)
         if path == "/api/genre":
             ip = self.client_address[0]
@@ -3161,12 +3210,25 @@ class H(BaseHTTPRequestHandler):
                         c["artist"] = str(d.get("artist") or "")[:120]
                     if "genre" in d:
                         c["genre"] = str(d.get("genre"))[:40] if d.get("genre") else None
+                    # Carátula real (iTunes, ver itunes_cover) — nunca un archivo subido, solo
+                    # la URL que ya devuelve /api/admin/classify_track.
+                    if "cover" in d:
+                        cov = str(d.get("cover") or "")[:500]
+                        c["cover"] = cov if cov.startswith("http") else None
                     # "Congelar" (pedido explícito): una vez el admin confirma que un título/
                     # artista/género quedó bien a mano, protege esa entrada de que el botón de
                     # iTunes la pise sin querer — el botón sigue funcionando, pero el cliente le
                     # muestra una confirmación extra si la entrada está congelada.
                     if "locked" in d:
                         c["locked"] = bool(d.get("locked"))
+                    # "featured": pedido explícito — estar en el catálogo (orderable por
+                    # clientes) es distinto de estar en la lista de fondo/destacadas que suena
+                    # cuando nadie está pidiendo nada (antes TODO el catálogo sonaba de fondo
+                    # sin poder elegir un subconjunto, igual que ya funciona en modo YouTube con
+                    # "Recomendadas del local"). Ver promote_next(): mientras nadie haya marcado
+                    # ninguna como featured, sigue sonando el catálogo completo — nunca silencio.
+                    if "featured" in d:
+                        c["featured"] = bool(d.get("featured"))
                     return self._send(200, {"ok": True, "curated": STATE["curated"]})
                 return self._send(400, {"error": "Acción inválida"})
 
@@ -3179,9 +3241,11 @@ class H(BaseHTTPRequestHandler):
                 artist_guess = str(d.get("artist") or "").strip()[:120]
                 clean_title = _clean_title_display(title_guess)
                 artist = _lookup_real_artist(_clean_for_lookup(clean_title)) if not artist_guess else None
+                final_artist = artist or artist_guess or ""
                 genre = itunes_genre(artist_guess or artist or "", clean_title)
+                cover = itunes_cover(final_artist, clean_title)
                 return self._send(200, {"ok": True, "title": clean_title,
-                                         "artist": artist or artist_guess or "", "genre": genre})
+                                         "artist": final_artist, "genre": genre, "cover": cover})
 
             if path == "/api/admin/dedica_presets":
                 act = d.get("action")
