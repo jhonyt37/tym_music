@@ -172,6 +172,20 @@
       <!-- LEFT: Reproducción + Pendientes -->
       <div style="display:flex;flex-direction:column;gap:14px">
 
+        <!-- Agregar canción — pedido explícito: era la 3ra tarjeta de la columna, con un
+             <input> sin ningún color, fácil de pasar por alto siendo la acción que más se usa.
+             Ahora es la primera tarjeta, con borde de acento para que salte a la vista. -->
+        <div class="card" style="border-color:var(--pri)">
+          <p class="sec">➕ Agregar canción a la cola</p>
+          <div style="display:flex;gap:8px">
+            <div class="search-wrap" style="margin:0;flex:1">
+              <input class="field" id="adminQ" placeholder="Buscar canción…" style="margin:0;width:100%" oninput="adminSearch()" onkeydown="if(event.key==='Enter')adminSearch()">
+              <button type="button" class="search-clear" id="adminQClear" aria-label="Borrar búsqueda">✕</button>
+            </div>
+          </div>
+          <div class="list" id="adminResults" style="margin-top:8px"></div>
+        </div>
+
         <!-- Asistencia (solo visible si hay pedidos) -->
         <div class="card urgentCard" id="assistCard" style="display:none">
           <p class="sec">🔔 Asistencia en mesa (<span id="acount">0</span>)</p>
@@ -182,18 +196,6 @@
         <div class="card">
           <p class="sec">Sonando ahora &amp; cola</p>
           <div class="list" id="queue"><div class="empty">Nada en cola.</div></div>
-        </div>
-
-        <!-- Agregar canción -->
-        <div class="card">
-          <p class="sec">Agregar canción a la cola</p>
-          <div style="display:flex;gap:8px">
-            <div class="search-wrap" style="margin:0;flex:1">
-              <input class="field" id="adminQ" placeholder="Buscar canción…" style="margin:0;width:100%" oninput="adminSearch()" onkeydown="if(event.key==='Enter')adminSearch()">
-              <button type="button" class="search-clear" id="adminQClear" aria-label="Borrar búsqueda">✕</button>
-            </div>
-          </div>
-          <div class="list" id="adminResults" style="margin-top:8px"></div>
         </div>
 
         <!-- Historial reciente -->
@@ -829,6 +831,30 @@ function initPasswordToggle(id){
   wrap.appendChild(btn);
 }
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
+const isLocalId=yt=>typeof yt==='string'&&yt.startsWith('local:');
+// Miniatura universal (Pendientes/Sonando+cola/Historial en el tab "En vivo") — antes esas 3
+// listas usaban img(it.yt) a ciegas, que arma una URL de i.ytimg.com incluso para un id local
+// ("local:<hash>"), así que en modo catálogo local la carátula siempre salía rota. Mismo
+// criterio que ya usa miniThumbHtml() en index.html (cliente) — portado acá.
+function miniThumbHtml(yt,mediaType,cover){
+  if(isLocalId(yt)){
+    if(cover)return`<img class="mini" src="${esc(cover)}" onerror="this.outerHTML=miniThumbHtml('${yt}','${mediaType||''}')">`;
+    return`<div class="mini" style="display:flex;align-items:center;justify-content:center;font-size:18px;background:var(--bg2)">${mediaType==='video'?'🎬':'🎵'}</div>`;
+  }
+  return`<img class="mini" src="${img(yt)}" onerror="this.src='https://i.ytimg.com/vi/${yt}/hqdefault.jpg';this.onerror=null">`;
+}
+// Evita reconstruir una lista si no cambió de verdad — poll (tick(), cada 2s) llamaba a estos
+// renders SIEMPRE, reconstruyendo todas las filas así no hubiera cambiado nada, lo que
+// reiniciaba en simultáneo el ticker (banner que desplaza títulos largos) de cada fila visible
+// cada 2s — se veía como si toda la lista "parpadeara". Mismo fix ya aplicado en index.html
+// (b81c8ab) para Queridos/Pedidos/Mis likes/Historial/cola del cliente — acá faltaba portarlo
+// a las listas propias del admin (Pendientes, Sonando+cola, Historial reciente).
+function _renderIfChanged(box,sig){
+  if(!box)return false;
+  if(box.dataset.rsig===sig)return false;
+  box.dataset.rsig=sig;
+  return true;
+}
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const mm=s=>{s=Math.max(0,Math.round(s||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -2379,14 +2405,17 @@ async function tick(){
     const P=$('pending');const pendAll=s.pending||[];
     const pend=pendAll.filter(it=>!_liveMesaFilter||it.table===_liveMesaFilter);
     $('pcount').textContent=pendAll.length;
-    if(!pend.length)P.innerHTML=_liveMesaFilter?'<div class="empty">'+esc(_liveMesaFilter)+' no tiene pedidos pendientes.</div>':'<div class="empty">No hay pedidos pendientes.</div>';
-    else{P.innerHTML='';pend.forEach(it=>{
-      const r=document.createElement('div');r.className='row';
-      r.innerHTML=`<img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${esc(it.title)} ${it.priority?'<span class="chip pri">⚡</span>':''}</div><div class="a">${esc(it.table)}${it.ts?' · '+hm3(it.ts):''}</div></div>`;
-      const ok=document.createElement('button');ok.className='btn green sm';ok.textContent='Aprobar';ok.onclick=()=>approve(it.id);
-      const no=document.createElement('button');no.className='btn red sm';no.textContent='✕';no.onclick=()=>reject(it.id);
-      r.appendChild(ok);r.appendChild(no);P.appendChild(r);
-    });tickify(P);}
+    const pendSig=JSON.stringify(pend.map(it=>[it.id,it.yt,it.title,it.table,it.priority,it.ts,it.cover,it.media_type]));
+    if(_renderIfChanged(P,pendSig)){
+      if(!pend.length)P.innerHTML=_liveMesaFilter?'<div class="empty">'+esc(_liveMesaFilter)+' no tiene pedidos pendientes.</div>':'<div class="empty">No hay pedidos pendientes.</div>';
+      else{P.innerHTML='';pend.forEach(it=>{
+        const r=document.createElement('div');r.className='row';
+        r.innerHTML=`${miniThumbHtml(it.yt,it.media_type,it.cover)}<div class="info"><div class="t">${esc(it.title)} ${it.priority?'<span class="chip pri">⚡</span>':''}</div><div class="a">${esc(it.table)}${it.ts?' · '+hm3(it.ts):''}</div></div>`;
+        const ok=document.createElement('button');ok.className='btn green sm';ok.textContent='Aprobar';ok.onclick=()=>approve(it.id);
+        const no=document.createElement('button');no.className='btn red sm';no.textContent='✕';no.onclick=()=>reject(it.id);
+        r.appendChild(ok);r.appendChild(no);P.appendChild(r);
+      });tickify(P);}
+    }
 
     // Sonando + cola (con drag & drop)
     const Q=$('queue');
@@ -2402,50 +2431,61 @@ async function tick(){
         e.preventDefault();adminAddSong(_dragSearchSong.yt,_dragSearchSong.title,_dragSearchSong.artist,_dragSearchSong.length,null);_dragSearchSong=null;
       }
     };
-    Q.innerHTML='';const np=s.now_playing;
-    if(np){
-      const r=document.createElement('div');r.className='row';r.style.borderColor='var(--pri)';
-      if(_liveMesaFilter&&np.table!==_liveMesaFilter)r.style.opacity='.35';
-      const npTs=np.played_at||np.ts;
-      r.innerHTML=`<span class="pulse"></span><img class="mini" src="${img(np.yt)}"><div class="info"><div class="t">${esc(np.title)}</div><div class="a">${np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table))}${npTs?' · sonando desde '+hm3(npTs):''}</div></div>`;
-      const sk=document.createElement('button');sk.className='btn ghost sm';sk.textContent='⏭';sk.onclick=()=>skip(np);r.appendChild(sk);Q.appendChild(r);
-    }
+    const np=s.now_playing;
     const q=s.queue||[];
-    _qSnapshot=q.map(x=>x.id);
-    if(!q.length&&!np)Q.innerHTML='<div class="empty">Nada en cola.</div>';
-    q.forEach((it,i)=>{
-      const r=document.createElement('div');r.className='row';r.draggable=true;
-      if(_liveMesaFilter&&it.table!==_liveMesaFilter)r.style.opacity='.35';
-      r.innerHTML=`<span class="drag-handle" title="Arrastra para reordenar">⠿</span><div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.table)}${it.ts?' · '+hm3(it.ts):''}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
-      const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';rm.onclick=()=>remove(it.id);r.appendChild(rm);
-      // Drag events para reorder
-      r.addEventListener('dragstart',e=>{
-        _dragQId=it.id;_dragSearchSong=null;
-        e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','q:'+it.id);
-        setTimeout(()=>r.classList.add('dragging'),0);
+    _qSnapshot=q.map(x=>x.id);   // usado por el drop-to-reorder — se actualiza siempre, aunque no se redibuje
+    // Firma SOLO con los campos que de verdad se muestran acá — np.position avanza cada
+    // segundo mientras suena (no se pinta ninguna barra de progreso en esta vista), incluirlo
+    // habría invalidado la guarda en cada tick y vuelto a este fix inútil.
+    const qSig=JSON.stringify([
+      np&&[np.id,np.yt,np.title,np.table,np.priority,np.fallback,np.cover,np.media_type,np.played_at||np.ts],
+      q.map(it=>[it.id,it.yt,it.title,it.table,it.priority,it.ts,it.cover,it.media_type]),
+      _liveMesaFilter,
+    ]);
+    if(_renderIfChanged(Q,qSig)){
+      Q.innerHTML='';
+      if(np){
+        const r=document.createElement('div');r.className='row';r.style.borderColor='var(--pri)';
+        if(_liveMesaFilter&&np.table!==_liveMesaFilter)r.style.opacity='.35';
+        const npTs=np.played_at||np.ts;
+        r.innerHTML=`<span class="pulse"></span>${miniThumbHtml(np.yt,np.media_type,np.cover)}<div class="info"><div class="t">${esc(np.title)}</div><div class="a">${np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table))}${npTs?' · sonando desde '+hm3(npTs):''}</div></div>`;
+        const sk=document.createElement('button');sk.className='btn ghost sm';sk.textContent='⏭';sk.onclick=()=>skip(np);r.appendChild(sk);Q.appendChild(r);
+      }
+      if(!q.length&&!np)Q.innerHTML='<div class="empty">Nada en cola.</div>';
+      q.forEach((it,i)=>{
+        const r=document.createElement('div');r.className='row';r.draggable=true;
+        if(_liveMesaFilter&&it.table!==_liveMesaFilter)r.style.opacity='.35';
+        r.innerHTML=`<span class="drag-handle" title="Arrastra para reordenar">⠿</span><div class="pos">${i+1}</div>${miniThumbHtml(it.yt,it.media_type,it.cover)}<div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.table)}${it.ts?' · '+hm3(it.ts):''}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
+        const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';rm.onclick=()=>remove(it.id);r.appendChild(rm);
+        // Drag events para reorder
+        r.addEventListener('dragstart',e=>{
+          _dragQId=it.id;_dragSearchSong=null;
+          e.dataTransfer.effectAllowed='move';e.dataTransfer.setData('text/plain','q:'+it.id);
+          setTimeout(()=>r.classList.add('dragging'),0);
+        });
+        r.addEventListener('dragend',()=>{r.classList.remove('dragging');Q.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));});
+        r.addEventListener('dragover',e=>{
+          e.preventDefault();e.dataTransfer.dropEffect=_dragQId?'move':'copy';
+          Q.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));
+          r.classList.add('drag-over');
+        });
+        r.addEventListener('dragleave',e=>{if(!r.contains(e.relatedTarget))r.classList.remove('drag-over');});
+        r.addEventListener('drop',e=>{
+          e.preventDefault();r.classList.remove('drag-over');
+          if(_dragSearchSong){
+            adminAddSong(_dragSearchSong.yt,_dragSearchSong.title,_dragSearchSong.artist,_dragSearchSong.length,i);
+            _dragSearchSong=null;return;
+          }
+          if(!_dragQId||_dragQId===it.id)return;
+          const ids=_qSnapshot.filter(id=>id!==_dragQId);
+          const toIdx=ids.indexOf(it.id);
+          ids.splice(toIdx,0,_dragQId);
+          _dragQId=null;reorderQueue(ids);
+        });
+        Q.appendChild(r);
       });
-      r.addEventListener('dragend',()=>{r.classList.remove('dragging');Q.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));});
-      r.addEventListener('dragover',e=>{
-        e.preventDefault();e.dataTransfer.dropEffect=_dragQId?'move':'copy';
-        Q.querySelectorAll('.drag-over').forEach(el=>el.classList.remove('drag-over'));
-        r.classList.add('drag-over');
-      });
-      r.addEventListener('dragleave',e=>{if(!r.contains(e.relatedTarget))r.classList.remove('drag-over');});
-      r.addEventListener('drop',e=>{
-        e.preventDefault();r.classList.remove('drag-over');
-        if(_dragSearchSong){
-          adminAddSong(_dragSearchSong.yt,_dragSearchSong.title,_dragSearchSong.artist,_dragSearchSong.length,i);
-          _dragSearchSong=null;return;
-        }
-        if(!_dragQId||_dragQId===it.id)return;
-        const ids=_qSnapshot.filter(id=>id!==_dragQId);
-        const toIdx=ids.indexOf(it.id);
-        ids.splice(toIdx,0,_dragQId);
-        _dragQId=null;reorderQueue(ids);
-      });
-      Q.appendChild(r);
-    });
-    tickify(Q);
+      tickify(Q);
+    }
 
     // Actividad activa ahora (mesas con canciones en cola o pendientes)
     const activeTbls=[...new Set([...q.map(x=>x.table),...(s.pending||[]).map(x=>x.table)].filter(t=>t&&!t.includes('🎚️')&&!t.includes('Votación')&&!t.includes('Duelo')))];
@@ -2486,27 +2526,32 @@ async function tick(){
     const hist=s.history||[];
     const reptExc=new Set(s.repeat_exceptions||[]);
     const HC=$('recentHistCard');const HL=$('recentHistList');
-    if(hist.length){HC.style.display='';HL.innerHTML='';
-      hist.forEach(h=>{
-        const r=document.createElement('div');r.className='row';r.draggable=true;r.title='Arrastra a la cola para agregarla de nuevo';
-        const exc=reptExc.has(h.yt);
-        const hTs=h.played_at||h.ts;
-        r.innerHTML=`<span class="drag-handle" style="opacity:.6">⠿</span><img class="mini" src="${img(h.yt)}"><div class="info"><div class="t">${esc(h.title)}</div><div class="a small">${esc(h.artist||'')}${hTs?' · '+hm3(hTs):''}</div></div>`;
-        const addBtn=document.createElement('button');addBtn.className='btn green icon';addBtn.textContent='➕';addBtn.title='Agregar de nuevo a la cola';
-        addBtn.onclick=()=>adminAddSong(h.yt,h.title,h.artist,h.duration,null);
-        r.appendChild(addBtn);
-        const rb=document.createElement('button');rb.className='btn icon';rb.style.background=exc?'var(--green)':'var(--bg2)';rb.style.border='1px solid var(--line)';rb.style.color=exc?'#fff':'var(--mut)';rb.textContent='🔁';rb.title=exc?'Repetición permitida — clic para bloquear':'Repetición bloqueada — clic para permitir';
-        rb.onclick=async()=>{const j=await post('/api/admin/allow_repeat',{yt:h.yt});toast(j.allowed?'Repetición permitida':'Repetición bloqueada');tick();};
-        r.appendChild(rb);
-        r.addEventListener('dragstart',e=>{
-          _dragQId=null;_dragSearchSong={yt:h.yt,title:h.title,artist:h.artist||'',length:h.duration||''};
-          e.dataTransfer.effectAllowed='copy';e.dataTransfer.setData('text/plain','hist:'+h.yt);
-          r.classList.add('dragging');
+    if(hist.length){
+      HC.style.display='';
+      const histSig=JSON.stringify([hist.map(h=>[h.yt,h.title,h.artist,h.played_at||h.ts,h.cover,h.media_type]),[...reptExc]]);
+      if(_renderIfChanged(HL,histSig)){
+        HL.innerHTML='';
+        hist.forEach(h=>{
+          const r=document.createElement('div');r.className='row';r.draggable=true;r.title='Arrastra a la cola para agregarla de nuevo';
+          const exc=reptExc.has(h.yt);
+          const hTs=h.played_at||h.ts;
+          r.innerHTML=`<span class="drag-handle" style="opacity:.6">⠿</span>${miniThumbHtml(h.yt,h.media_type,h.cover)}<div class="info"><div class="t">${esc(h.title)}</div><div class="a small">${esc(h.artist||'')}${hTs?' · '+hm3(hTs):''}</div></div>`;
+          const addBtn=document.createElement('button');addBtn.className='btn green icon';addBtn.textContent='➕';addBtn.title='Agregar de nuevo a la cola';
+          addBtn.onclick=()=>adminAddSong(h.yt,h.title,h.artist,h.duration,null);
+          r.appendChild(addBtn);
+          const rb=document.createElement('button');rb.className='btn icon';rb.style.background=exc?'var(--green)':'var(--bg2)';rb.style.border='1px solid var(--line)';rb.style.color=exc?'#fff':'var(--mut)';rb.textContent='🔁';rb.title=exc?'Repetición permitida — clic para bloquear':'Repetición bloqueada — clic para permitir';
+          rb.onclick=async()=>{const j=await post('/api/admin/allow_repeat',{yt:h.yt});toast(j.allowed?'Repetición permitida':'Repetición bloqueada');tick();};
+          r.appendChild(rb);
+          r.addEventListener('dragstart',e=>{
+            _dragQId=null;_dragSearchSong={yt:h.yt,title:h.title,artist:h.artist||'',length:h.duration||''};
+            e.dataTransfer.effectAllowed='copy';e.dataTransfer.setData('text/plain','hist:'+h.yt);
+            r.classList.add('dragging');
+          });
+          r.addEventListener('dragend',()=>{r.classList.remove('dragging');_dragSearchSong=null;});
+          HL.appendChild(r);
         });
-        r.addEventListener('dragend',()=>{r.classList.remove('dragging');_dragSearchSong=null;});
-        HL.appendChild(r);
-      });
-      tickify(HL);
+        tickify(HL);
+      }
     }else HC.style.display='none';
 
     // Badge de alertas en el tab "En vivo": pedidos pendientes + auxilios + votación/duelo por cerrar
