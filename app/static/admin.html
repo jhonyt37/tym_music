@@ -1327,7 +1327,9 @@ function initSearchClear(inputId,btnId){
 // en YouTube y crea una entrada nueva en curated; local busca DENTRO del catálogo ya escaneado
 // y solo marca featured=true en la entrada que ya existe (nunca duplica ni crea nada).
 function adminThumbHtml(c){
-  if(c.cover)return`<img class="mini" src="${esc(c.cover)}">`;
+  // custom_cover (pedido explícito): marco de color distinto para saber de un vistazo cuál
+  // carátula es una elección propia del bar (subida/sugerida) vs. la oficial de iTunes.
+  if(c.cover)return`<img class="mini" style="${c.custom_cover?'border:2px solid var(--gold)':''}" src="${esc(c.cover)}">`;
   return`<div class="mini" style="display:flex;align-items:center;justify-content:center;font-size:18px;background:var(--bg2)">${c.media_type==='video'?'🎬':'🎵'}</div>`;
 }
 $('curq').addEventListener('input',e=>{
@@ -1746,6 +1748,23 @@ async function resolveLocalFile(path){
   return await fh.getFile();
 }
 
+// Redimensiona/comprime una imagen (carátula subida a mano) ANTES de subirla — evita reventar
+// el límite de 3MB del body (una foto de celular real puede pesar varios MB) y hace la subida
+// instantánea. El servidor hace una segunda pasada de seguridad (resize_cover_image), esto es
+// solo para no mandar bytes de más.
+async function resizeImageFile(file,maxDim,quality){
+  const bmp=await createImageBitmap(file);
+  let w=bmp.width,h=bmp.height;
+  if(Math.max(w,h)>maxDim){
+    const scale=maxDim/Math.max(w,h);
+    w=Math.round(w*scale);h=Math.round(h*scale);
+  }
+  const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;
+  canvas.getContext('2d').drawImage(bmp,0,0,w,h);
+  bmp.close&&bmp.close();
+  return canvas.toDataURL('image/jpeg',quality||0.85);
+}
+
 // Copia un archivo encontrado en lo que se soltó DENTRO de la carpeta permitida, recreando
 // las subcarpetas que traiga su ruta relativa. Nunca sobreescribe algo que ya esté ahí (podría
 // ser una canción distinta con el mismo nombre) — lo salta y lo reporta.
@@ -2037,6 +2056,25 @@ function renderLocalCatalog(fullCurated){
         ${localTrackFieldsHtml(c)}
         <div class="small" style="color:var(--mut);opacity:.75">📄 ${esc(c.local_path||'')}</div>
       </div>`;
+    // Pedido explícito: clic en una carátula PROPIA (marco de color, ver adminThumbHtml) la
+    // quita — libera un cupo de las 50 permitidas. Solo en esta vista (el catálogo editable);
+    // adminThumbHtml() se reusa en otras 3 pantallas donde solo importa el marco visual, no
+    // esta acción.
+    if(c.custom_cover){
+      const thumbEl=r.querySelector('.mini');
+      if(thumbEl){
+        thumbEl.style.cursor='pointer';
+        thumbEl.title='Carátula propia — clic para quitarla y liberar un cupo';
+        thumbEl.onclick=async()=>{
+          if(!confirm(`¿Quitar la carátula propia de "${c.title}"? Libera un cupo de las ${50} permitidas en este bar.`))return;
+          const r3=await post('/api/admin/local_catalog',{action:'remove_cover',yt:c.yt});
+          if(!r3.ok){toast(r3.error||'Error','err');return;}
+          c.cover=null;c.custom_cover=false;
+          toast('Carátula quitada','ok');
+          renderLocalCatalog(window._fullCurated);
+        };
+      }
+    }
     const saveField=async(f,val)=>{await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,[f]:val});};
     ['title','artist','genre'].forEach(f=>{
       const inp=r.querySelector(`[data-f="${f}"]`);
@@ -2138,6 +2176,101 @@ function renderLocalCatalog(fullCurated){
         };
       }
     };
+    // Carátula propia (pedido explícito) — botón "+" normal (no escondido como el de audio:
+    // esta es una acción que cualquier admin puede querer usar seguido, no un último recurso).
+    // Al abrir: zona de arrastre GRANDE (no la miniatura chica de la fila) + botón para elegir
+    // archivo del explorador + sugerencias combinadas (iTunes primero, Google de respaldo con
+    // disclaimer — ver cover_suggestions en server.py).
+    const coverToggle=document.createElement('button');coverToggle.type='button';
+    coverToggle.className='btn ghost sm';coverToggle.textContent='🖼️+';
+    coverToggle.title='Cambiar la carátula de esta canción';
+    actions.appendChild(coverToggle);
+    const coverPanel=document.createElement('div');
+    coverPanel.tabIndex=-1; // mismo motivo que audioIdPanel: retener el foco para sobrevivir al poll de 2s
+    coverPanel.style.cssText='display:none;margin-top:6px;padding:10px;border:1px dashed var(--bd);border-radius:8px;width:100%;outline:none';
+    coverToggle.onclick=()=>{
+      const open=coverPanel.style.display!=='none';
+      coverPanel.style.display=open?'none':'block';
+      if(!open&&!coverPanel.dataset.built){
+        coverPanel.dataset.built='1';
+        // Sin IDs con el yt dentro (ej. "coverFile-local:abc123") — el yt local trae ":", que
+        // rompe querySelector('#...') al interpretarse como pseudo-clase CSS (bug real
+        // encontrado probando esto mismo). Todo con clases con scope al propio coverPanel.
+        coverPanel.innerHTML=`
+          <div class="cover-dropzone" style="min-height:110px;border:2px dashed var(--bd);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;cursor:pointer;padding:12px;text-align:center">
+            <span style="font-size:26px">🖼️</span>
+            <span class="small" style="color:var(--mut)">Arrastra una imagen aquí</span>
+            <button type="button" class="btn ghost sm cover-pick-btn">📁 Buscar archivo</button>
+          </div>
+          <input type="file" accept="image/*" class="cover-file-input" style="display:none">
+          <div class="small cover-up-status" style="margin-top:6px"></div>
+          <div class="small" style="color:var(--mut);margin-top:10px">Sugerencias</div>
+          <div class="cover-suggest-box" style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+            <span class="small" style="color:var(--mut)">Cargando…</span>
+          </div>`;
+        const dz=coverPanel.querySelector('.cover-dropzone');
+        const fileInput=coverPanel.querySelector('.cover-file-input');
+        const upStatus=coverPanel.querySelector('.cover-up-status');
+        const applyCover=async(dataUrlOrLink,{isUpload})=>{
+          upStatus.textContent='Guardando…';
+          try{
+            let resp;
+            if(isUpload){
+              resp=await post('/api/admin/local_catalog',{action:'upload_cover',yt:c.yt,image:dataUrlOrLink});
+            }else{
+              // Sugerencia elegida (iTunes/Google): es una URL, no bytes — no cuenta contra el
+              // límite de 50 (ver server.py) porque no se guarda nada nuestro, solo el link.
+              await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,cover:dataUrlOrLink});
+              resp={ok:true,cover:dataUrlOrLink};
+            }
+            if(!resp.ok){upStatus.innerHTML=`<span style="color:#ef4444">${esc(resp.error||'No se pudo guardar')}</span>`;return;}
+            c.cover=resp.cover;
+            toast('Carátula actualizada','ok');
+            coverPanel.blur();  // mismo motivo que en el panel de audio: soltar el foco ANTES
+                                 // de refrescar, si no el propio guard de renderLocalCatalog()
+                                 // bloquea este refresco intencional.
+            renderLocalCatalog(window._fullCurated);
+          }catch(e){
+            upStatus.innerHTML=`<span style="color:#ef4444">${esc(String((e&&e.message)||e))}</span>`;
+          }
+        };
+        dz.onclick=()=>fileInput.click();
+        fileInput.onchange=async()=>{
+          const f=fileInput.files[0];if(!f)return;
+          upStatus.textContent='Procesando imagen…';
+          const dataUrl=await resizeImageFile(f,500,0.85);
+          await applyCover(dataUrl,{isUpload:true});
+        };
+        ['dragenter','dragover'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.style.borderColor='var(--pri)';}));
+        ['dragleave','drop'].forEach(ev=>dz.addEventListener(ev,e=>{e.preventDefault();dz.style.borderColor='var(--bd)';}));
+        dz.addEventListener('drop',async e=>{
+          const f=e.dataTransfer.files&&e.dataTransfer.files[0];
+          if(!f||!f.type.startsWith('image/')){toast('Eso no es una imagen','err');return;}
+          upStatus.textContent='Procesando imagen…';
+          const dataUrl=await resizeImageFile(f,500,0.85);
+          await applyCover(dataUrl,{isUpload:true});
+        });
+        // Sugerencias combinadas — iTunes (oficial) + Google (respaldo, con disclaimer visible,
+        // nunca mezcladas sin distinguir cuál es cuál).
+        (async()=>{
+          const sugBox=coverPanel.querySelector('.cover-suggest-box');
+          const r2=await post('/api/admin/cover_suggestions',{artist:c.artist,title:c.title});
+          if(!r2.ok||!r2.results||!r2.results.length){sugBox.innerHTML='<span class="small" style="color:var(--mut)">Sin sugerencias — sube una imagen tuya.</span>';return;}
+          sugBox.innerHTML='';
+          r2.results.forEach(s=>{
+            const wrap=document.createElement('div');wrap.style.cssText='display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer';
+            wrap.title=s.source==='google'?'Sugerencia de internet — NO es oficial, verifica que tengas derecho a usarla antes de aplicarla':(s.label||'iTunes');
+            wrap.innerHTML=`<img src="${esc(s.cover)}" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:2px solid ${s.source==='google'?'var(--gold)':'var(--line)'}">
+              <span class="small" style="color:${s.source==='google'?'var(--gold)':'var(--mut)'};font-size:10px">${s.source==='google'?'⚠ No oficial':'iTunes'}</span>`;
+            wrap.onclick=()=>{
+              if(s.source==='google'&&!confirm('Esta imagen viene de una búsqueda en internet, NO es carátula oficial — el bar es responsable de verificar que tenga derecho a usarla. ¿Aplicarla de todas formas?'))return;
+              applyCover(s.cover,{isUpload:false});
+            };
+            sugBox.appendChild(wrap);
+          });
+        })();
+      }
+    };
     const itunesBtn=document.createElement('button');itunesBtn.className='btn ghost sm';itunesBtn.textContent='🔎 Autocompletar';
     itunesBtn.title='Autocompletar género/artista/carátula (nombre del archivo → Wikidata → iTunes)';
     itunesBtn.onclick=async()=>{
@@ -2186,6 +2319,7 @@ function renderLocalCatalog(fullCurated){
     actions.appendChild(x);
     r.appendChild(actions);
     r.appendChild(audioIdPanel);
+    r.appendChild(coverPanel);
     box.appendChild(r);
   });
   tickify(box);

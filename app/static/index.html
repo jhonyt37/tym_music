@@ -1467,7 +1467,7 @@ function renderHistorialSocial(history,bisVotes,bisThreshold,myBisVotes){
   history.forEach(it=>{
     const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
     const playedTs=it.played_at||it.ts;
-    div.innerHTML=`${miniThumbHtml(it.yt,it.media_type)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}${playedTs?' · sonó '+hm(playedTs):''}</div></div>`;
+    div.innerHTML=`${miniThumbHtml(it.yt,it.media_type,it.cover)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}${playedTs?' · sonó '+hm(playedTs):''}</div></div>`;
     const react_total=it.react_total||0;
     if(react_total>=5){
       const bisCount=(bisVotes&&bisVotes[it.yt])||0;
@@ -1823,7 +1823,7 @@ function songRow(it,opts){
   const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
   const tag=it.super?'⏫ ':(it.priority?'⚡ ':'');
   const tsHtml=it.ts?` · <span style="opacity:.7">pedida ${hm(it.ts)}</span>`:'';
-  div.innerHTML=`${miniThumbHtml(it.yt,it.media_type)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+esc(it.table||it.artist||'')+tsHtml}</div></div>`;
+  div.innerHTML=`${miniThumbHtml(it.yt,it.media_type,it.cover)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+esc(it.table||it.artist||'')+tsHtml}</div></div>`;
   if(opts&&opts.boost){
     if(!it.priority){const b=document.createElement('button');b.className='btn sm gold';b.textContent='⚡ Impulsar';b.onclick=()=>boost(it.id,it.mine);div.appendChild(b);}
     // Siempre visible (nunca oculto) — deshabilitado con el motivo en el title (tooltip) cuando
@@ -1954,7 +1954,7 @@ function renderTopRequested(items){
   if(!items||!items.length){box.innerHTML='<div class="empty">Aún sin pedidos registrados.</div>';return;}
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank tappable';
-    d.innerHTML=`<div class="n">${i+1}</div>${miniThumbHtml(it.yt,it.media_type)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love" style="color:var(--pri)">🎵 ${it.count}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div>${miniThumbHtml(it.yt,it.media_type,it.cover)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love" style="color:var(--pri)">🎵 ${it.count}</div>`;
     d.onclick=()=>openSheet(it);
     box.appendChild(d);
   });
@@ -1968,7 +1968,7 @@ function renderMyLikes(items){
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank';
     const emojis=(it.my_reacts||[]).join(' ');
-    d.innerHTML=`<div class="n">${i+1}</div>${miniThumbHtml(it.yt,it.media_type)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love">${emojis}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div>${miniThumbHtml(it.yt,it.media_type,it.cover)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love">${emojis}</div>`;
     box.appendChild(d);
   });
   tickify(box);
@@ -1981,7 +1981,7 @@ function renderLoved(items){
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank';
     const tables=it.tables&&it.tables.length?it.tables.slice(0,4).join(' · ')+(it.tables.length>4?' y '+(it.tables.length-4)+' más':''):'';
-    d.innerHTML=`<div class="n">${i+1}</div>${miniThumbHtml(it.yt,it.media_type)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div>${tables?`<div style="font-size:11px;color:var(--pri);margin-top:2px">🙌 ${esc(tables)}</div>`:''}</div><div class="love">❤️ ${it.total}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div>${miniThumbHtml(it.yt,it.media_type,it.cover)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div>${tables?`<div style="font-size:11px;color:var(--pri);margin-top:2px">🙌 ${esc(tables)}</div>`:''}</div><div class="love">❤️ ${it.total}</div>`;
     box.appendChild(d);
   });
   tickify(box);

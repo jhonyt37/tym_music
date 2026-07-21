@@ -53,6 +53,18 @@
 const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const isLocalId=yt=>typeof yt==='string'&&yt.startsWith('local:');
+// Mismo fix que index.html/admin.html: img(yt) arma una URL de YouTube a ciegas, rota para un
+// id local. NOTA: esta pantalla (/player) no tiene el reproductor de archivos locales que sí
+// tiene /tv (mediaCtl/loadLocalFile) — un bar en modo local no puede usar /player para sonar,
+// pero al menos la miniatura de "hasta ahora" no debe salir rota si alguien la abre igual.
+function miniThumbHtml(yt,mediaType,cover){
+  if(isLocalId(yt)){
+    if(cover)return`<img class="mini" src="${esc(cover)}" onerror="this.outerHTML=miniThumbHtml('${yt}','${mediaType||''}')">`;
+    return`<div class="mini" style="display:flex;align-items:center;justify-content:center;font-size:18px;background:var(--bg2)">${mediaType==='video'?'🎬':'🎵'}</div>`;
+  }
+  return`<img class="mini" src="${img(yt)}" onerror="this.src='https://i.ytimg.com/vi/${yt}/hqdefault.jpg';this.onerror=null">`;
+}
 // ---- Ojito de mostrar/ocultar contraseña ----
 function initPasswordToggle(id){
   const el=document.getElementById(id);
@@ -182,7 +194,7 @@ function paintUp(s){
   if(!q.length){up.innerHTML='<div class="empty">Cola vacía — sonará la lista del local.</div>';return;}
   up.innerHTML='';q.slice(0,8).forEach((it,i)=>{
     const r=document.createElement('div');r.className='row';
-    r.innerHTML=`<div class="pos">${i+1}</div><img class="mini" src="${img(it.yt)}"><div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.table||'')}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
+    r.innerHTML=`<div class="pos">${i+1}</div>${miniThumbHtml(it.yt,it.media_type,it.cover)}<div class="info"><div class="t">${esc(it.title)}</div><div class="a">${esc(it.table||'')}</div></div>${it.priority?'<span class="chip pri">⚡</span>':''}`;
     up.appendChild(r);});
   tickify(up);
 }

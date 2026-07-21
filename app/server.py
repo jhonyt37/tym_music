@@ -1044,11 +1044,11 @@ def _clean_for_lookup(t):
     t = re.sub(r"\b(ft|feat|featuring)\b.*$", "", t, flags=re.IGNORECASE)
     return re.sub(r"\s+", " ", t).strip()
 
-def _itunes_query(term, entity):
+def _itunes_query(term, entity, limit=3):
     if not term:
         return []
     url = "https://itunes.apple.com/search?" + urllib.parse.urlencode(
-        {"term": term, "entity": entity, "limit": 3, "country": "CO"})
+        {"term": term, "entity": entity, "limit": limit, "country": "CO"})
     try:
         d = json.loads(urllib.request.urlopen(url, timeout=6).read())
         return d.get("results", [])
@@ -1304,6 +1304,66 @@ def itunes_cover(artist, title):
         for k in stale:
             del _cover_cache[k]
     return cover
+
+# ---- Carátula propia subida por el admin (pedido explícito, distinto del logo del bar) —
+# límite duro por bar: son potencialmente cientos de canciones, no un solo logo, así que sin
+# límite el estado guardado (data.json/Redis) crecería sin control. El navegador ya la
+# redimensiona antes de subir (evita reventar el límite de 3MB del body); esto es una segunda
+# pasada de seguridad server-side, más liviana que remove_solid_bg (logo) — una carátula real
+# ya trae su propio diseño, quitarle el fondo la arruinaría, así que NUNCA se toca el fondo acá.
+MAX_CUSTOM_COVERS = 50
+
+def resize_cover_image(data_uri, max_dim=500):
+    try:
+        from PIL import Image
+    except ImportError:
+        return None
+    try:
+        header, _, b64 = data_uri.partition(",")
+        if not b64:
+            return None
+        import base64, io
+        raw = base64.b64decode(b64)
+        im = Image.open(io.BytesIO(raw)).convert("RGB")
+        w, h = im.size
+        if w < 4 or h < 4:
+            return None
+        if max(w, h) > max_dim:
+            scale = max_dim / max(w, h)
+            im = im.resize((max(1, round(w * scale)), max(1, round(h * scale))), Image.LANCZOS)
+        buf = io.BytesIO()
+        im.save(buf, format="JPEG", quality=82)
+        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+    except Exception:
+        return None
+
+# ---- Sugerencias de carátula vía Google Images (respaldo cuando iTunes no tiene nada bueno) —
+# pedido explícito, "combinadas": iTunes primero (oficial, sin riesgo de derechos), Google
+# como respaldo con disclaimer claro en la UI de que NO es oficial y es responsabilidad del
+# bar. Requiere que el usuario registre su propia Google Programmable Search Engine (búsqueda
+# de imágenes activada) + una API key — sin eso, esta función simplemente no devuelve nada
+# (las sugerencias de iTunes solas siguen funcionando igual). Cuota gratis: 100/día; de ahí en
+# adelante Google cobra por consulta.
+GOOGLE_CSE_API_KEY = os.environ.get("GOOGLE_CSE_API_KEY", "")
+GOOGLE_CSE_CX = os.environ.get("GOOGLE_CSE_CX", "")
+
+def google_image_suggestions(query, limit=6):
+    if not (GOOGLE_CSE_API_KEY and GOOGLE_CSE_CX) or not query:
+        return []
+    try:
+        url = "https://www.googleapis.com/customsearch/v1?" + urllib.parse.urlencode({
+            "key": GOOGLE_CSE_API_KEY, "cx": GOOGLE_CSE_CX, "q": query,
+            "searchType": "image", "num": min(limit, 10), "safe": "active", "imgSize": "medium",
+        })
+        d = json.loads(urllib.request.urlopen(url, timeout=6).read())
+        out = []
+        for item in d.get("items", []):
+            link = item.get("link")
+            if link:
+                out.append({"cover": link, "source": "google", "label": str(item.get("title", ""))[:80]})
+        return out
+    except Exception:
+        return []
 
 # ---- Identificación por audio (AudD) — SOLO última instancia manual, nunca automática/masiva.
 # Pruebas reales (2026-07-20, 50 archivos) confirmaron 100% de respuesta pero con errores de
@@ -1864,7 +1924,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
                     if tok_sess:
                         pub_tables.add(tok_sess["table"])
             a = agg.setdefault(it["yt"], {"yt": it["yt"], "title": _clean_title_display(it["title"]),
-                                          "artist": it.get("artist", ""), "total": 0, "tables": []})
+                                          "artist": it.get("artist", ""), "total": 0, "tables": [],
+                                          "media_type": it.get("media_type"), "cover": it.get("cover")})
             a["total"] += tot
             for t in pub_tables:
                 if t not in a["tables"]:
@@ -1876,7 +1937,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
         if not yt:
             continue
         if yt not in req_songs:
-            req_songs[yt] = {"yt": yt, "title": _clean_title_display(e.get("title") or "?"), "artist": e.get("artist", ""), "count": 0}
+            req_songs[yt] = {"yt": yt, "title": _clean_title_display(e.get("title") or "?"), "artist": e.get("artist", ""),
+                              "count": 0, "media_type": e.get("media_type"), "cover": e.get("cover")}
         req_songs[yt]["count"] += 1
     top_requested = sorted(req_songs.values(), key=lambda x: -x["count"])[:10]
 
@@ -2106,7 +2168,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
             _, my_r, _ = react_counts(it["id"], token)
             if my_r:
                 my_liked.append({"id": it["id"], "yt": it["yt"], "title": it["title"],
-                                 "artist": it.get("artist", ""), "my_reacts": my_r})
+                                 "artist": it.get("artist", ""), "my_reacts": my_r,
+                                 "media_type": it.get("media_type"), "cover": it.get("cover")})
         out["my_liked"] = my_liked[:20]
     if admin:
         out["pending"] = [public_item(i, token) for i in pending_view()]
@@ -2589,7 +2652,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/dedica_presets", "/api/admin/dedica_codes",
                        "/api/admin/song_message/approve", "/api/admin/song_message/reject",
                        "/api/admin/change_password", "/api/admin/update_email",
-                       "/api/admin/local_catalog", "/api/admin/classify_track")
+                       "/api/admin/local_catalog", "/api/admin/classify_track", "/api/admin/cover_suggestions")
         vid = self.resolve_vid(d)
         if path in ADMIN_PATHS:
             av = self.authed_venue()
@@ -2935,6 +2998,7 @@ class H(BaseHTTPRequestHandler):
                     "ts": _now, "title": title, "artist": artist or "",
                     "yt": yt, "table": table, "mode": mode,
                     "priority": priority, "charge": charge,
+                    "media_type": item.get("media_type"), "cover": item.get("cover"),
                 })
                 _cutoff = _now - 3 * 24 * 3600
                 if len(STATE["request_log"]) > 5000 or (STATE["request_log"] and STATE["request_log"][0]["ts"] < _cutoff):
@@ -3496,6 +3560,7 @@ class H(BaseHTTPRequestHandler):
                     order = d.get("order") or []
                     pos = {yt: i for i, yt in enumerate(order)}
                     STATE["curated"].sort(key=lambda c: pos.get(c["yt"], 999999))
+                save_state()
                 return self._send(200, {"ok": True, "curated": STATE["curated"]})
 
             if path == "/api/admin/local_catalog":
@@ -3580,6 +3645,13 @@ class H(BaseHTTPRequestHandler):
                                     missing_now += 1
                                 else:
                                     revived += 1
+                    # Bug real encontrado probando la carátula propia: NINGUNA acción de este
+                    # endpoint (import/edit/upload_cover/remove_cover) guardaba el estado — un
+                    # reinicio del proceso (redeploy, o el spin-down del free tier de Render tras
+                    # 15 min sin uso) perdía en silencio cualquier edición del catálogo local que
+                    # no coincidiera con otra ruta que sí guarde (ej. login). Corregido acá y en
+                    # las otras 3 acciones de este mismo endpoint.
+                    save_state()
                     return self._send(200, {"ok": True, "added": added, "updated": updated,
                                              "missing_now": missing_now, "revived": revived,
                                              "curated": STATE["curated"]})
@@ -3634,8 +3706,71 @@ class H(BaseHTTPRequestHandler):
                     if "genre" in d or "cover" in d or d.get("locked"):
                         track_db_contribute(c.get("artist"), c.get("title"), c.get("genre"), c.get("cover"), verified=True)
                         file_db_contribute(c.get("sha256"), c.get("genre"), c.get("cover"), verified=True)
+                    save_state()
                     return self._send(200, {"ok": True, "curated": STATE["curated"]})
+                elif act == "upload_cover":
+                    # Carátula propia subida a mano (pedido explícito) — a diferencia de la que
+                    # trae "Autocompletar"/AudD (iTunes, oficial), esta es una elección del bar,
+                    # así que NUNCA se contribuye a track_db/file_db (esas bases son para datos
+                    # objetivos compartidos, no para el gusto de un bar en particular).
+                    yt = d.get("yt")
+                    if not yt or not is_local_id(yt):
+                        return self._send(400, {"error": "yt inválido"})
+                    c = next((c for c in STATE["curated"] if c["yt"] == yt), None)
+                    if not c:
+                        return self._send(404, {"error": "No encontrada"})
+                    if not c.get("custom_cover"):
+                        used = sum(1 for x in STATE["curated"] if x.get("custom_cover"))
+                        if used >= MAX_CUSTOM_COVERS:
+                            return self._send(400, {"error": f"Límite de {MAX_CUSTOM_COVERS} carátulas propias alcanzado en este bar — borra alguna o usa una sugerencia"})
+                    processed = resize_cover_image(str(d.get("image") or ""))
+                    if not processed:
+                        return self._send(400, {"error": "No se pudo procesar la imagen"})
+                    c["cover"] = processed
+                    c["custom_cover"] = True
+                    save_state()
+                    return self._send(200, {"ok": True, "cover": processed})
+                elif act == "remove_cover":
+                    # Pedido explícito: clic en una carátula propia la quita — libera el cupo
+                    # (no tendría sentido que siguiera contando contra el límite de 50 si ya no
+                    # existe). Solo limpia si de verdad era una subida propia; en una carátula
+                    # de iTunes no hace nada raro, simplemente no había cupo que liberar.
+                    yt = d.get("yt")
+                    if not yt or not is_local_id(yt):
+                        return self._send(400, {"error": "yt inválido"})
+                    c = next((c for c in STATE["curated"] if c["yt"] == yt), None)
+                    if not c:
+                        return self._send(404, {"error": "No encontrada"})
+                    c["cover"] = None
+                    c["custom_cover"] = False
+                    save_state()
+                    return self._send(200, {"ok": True})
                 return self._send(400, {"error": "Acción inválida"})
+
+            if path == "/api/admin/cover_suggestions":
+                # Sugerencias para elegir carátula a mano (pedido explícito, "combinadas"):
+                # primero iTunes (catálogo oficial, sin riesgo de derechos), luego Google Images
+                # como respaldo si iTunes no trae nada bueno — el cliente debe mostrar un
+                # disclaimer claro en las de Google ("no oficial, responsabilidad del bar"), acá
+                # solo se etiquetan con source:"google" para que la UI las distinga.
+                artist = str(d.get("artist") or "").strip()[:80]
+                title = str(d.get("title") or "").strip()[:150]
+                clean_title = _clean_for_lookup(title)
+                results, seen = [], set()
+                for r in _itunes_query(f"{artist} {clean_title}".strip(), "song", limit=8):
+                    art = r.get("artworkUrl100")
+                    if not art:
+                        continue
+                    cov = art.replace("100x100bb", "600x600bb")
+                    if cov in seen:
+                        continue
+                    seen.add(cov)
+                    results.append({"cover": cov, "source": "itunes",
+                                     "label": f"{r.get('artistName','')} — {r.get('trackName','')}"[:100]})
+                    if len(results) >= 6:
+                        break
+                results += google_image_suggestions(f"{artist} {clean_title} carátula álbum".strip())
+                return self._send(200, {"ok": True, "results": results})
 
             if path == "/api/admin/classify_track":
                 # Ayuda opcional del importador: recibe un título/artista "adivinado" del
