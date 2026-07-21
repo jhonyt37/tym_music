@@ -545,6 +545,11 @@ TYM = {
     # mismo. Clave = sha256 del archivo completo (huella exacta, gratis, sin dependencias
     # nuevas) -> {"artist","title","ts"}.
     "audd_cache": {},
+    # Base de metadata compartida entre TODOS los bares (catálogo local) — pedido explícito:
+    # "ir haciendo nuestra propia huella musical". Clave = título+artista normalizados (ver
+    # _track_key), NO el archivo — así una canción con distinto bitrate/formato entre dos bares
+    # igual hace match, mientras el nombre/tag sea razonable. Ver track_db_lookup/_contribute.
+    "track_db": {},
 }
 
 CUR_VID = DEFAULT_VID   # bar del request actual (se fija bajo LOCK)
@@ -1172,12 +1177,57 @@ def wikidata_genre(artist):
             del _wikidata_cache[k]
     return genre
 
+# ---- Base de metadata compartida entre bares (TYM["track_db"]) — "nuestra propia huella
+# musical": clave = título+artista normalizados, NO el archivo, para que la misma canción con
+# distinto bitrate/formato/nombre de archivo entre dos bares igual haga match con solo un poco
+# de parecido en el título/artista (mismo criterio que ya usan itunes_genre/wikidata_genre para
+# buscar). Sin huella de audio real todavía (necesitaría decodificar el archivo — ver Fase 2,
+# huella acústica vía Docker+chromaprint) — esto es puro texto, gratis, instantáneo.
+TRACK_DB_MAX = 20000
+
+def _track_key(artist, title):
+    a = _fold_txt((artist or "").strip())
+    t = _fold_txt(_clean_for_lookup((title or "").strip()))
+    if not a and not t:
+        return None
+    return f"{a}|{t}"
+
+def track_db_lookup(artist, title):
+    key = _track_key(artist, title)
+    if not key:
+        return None
+    return TYM["track_db"].get(key)
+
+def track_db_contribute(artist, title, genre=None, cover=None, verified=False):
+    """Sube (o corrige) una entrada de la base compartida. Sin `verified` (clasificación
+    automática al escanear/autocompletar) nunca pisa un dato ya existente — evita que un guess
+    débil de un bar arruine el dato bueno que ya subió otro. Con `verified` (edición manual del
+    admin, o entrada 'congelada') sí sobreescribe — es la fuente más confiable que hay."""
+    key = _track_key(artist, title)
+    if not key or not (genre or cover):
+        return
+    existing = TYM["track_db"].get(key)
+    if existing and not verified:
+        return
+    TYM["track_db"][key] = {
+        "genre": genre or (existing or {}).get("genre"),
+        "cover": cover or (existing or {}).get("cover"),
+        "ts": time.time(),
+    }
+    if len(TYM["track_db"]) > TRACK_DB_MAX:
+        stale = sorted(TYM["track_db"].items(), key=lambda kv: kv[1].get("ts", 0))
+        for k, _ in stale[: len(TYM["track_db"]) - TRACK_DB_MAX]:
+            del TYM["track_db"][k]
+
 def classify_genre(artist, title, hint=""):
     """Cascada combinada (ver comentario grande arriba). Prioridad por precisión:
     1) género nombrado en el archivo/carpeta (hint) — lo más preciso y gratis,
     2) Wikidata por artista — específico cuando responde,
     3) iTunes por artista/título — mayor cobertura pero etiquetas genéricas.
     Devuelve la primera que dé algo, o None."""
+    hit = track_db_lookup(artist, title)
+    if hit and hit.get("genre"):
+        return hit["genre"]
     g = genre_from_text(hint)
     if g:
         return g
@@ -3436,14 +3486,31 @@ class H(BaseHTTPRequestHandler):
                         if not path:
                             continue
                         yt = "local:" + hashlib.sha1(path.encode("utf-8")).hexdigest()[:16]
+                        entry_title = str(t.get("title") or "Canción")[:200]
+                        entry_artist = str(t.get("artist") or "")[:120]
+                        entry_genre = str(t.get("genre"))[:40] if t.get("genre") else None
+                        entry_cover = None
+                        # Base compartida entre bares (ver track_db_lookup): si este bar no trajo
+                        # género (el escaneo del navegador no reconoció nada en el nombre/tags) y
+                        # otro bar ya identificó la misma canción antes, se completa gratis, sin
+                        # tocar iTunes/Wikidata — el admin de todas formas puede corregirla a mano.
+                        if not entry_genre:
+                            hit = track_db_lookup(entry_artist, entry_title)
+                            if hit:
+                                entry_genre = hit.get("genre") or entry_genre
+                                entry_cover = hit.get("cover")
                         entry = {
-                            "yt": yt, "title": str(t.get("title") or "Canción")[:200],
-                            "artist": str(t.get("artist") or "")[:120],
+                            "yt": yt, "title": entry_title, "artist": entry_artist,
                             "duration": int(t["duration"]) if str(t.get("duration") or "").isdigit() else DEFAULT_DUR,
-                            "genre": (str(t.get("genre"))[:40] if t.get("genre") else None),
+                            "genre": entry_genre,
                             "media_type": (t.get("media_type") if t.get("media_type") in ("audio", "video") else None),
                             "local_path": path,
                         }
+                        if entry_cover:
+                            entry["cover"] = entry_cover
+                        # Contribuye a la base compartida (no verificado — un guess de escaneo
+                        # nunca pisa un dato ya subido por otro bar, ver track_db_contribute).
+                        track_db_contribute(entry_artist, entry_title, entry_genre, entry_cover)
                         if yt in by_yt:
                             by_yt[yt].update(entry); updated += 1
                         else:
@@ -3519,6 +3586,11 @@ class H(BaseHTTPRequestHandler):
                     # clientes y del fallback (ver /api/search_local y promote_next()).
                     if "excluded" in d:
                         c["excluded"] = bool(d.get("excluded"))
+                    # Edición manual (o el resultado ya confirmado de "Autocompletar"/AudD que
+                    # el admin aplicó) es la fuente más confiable que hay — sobreescribe lo que
+                    # ya estuviera en la base compartida entre bares para esta canción.
+                    if "genre" in d or "cover" in d or d.get("locked"):
+                        track_db_contribute(c.get("artist"), c.get("title"), c.get("genre"), c.get("cover"), verified=True)
                     return self._send(200, {"ok": True, "curated": STATE["curated"]})
                 return self._send(400, {"error": "Acción inválida"})
 
@@ -3537,6 +3609,13 @@ class H(BaseHTTPRequestHandler):
                 final_artist = artist or artist_guess or ""
                 genre = classify_genre(artist_guess or artist or "", clean_title, hint)
                 cover = itunes_cover(final_artist, clean_title)
+                if not cover:
+                    hit = track_db_lookup(final_artist, clean_title)
+                    if hit:
+                        cover = hit.get("cover")
+                # Contribuye a la base compartida entre bares con lo que se acaba de resolver
+                # (no verificado — el admin todavía puede corregirlo antes de guardar).
+                track_db_contribute(final_artist, clean_title, genre, cover)
                 return self._send(200, {"ok": True, "title": clean_title,
                                          "artist": final_artist, "genre": genre, "cover": cover})
 
@@ -4227,7 +4306,7 @@ def load_state():
         return
     try:
         if "tym" in d:
-            for k in ("socials", "tym_logo", "subscribers", "events", "accounts", "vapid", "push_subs", "audd_cache"):
+            for k in ("socials", "tym_logo", "subscribers", "events", "accounts", "vapid", "push_subs", "audd_cache", "track_db"):
                 if k in d["tym"]:
                     TYM[k] = d["tym"][k]
             # Carga todos los owners desde la DB (iniciales + creados dinámicamente)
