@@ -30,6 +30,9 @@
 /* ---- Panels ---- */
 .tabpanel{display:none}
 .tabpanel.active{display:block}
+/* ---- Sub-tabs dentro de una tarjeta (2 listas comparten el mismo espacio) ---- */
+.subtab{padding:6px 14px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--mut);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap}
+.subtab.on{background:var(--pri);color:#fff;border-color:var(--pri)}
 /* ---- Section titles ---- */
 .sec{font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 12px;padding-bottom:7px;border-bottom:1px solid var(--line)}
 /* ---- Secciones colapsables de Ajustes ---- */
@@ -198,10 +201,15 @@
           <div class="list" id="queue"><div class="empty">Nada en cola.</div></div>
         </div>
 
-        <!-- Historial reciente -->
+        <!-- Historial reciente / Canciones del bar — pedido explícito: no 2 tablas apiladas,
+             2 sub-tabs que comparten el mismo espacio, una lista visible a la vez. -->
         <div class="card" id="recentHistCard" style="display:none">
-          <p class="sec">Historial reciente</p>
+          <div style="display:flex;gap:8px;margin-bottom:12px">
+            <button type="button" class="subtab on" id="liveSubHist" onclick="setLiveSubTab('hist')">🕓 Historial reciente</button>
+            <button type="button" class="subtab" id="liveSubFeatured" onclick="setLiveSubTab('featured')">🌟 Canciones del bar</button>
+          </div>
           <div class="list" id="recentHistList"></div>
+          <div class="list" id="liveFeaturedList" style="display:none"></div>
         </div>
 
         <!-- Por aprobar -->
@@ -1383,6 +1391,15 @@ function renderCurated(fullList){
     const r=document.createElement('div');r.className='row';r.draggable=true;r.title='Arrastra para reordenar aquí, o suéltala en la cola en vivo para agregarla';
     const thumb=isLocal?adminThumbHtml(c):`<img class="mini" src="${img(c.yt)}">`;
     r.innerHTML=`<span class="drag-handle" title="Arrastra para reordenar o agregar a la cola">⠿</span>${thumb}<div class="info"><div class="t">${esc(c.title)}</div><div class="a">${esc(c.artist||'')}</div></div>`;
+    // Pedido explícito: agregar a la cola en vivo ya se podía hacer arrastrando la fila hasta
+    // "Sonando ahora & cola" (drag&drop, ver abajo) pero no todos lo descubren — un botón con
+    // ícono es más directo. Mismo adminAddSong() que ya usa el buscador de "En vivo"; para
+    // local, /api/admin/add ignora length/duration del body y los saca del propio catálogo por
+    // yt, así que no hace falta mandar isLocal?c.duration:c.length con precisión acá.
+    const q=document.createElement('button');q.className='btn green icon';q.textContent='➕';
+    q.title='Agregar a la cola en vivo';
+    q.onclick=e=>{e.stopPropagation();adminAddSong(c.yt,c.title,c.artist,isLocal?c.duration:c.length,null);};
+    r.appendChild(q);
     const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';
     x.title=isLocal?'Quitar de la lista de fondo (sigue en el catálogo, pedible)':'Quitar de recomendadas';
     x.onclick=async()=>{
@@ -1415,6 +1432,41 @@ function renderCurated(fullList){
       order.splice(toIdx,0,_dragCurYt);
       _dragCurYt=null;reorderCurated(order);
     });
+    box.appendChild(r);
+  });
+  tickify(box);
+}
+
+// Pedido explícito: en el tab "En vivo", historial reciente y "canciones del bar" (las
+// destacadas — mismo dato que "Recomendadas del local" en Contenido) no deben ser 2 tablas
+// apiladas, sino 2 sub-tabs que comparten el mismo espacio. Esta lista es de solo
+// navegar+agregar (sin drag&drop ni quitar) — reordenar/quitar destacadas sigue siendo cosa
+// del tab Contenido, acá solo hace falta un vistazo rápido para meter algo a la cola en vivo.
+let _liveSubTab='hist';
+function setLiveSubTab(tab){
+  _liveSubTab=tab;
+  $('liveSubHist').classList.toggle('on',tab==='hist');
+  $('liveSubFeatured').classList.toggle('on',tab==='featured');
+  $('recentHistList').style.display=tab==='hist'?'':'none';
+  $('liveFeaturedList').style.display=tab==='featured'?'':'none';
+}
+function renderLiveFeatured(fullList){
+  const isLocal=window._curatedIsLocal;
+  const list=isLocal
+    ?(fullList||[]).filter(c=>c.yt&&c.yt.startsWith('local:')&&c.featured&&!c.excluded)
+    :(fullList||[]).filter(c=>!(c.yt&&c.yt.startsWith('local:')));
+  const box=$('liveFeaturedList');
+  const sig=JSON.stringify(list.map(c=>[c.yt,c.title,c.artist,c.cover]));
+  if(!_renderIfChanged(box,sig))return;
+  box.innerHTML='';
+  if(!list.length){box.innerHTML=`<div class="empty">${isLocal?'Aún no has destacado ninguna del catálogo.':'Aún no has añadido recomendadas.'}</div>`;return;}
+  list.forEach(c=>{
+    const r=document.createElement('div');r.className='row';
+    const thumb=isLocal?adminThumbHtml(c):`<img class="mini" src="${img(c.yt)}">`;
+    r.innerHTML=`${thumb}<div class="info"><div class="t">${esc(c.title)}</div><div class="a">${esc(c.artist||'')}</div></div>`;
+    const q=document.createElement('button');q.className='btn green icon';q.textContent='➕';q.title='Agregar a la cola en vivo';
+    q.onclick=()=>adminAddSong(c.yt,c.title,c.artist,isLocal?c.duration:c.length,null);
+    r.appendChild(q);
     box.appendChild(r);
   });
   tickify(box);
@@ -2744,12 +2796,18 @@ async function tick(){
         }
       }else anCard.style.display='none';
     }
-    // Historial reciente con toggle de repetición
+    // Historial reciente / Canciones del bar — 2 sub-tabs, misma tarjeta (ver setLiveSubTab).
+    // La tarjeta se muestra si CUALQUIERA de las 2 listas tiene contenido, no solo el historial
+    // — antes de agregar el sub-tab, alcanzaba con mirar hist.length porque era la única lista.
     const hist=s.history||[];
     const reptExc=new Set(s.repeat_exceptions||[]);
     const HC=$('recentHistCard');const HL=$('recentHistList');
+    const featuredCount=(s.curated||[]).filter(c=>window._curatedIsLocal
+      ?(c.yt&&c.yt.startsWith('local:')&&c.featured&&!c.excluded)
+      :!(c.yt&&c.yt.startsWith('local:'))).length;
+    HC.style.display=(hist.length||featuredCount)?'':'none';
+    renderLiveFeatured(s.curated||[]);
     if(hist.length){
-      HC.style.display='';
       const histSig=JSON.stringify([hist.map(h=>[h.yt,h.title,h.artist,h.played_at||h.ts,h.cover,h.media_type]),[...reptExc]]);
       if(_renderIfChanged(HL,histSig)){
         HL.innerHTML='';
@@ -2774,7 +2832,7 @@ async function tick(){
         });
         tickify(HL);
       }
-    }else HC.style.display='none';
+    }else if(HL.dataset.rsig!=='empty'){HL.innerHTML='<div class="empty">Sin historial todavía.</div>';HL.dataset.rsig='empty';}
 
     // Badge de alertas en el tab "En vivo": pedidos pendientes + auxilios + votación/duelo por cerrar
     const pollClosing=!!(s.poll&&s.poll.active&&s.poll.ends_at&&(s.poll.ends_at-Date.now()/1000)<=15);
