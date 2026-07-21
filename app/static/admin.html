@@ -566,6 +566,10 @@
       <div id="scanReview" style="margin-top:10px"></div>
 
       <h2 style="margin-top:16px;font-size:14px;font-weight:700">En el catálogo</h2>
+      <div class="search-wrap" style="margin-bottom:8px">
+        <input class="search" id="localCatSearch" placeholder="Buscar por título, artista o género…" autocomplete="off" oninput="_localCatFilter=this.value.trim().toLowerCase();renderLocalCatalog(window._fullCurated)">
+        <button type="button" class="search-clear" id="localCatSearchClear" aria-label="Borrar búsqueda">✕</button>
+      </div>
       <div class="small" style="color:var(--mut);margin-bottom:6px" id="localCatEmptyHint"></div>
       <div class="list" id="localCatList"></div>
     </div>
@@ -1238,7 +1242,7 @@ function initSearchClear(inputId,btnId){
   btn.addEventListener('click',()=>{el.value='';el.dispatchEvent(new Event('input',{bubbles:true}));el.focus();sync();});
   sync();
 }
-['adminQ','curq','pollSearch','dueloSearchA','dueloSearchB','custq'].forEach(id=>initSearchClear(id,id+'Clear'));
+['adminQ','curq','pollSearch','dueloSearchA','dueloSearchB','custq','localCatSearch'].forEach(id=>initSearchClear(id,id+'Clear'));
 ['lgPass','newPass','newPassConfirm'].forEach(initPasswordToggle);
 
 // Curadas
@@ -1475,7 +1479,7 @@ function localTrackFieldsHtml(v){
   </div>`;
 }
 
-let _scanBatch=[];
+let _scanBatch=[],_localCatFilter='';
 async function pickLocalFolder(){
   if(!window.showDirectoryPicker){
     toast('Tu navegador no soporta esto — usa Chrome o Edge','err');
@@ -1699,18 +1703,33 @@ async function saveLocalCatalogBatch(){
 
 function renderLocalCatalog(fullCurated){
   window._fullCurated=fullCurated||[];
-  const list=(fullCurated||[]).filter(c=>c.yt&&c.yt.startsWith('local:'));
   const box=$('localCatList'),hint=$('localCatEmptyHint');
+  // Bug reportado: tick() llama esto cada 2s (poll normal) y antes reconstruía toda la lista
+  // de un tirón — si el admin estaba a mitad de escribir en un campo, el poll lo pisaba de
+  // vuelta al valor viejo del servidor (se sentía como "a veces se pone el texto
+  // predefinido"). Mientras el foco esté DENTRO de esta lista, no se re-dibuja nada — el
+  // campo se guarda solo al salir (evento 'change'), y ahí sí se refresca en el próximo poll.
+  if(box.contains(document.activeElement))return;
+  const list=window._fullCurated.filter(c=>c.yt&&c.yt.startsWith('local:'))
+    .filter(c=>{
+      if(!_localCatFilter)return true;
+      return (c.title+' '+(c.artist||'')+' '+(c.genre||'')+' '+(c.local_path||'')).toLowerCase().includes(_localCatFilter);
+    });
   box.innerHTML='';
-  hint.textContent=list.length?'':'Aún no has escaneado ninguna carpeta.';
+  hint.textContent=window._fullCurated.some(c=>c.yt&&c.yt.startsWith('local:'))
+    ?(list.length?'':'Nada coincide con esa búsqueda.')
+    :'Aún no has escaneado ninguna carpeta.';
   list.forEach(c=>{
     const r=document.createElement('div');r.className='row';r.style.alignItems='flex-start';
     // auto_added: el TV lo encontró solo en un re-escaneo (Fase 5) y nadie lo ha revisado
     // todavía — editar cualquier campo (a mano o con el botón de iTunes) lo marca revisado.
     const autoBadge=c.auto_added?'<span class="small" style="color:var(--gold);font-weight:700;display:block;margin-bottom:2px">🆕 Detectado automáticamente — revisa</span>':'';
+    // "Congelar" (pedido explícito): protege una entrada ya verificada a mano de que el botón
+    // de iTunes la pise sin querer.
+    const lockedBadge=c.locked?'<span class="small" style="color:#38bdf8;font-weight:700;display:block;margin-bottom:2px">🔒 Congelada — protegida de iTunes</span>':'';
     r.innerHTML=`<span style="font-size:20px">${c.media_type==='video'?'🎬':'🎵'}</span>
       <div class="info" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0">
-        ${autoBadge}
+        ${autoBadge}${lockedBadge}
         ${localTrackFieldsHtml(c)}
         <div class="small" style="color:var(--mut);opacity:.75">📄 ${esc(c.local_path||'')}</div>
       </div>`;
@@ -1719,9 +1738,22 @@ function renderLocalCatalog(fullCurated){
       const inp=r.querySelector(`[data-f="${f}"]`);
       inp.addEventListener('change',()=>saveField(f,inp.value));
     });
+    const lockBtn=document.createElement('button');lockBtn.className='btn ghost sm';
+    lockBtn.textContent=c.locked?'🔓 Descongelar':'🔒 Congelar';
+    lockBtn.title=c.locked?'Permitir que iTunes la sobreescriba de nuevo':'Proteger esta entrada de que el botón de iTunes la sobreescriba';
+    lockBtn.onclick=async()=>{
+      lockBtn.disabled=true;
+      c.locked=!c.locked;
+      await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,locked:c.locked});
+      renderLocalCatalog(window._fullCurated);
+    };
+    r.appendChild(lockBtn);
     const itunesBtn=document.createElement('button');itunesBtn.className='btn ghost sm';itunesBtn.textContent='🔎 iTunes';
     itunesBtn.title='Autocompletar género/artista cruzando con iTunes';
     itunesBtn.onclick=async()=>{
+      // admin.html no tiene un modal de confirmación propio — confirm() nativo, como el resto
+      // de acciones destructivas/de riesgo en este archivo.
+      if(c.locked&&!confirm(`"${c.title}" está congelada — ¿de todas formas quieres que iTunes la sobreescriba?`))return;
       itunesBtn.disabled=true;
       const cl=await post('/api/admin/classify_track',{title:c.title,artist:c.artist});
       if(cl.ok){

@@ -3131,6 +3131,12 @@ class H(BaseHTTPRequestHandler):
                         c["artist"] = str(d.get("artist") or "")[:120]
                     if "genre" in d:
                         c["genre"] = str(d.get("genre"))[:40] if d.get("genre") else None
+                    # "Congelar" (pedido explícito): una vez el admin confirma que un título/
+                    # artista/género quedó bien a mano, protege esa entrada de que el botón de
+                    # iTunes la pise sin querer — el botón sigue funcionando, pero el cliente le
+                    # muestra una confirmación extra si la entrada está congelada.
+                    if "locked" in d:
+                        c["locked"] = bool(d.get("locked"))
                     return self._send(200, {"ok": True, "curated": STATE["curated"]})
                 return self._send(400, {"error": "Acción inválida"})
 
