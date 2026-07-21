@@ -1540,6 +1540,22 @@ async function idbSetDirHandle(handle){
 }
 let _localDirHandle=null;
 
+// Huella exacta del archivo (SHA-256 vía Web Crypto, nativo del navegador, sin librerías) —
+// pedido explícito: detectar el MISMO archivo entre dos bares (ej. ambos bajaron el mismo mp3
+// de la misma fuente) para compartir género/carátula ya resueltos, sin subir el audio a
+// ningún lado — el hash se calcula acá mismo, solo se manda el texto resultante al servidor.
+// A diferencia del caché de AudD (que sí sube el audio, pero solo bajo pedido manual), esto
+// corre en cada escaneo/revisión y nunca toca la red con el archivo en sí.
+async function sha256File(file){
+  try{
+    const buf=await file.arrayBuffer();
+    const digest=await crypto.subtle.digest('SHA-256',buf);
+    return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }catch(e){
+    return null; // navegador sin soporte de Web Crypto, o archivo ilegible — no es bloqueante
+  }
+}
+
 async function scanFolder(dirHandle,onProgress){
   const found=[];
   let n=0;
@@ -1549,6 +1565,7 @@ async function scanFolder(dirHandle,onProgress){
     const file=await entry.handle.getFile();
     let tags=null;
     if(entry.mediaType==='audio')tags=await readId3Tags(file);
+    const sha256=await sha256File(file);
     const guess=guessFromFilename(entry.handle.name);
     const topFolder=entry.path.includes('/')?entry.path.split('/')[0]:'';
     found.push({
@@ -1559,6 +1576,7 @@ async function scanFolder(dirHandle,onProgress){
       genre:(tags&&tags.genre)||genreFromPath(entry.path)||topFolder||'',
       media_type:entry.mediaType,
       duration:null,
+      sha256,
     });
   }
   return found;
@@ -1758,6 +1776,7 @@ async function copyDroppedFile(found){
       if(res.skipped){skipped++;continue;}
       let tags=null;
       if(res.mediaType==='audio')tags=await readId3Tags(res.file);
+      const sha256=await sha256File(res.file);
       const guess=guessFromFilename(res.file.name);
       const topFolder=res.path.includes('/')?res.path.split('/')[0]:'';
       newTracks.push({
@@ -1767,6 +1786,7 @@ async function copyDroppedFile(found){
         genre:(tags&&tags.genre)||genreFromPath(res.path)||topFolder||'',
         media_type:res.mediaType,
         duration:null,
+        sha256,
       });
     }
     status.textContent=`${newTracks.length} archivo(s) copiado(s) a la carpeta permitida`+

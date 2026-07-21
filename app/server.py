@@ -550,6 +550,11 @@ TYM = {
     # _track_key), NO el archivo — así una canción con distinto bitrate/formato entre dos bares
     # igual hace match, mientras el nombre/tag sea razonable. Ver track_db_lookup/_contribute.
     "track_db": {},
+    # Huella EXACTA del archivo (sha256, calculado en el navegador con Web Crypto durante el
+    # escaneo — el audio nunca se sube) -> {"genre","cover","ts"}. Más confiable que track_db
+    # cuando hace match (son literalmente los mismos bytes, no solo un título parecido) —
+    # pedido explícito: detectar el mismo mp3 entre bares sin depender del nombre del archivo.
+    "file_db": {},
 }
 
 CUR_VID = DEFAULT_VID   # bar del request actual (se fija bajo LOCK)
@@ -1218,6 +1223,38 @@ def track_db_contribute(artist, title, genre=None, cover=None, verified=False):
         stale = sorted(TYM["track_db"].items(), key=lambda kv: kv[1].get("ts", 0))
         for k, _ in stale[: len(TYM["track_db"]) - TRACK_DB_MAX]:
             del TYM["track_db"][k]
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+def _norm_sha(sha):
+    sha = str(sha or "").strip().lower()
+    return sha if _SHA256_RE.match(sha) else None
+
+def file_db_lookup(sha256):
+    key = _norm_sha(sha256)
+    if not key:
+        return None
+    return TYM["file_db"].get(key)
+
+def file_db_contribute(sha256, genre=None, cover=None, verified=False):
+    """Misma lógica de confianza que track_db_contribute (ver arriba), pero por huella exacta
+    del archivo — un match acá es más fuerte que uno por texto, así que al importar se consulta
+    PRIMERO (ver acción 'import' de /api/admin/local_catalog)."""
+    key = _norm_sha(sha256)
+    if not key or not (genre or cover):
+        return
+    existing = TYM["file_db"].get(key)
+    if existing and not verified:
+        return
+    TYM["file_db"][key] = {
+        "genre": genre or (existing or {}).get("genre"),
+        "cover": cover or (existing or {}).get("cover"),
+        "ts": time.time(),
+    }
+    if len(TYM["file_db"]) > TRACK_DB_MAX:
+        stale = sorted(TYM["file_db"].items(), key=lambda kv: kv[1].get("ts", 0))
+        for k, _ in stale[: len(TYM["file_db"]) - TRACK_DB_MAX]:
+            del TYM["file_db"][k]
 
 def classify_genre(artist, title, hint=""):
     """Cascada combinada (ver comentario grande arriba). Prioridad por precisión:
@@ -3490,12 +3527,14 @@ class H(BaseHTTPRequestHandler):
                         entry_artist = str(t.get("artist") or "")[:120]
                         entry_genre = str(t.get("genre"))[:40] if t.get("genre") else None
                         entry_cover = None
-                        # Base compartida entre bares (ver track_db_lookup): si este bar no trajo
-                        # género (el escaneo del navegador no reconoció nada en el nombre/tags) y
-                        # otro bar ya identificó la misma canción antes, se completa gratis, sin
-                        # tocar iTunes/Wikidata — el admin de todas formas puede corregirla a mano.
+                        entry_sha = _norm_sha(t.get("sha256"))
+                        # Base compartida entre bares: si este bar no trajo género (el escaneo del
+                        # navegador no reconoció nada en el nombre/tags), primero se busca por
+                        # huella EXACTA del archivo (más confiable — mismos bytes, no solo un
+                        # título parecido) y si no hay match ahí, por título+artista normalizados.
+                        # Ninguna llama a iTunes/Wikidata — el admin igual puede corregir a mano.
                         if not entry_genre:
-                            hit = track_db_lookup(entry_artist, entry_title)
+                            hit = file_db_lookup(entry_sha) or track_db_lookup(entry_artist, entry_title)
                             if hit:
                                 entry_genre = hit.get("genre") or entry_genre
                                 entry_cover = hit.get("cover")
@@ -3508,9 +3547,12 @@ class H(BaseHTTPRequestHandler):
                         }
                         if entry_cover:
                             entry["cover"] = entry_cover
-                        # Contribuye a la base compartida (no verificado — un guess de escaneo
-                        # nunca pisa un dato ya subido por otro bar, ver track_db_contribute).
+                        if entry_sha:
+                            entry["sha256"] = entry_sha
+                        # Contribuye a las dos bases compartidas (no verificado — un guess de
+                        # escaneo nunca pisa un dato ya subido por otro bar).
                         track_db_contribute(entry_artist, entry_title, entry_genre, entry_cover)
+                        file_db_contribute(entry_sha, entry_genre, entry_cover)
                         if yt in by_yt:
                             by_yt[yt].update(entry); updated += 1
                         else:
@@ -3591,6 +3633,7 @@ class H(BaseHTTPRequestHandler):
                     # ya estuviera en la base compartida entre bares para esta canción.
                     if "genre" in d or "cover" in d or d.get("locked"):
                         track_db_contribute(c.get("artist"), c.get("title"), c.get("genre"), c.get("cover"), verified=True)
+                        file_db_contribute(c.get("sha256"), c.get("genre"), c.get("cover"), verified=True)
                     return self._send(200, {"ok": True, "curated": STATE["curated"]})
                 return self._send(400, {"error": "Acción inválida"})
 
@@ -4306,7 +4349,7 @@ def load_state():
         return
     try:
         if "tym" in d:
-            for k in ("socials", "tym_logo", "subscribers", "events", "accounts", "vapid", "push_subs", "audd_cache", "track_db"):
+            for k in ("socials", "tym_logo", "subscribers", "events", "accounts", "vapid", "push_subs", "audd_cache", "track_db", "file_db"):
                 if k in d["tym"]:
                     TYM[k] = d["tym"][k]
             # Carga todos los owners desde la DB (iniciales + creados dinámicamente)
