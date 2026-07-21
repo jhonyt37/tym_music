@@ -942,6 +942,57 @@ async function loadSimilar(artists,genres,recentTitles){
     tickify(box);
   }catch(e){$('simBox').style.display='none';}
 }
+// Equivalente de loadSimilar() pero para modo catálogo local — pedido explícito: "Por si te
+// gustó" debe sugerir por mismo artista/género igual que ya funciona en YouTube, no quedarse
+// apagado en modo local. Mismo shape/interleave/dedup, pero busca en /api/search_local (el
+// propio catálogo del bar) en vez de /api/search (YouTube) — nunca toca loadSimilar() de
+// arriba, así el modo YouTube queda exactamente igual que estaba.
+async function loadSimilarLocal(artists,genres,recentTitles){
+  const unique=[...new Set((Array.isArray(artists)?artists:[artists]).filter(Boolean))].slice(0,3);
+  const uniqueGenres=[...new Set((Array.isArray(genres)?genres:[genres]).filter(Boolean).map(g=>g.toLowerCase()))];
+  if(!unique.length&&!uniqueGenres.length){$('simBox').style.display='none';return;}
+  $('simBox').style.display='block';
+  $('simLabel').textContent=[...unique,...uniqueGenres].filter(Boolean).join(' · ');
+  $('simList').innerHTML='<div class="empty" style="font-size:13px">Buscando…</div>';
+  try{
+    const artistQ=unique.map(a=>fetch('/api/search_local?q='+encodeURIComponent(a)).then(r=>r.json()).catch(()=>[]));
+    const genreQ=uniqueGenres.map(g=>fetch('/api/search_local?genre='+encodeURIComponent(g)).then(r=>r.json()).catch(()=>[]));
+    const perQuery=await Promise.all([...artistQ,...genreQ]);
+    const seenYt=new Set([_nowYt]);
+    const seenTitle=new Set((recentTitles||[]).map(normTitle).filter(Boolean));
+    const filtered=perQuery.map(ar=>ar.filter(s=>{
+      if(!s.yt||seenYt.has(s.yt))return false;
+      const nt=normTitle(s.title);
+      if(nt&&seenTitle.has(nt))return false;
+      seenYt.add(s.yt);if(nt)seenTitle.add(nt);
+      return true;
+    }));
+    const merged=interleaveArtists(filtered,9);
+    const box=$('simList');box.innerHTML='';
+    if(!merged.length){$('simBox').style.display='none';return;}
+    merged.forEach(s=>{
+      const r=document.createElement('div');r.className='row tappable';
+      const sub=[s.artist,mm(s.duration)].filter(Boolean).join(' · ');
+      r.innerHTML=`${miniThumbHtml(s.yt,s.media_type,s.cover)}<div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc(sub)}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
+      r.onclick=()=>openSheet(s);
+      box.appendChild(r);
+    });
+    tickify(box);
+    const shownArtists=[...new Set(merged.map(s=>s.artist).filter(Boolean))];
+    if(shownArtists.length){
+      const wrap=document.createElement('div');
+      wrap.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;padding-top:8px;border-top:1px solid var(--line)';
+      shownArtists.forEach(a=>{
+        const b=document.createElement('button');b.className='btn sm ghost';
+        b.textContent='Más de '+a;
+        b.onclick=()=>{showTab('pedir');$('q').value=a;$('q').dispatchEvent(new Event('input'));};
+        wrap.appendChild(b);
+      });
+      box.appendChild(wrap);
+    }
+    tickify(box);
+  }catch(e){$('simBox').style.display='none';}
+}
 
 // ---------- Pedir ----------
 function openSheet(s){
@@ -2023,23 +2074,29 @@ async function poll(){
       if(!still){assistActive=false;assistId=null;updateAssistBtn();toast('✓ Alguien está en camino 👋','ok');}
     }
 
-    // Sugerencias basadas en lo que suena (fallback también, si tiene artista) — 100%
-    // YouTube (/api/search por artista/género + /api/genre de iTunes), no aplica en modo
-    // catálogo local (bug reportado: salían resultados de YouTube con el local en modo local).
-    if(CONTENT_MODE==='local'){$('simBox').style.display='none';_simLoadedForId=null;}
-    else if(np&&np.artist&&np.id!==_simLoadedForId){
+    // Sugerencias basadas en lo que suena (fallback también, si tiene artista) — mismo
+    // artista/género en ambos modos, pedido explícito ("así como ya funciona bien en
+    // YouTube, así debería ser en local"). En YouTube sigue exactamente igual que antes
+    // (/api/search por artista/género + /api/genre de iTunes, vía loadSimilar()); en local
+    // busca DENTRO del catálogo del bar (/api/search_local, vía loadSimilarLocal()) usando el
+    // género que el catálogo ya trae — nunca llama a YouTube ni se toca loadSimilar().
+    if(np&&np.artist&&np.id!==_simLoadedForId){
       _simLoadedForId=np.id;_nowYt=np.yt;
       const simArtists=[np.artist,(s.history[0]||{}).artist,(s.history[1]||{}).artist];
       const recentTitles=[np.title,...(s.history||[]).map(h=>h.title)];
-      const npId=np.id;
-      // Género REAL de la canción que suena (iTunes), no el género fijo del local —
-      // así si suena salsa, salen más salsa, aunque el local tenga otro género configurado.
-      fetch('/api/genre?artist='+encodeURIComponent(np.artist)+'&title='+encodeURIComponent(np.title))
-        .then(r=>r.json()).catch(()=>({}))
-        .then(g=>{
-          if(_simLoadedForId!==npId)return; // la canción ya cambió, descarta esta respuesta vieja
-          loadSimilar(simArtists,[g.genre,s.active_genre],recentTitles);
-        });
+      if(CONTENT_MODE==='local'){
+        loadSimilarLocal(simArtists,[np.genre],recentTitles);
+      }else{
+        const npId=np.id;
+        // Género REAL de la canción que suena (iTunes), no el género fijo del local —
+        // así si suena salsa, salen más salsa, aunque el local tenga otro género configurado.
+        fetch('/api/genre?artist='+encodeURIComponent(np.artist)+'&title='+encodeURIComponent(np.title))
+          .then(r=>r.json()).catch(()=>({}))
+          .then(g=>{
+            if(_simLoadedForId!==npId)return; // la canción ya cambió, descarta esta respuesta vieja
+            loadSimilar(simArtists,[g.genre,s.active_genre],recentTitles);
+          });
+      }
     }else if(!np){$('simBox').style.display='none';_simLoadedForId=null;}
 
     // Now playing

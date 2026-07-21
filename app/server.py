@@ -1349,7 +1349,8 @@ def promote_next(manual=False):
             "table": "Lista del local", "priority": False, "status": "playing",
             "ts": now, "charged": False, "fallback": True, "played_at": now,
             "duration": s.get("duration", DEFAULT_DUR), "position": 0,
-            "media_type": s.get("media_type"), "local_path": s.get("local_path")} if s else None)
+            "media_type": s.get("media_type"), "local_path": s.get("local_path"),
+            "genre": s.get("genre")} if s else None)
     return STATE["now_playing"]
 
 def in_play_or_queue(yt):
@@ -1545,6 +1546,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                   "paid": np.get("charge_on_play", 0) > 0 or np.get("paid_amount", 0) > 0,
                   "duration": np.get("duration", DEFAULT_DUR), "position": np.get("position", 0),
                   "media_type": np.get("media_type"), "local_path": np.get("local_path"),
+                  "genre": np.get("genre"),
                   "learned_end": STATE["learned_end"].get(np["yt"]),
                   "message": (np.get("message") or "") if np.get("message_status", "approved") == "approved" else "",
                   "ts": np.get("ts"), "played_at": np.get("played_at"),
@@ -1991,12 +1993,20 @@ class H(BaseHTTPRequestHandler):
             if not _rate_ok(ip, "search"):
                 return self._send(429, {"error": "Demasiadas búsquedas. Espera un momento."})
             q = self._q("q")[:150].strip().lower()
+            # genre: pedido explícito — "Por si te gustó" en modo local debe sugerir por mismo
+            # artista/género igual que ya funciona en YouTube (ahí usa /api/search por artista +
+            # /api/genre de iTunes) — acá el género ya viene del propio catálogo, sin llamar a
+            # nada externo. Filtro aparte de `q` (no se mezclan) para no dar falsos positivos si
+            # el nombre del género aparece suelto en un título.
+            genre_q = self._q("genre")[:40].strip().lower()
             with LOCK:
                 self.set_venue(self.resolve_vid())
                 # missing: archivo que el último re-escaneo no encontró en disco — no se le
                 # ofrece a los clientes (verían el pedido fallar en /tv al querer sonar).
                 pool = [c for c in STATE["curated"] if is_local_id(c.get("yt")) and not c.get("missing")]
-                if q:
+                if genre_q:
+                    pool = [c for c in pool if genre_q in (c.get("genre") or "").lower()]
+                elif q:
                     # Con texto, se busca en TODO el catálogo — el cliente tiene que poder pedir
                     # cualquier cosa que el bar tenga, esté o no destacada.
                     pool = [c for c in pool
@@ -2430,7 +2440,7 @@ class H(BaseHTTPRequestHandler):
                 # sin YouTube (ver plan federated-knitting-lagoon.md), necesarios para que /tv
                 # sepa qué archivo abrir y si mostrar la vista de audio o de video. Se resuelve
                 # ANTES del chequeo de duración máxima para que aplique sobre el valor real.
-                local_media_type, local_path = None, None
+                local_media_type, local_path, local_genre = None, None, None
                 if is_local_id(yt):
                     _cur_entry = next((c for c in STATE["curated"] if c["yt"] == yt), None)
                     if not _cur_entry:
@@ -2440,6 +2450,10 @@ class H(BaseHTTPRequestHandler):
                     dur = _cur_entry.get("duration") or DEFAULT_DUR
                     local_media_type = _cur_entry.get("media_type")
                     local_path = _cur_entry.get("local_path")
+                    # género del catálogo (pedido explícito: "Por si te gustó" en modo local debe
+                    # sugerir por artista/género igual que en YouTube, sin llamar a iTunes de
+                    # nuevo — el catálogo ya trae el género que el admin clasificó).
+                    local_genre = _cur_entry.get("genre")
                 _max_dur_min = int(STATE["settings"].get("max_song_duration_min", 0) or 0)
                 if _max_dur_min > 0 and dur > _max_dur_min * 60:
                     return self._send(400, {"error": f"Esta canción dura más de {_max_dur_min} min, el máximo permitido en este local 🎵",
@@ -2560,7 +2574,7 @@ class H(BaseHTTPRequestHandler):
                         "ts": time.time(), "charge_on_play": charge, "charged": bool(charge_via),
                         "charge_kind": ckind, "charge_via": charge_via, "paid_amount": paid_amount,
                         "message": req_msg, "message_status": msg_status, "message_mod_reason": _msg_reason,
-                        "media_type": local_media_type, "local_path": local_path}
+                        "media_type": local_media_type, "local_path": local_path, "genre": local_genre}
                 STATE["items"].append(item)
                 bump_count(yt, title, artist)
                 log_order(table, d.get("token"), mode, title, yt)   # analítica (free/premium)
