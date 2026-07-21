@@ -312,6 +312,9 @@
       <label class="small">Precio por prioridad (COP)</label>
       <input class="field" id="price" type="number" step="100">
       <div class="pkgrow"><span class="small" style="flex:1">Saltar al #1: multiplicador (× precio)</span><input class="field" id="jumpMult" type="number"></div>
+      <div class="small" style="color:var(--mut);margin-top:10px">Anti-abuso: si una mesa compra "Prioridad" o "Al frente" varias veces seguidas, el precio sube (x2, luego x3) hasta que pase la ventana de tiempo. Cada una tiene su propio contador — pagar una no afecta el precio de la otra.</div>
+      <div class="pkgrow"><span class="small" style="flex:1">⚡ Prioridad: ventana anti-abuso (min)</span><input class="field" id="prioAbuseMin" type="number"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">⏫ Al frente: ventana anti-abuso (min)</span><input class="field" id="jumpAbuseMin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">💌 Cargo extra por dedicatoria al pedir (COP, 0=gratis)</span><input class="field" id="dedicaPrice" type="number" step="100"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Monto mínimo para "pagar directo" (COP)</span><input class="field" id="minDirectPay" type="number" step="100"></div>
 
@@ -1129,6 +1132,8 @@ async function save(){
     trim_end_secs:parseInt($('trimEnd').value||0),
     free_per_window:parseInt($('freeN').value||0),free_window_min:parseInt($('freeWin').value||0),
     jump_multiplier:parseInt($('jumpMult').value||0),
+    priority_abuse_window_min:parseInt($('prioAbuseMin').value||60),
+    jump_abuse_window_min:parseInt($('jumpAbuseMin').value||60),
     max_priority_queue_min:parseInt($('maxPrioMin').value||0),
     max_song_duration_min:parseInt($('maxSongDurationMin').value||0),
     dedica_price:parseInt($('dedicaPrice').value||0),
@@ -2005,6 +2010,8 @@ async function tick(){
       $('trimEnd').value=s.settings.trim_end_secs;
       $('freeN').value=s.settings.free_per_window;$('freeWin').value=s.settings.free_window_min;
       $('jumpMult').value=s.settings.jump_multiplier;
+      $('prioAbuseMin').value=s.settings.priority_abuse_window_min!=null?s.settings.priority_abuse_window_min:60;
+      $('jumpAbuseMin').value=s.settings.jump_abuse_window_min!=null?s.settings.jump_abuse_window_min:60;
       $('maxPrioMin').value=s.settings.max_priority_queue_min||0;
       $('maxSongDurationMin').value=s.settings.max_song_duration_min||0;
       $('dedicaPrice').value=s.settings.dedica_price||0;

@@ -598,7 +598,9 @@ function applyTheme(t){
   document.querySelector('meta[name="theme-color"]').content=th.bg;
 }
 let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0, jumpReason='', dedicaPrice=0;
-let priorityAbuseMult=1, priorityAbuseResetAt=0;
+// "Prioridad" (⚡) y "Al frente" (⏫) tienen cada una su propio contador anti-abuso en el
+// servidor (pedido explícito — antes compartían uno solo, pagar uno subía el precio del otro).
+let priorityAbuseMult=1, priorityAbuseResetAt=0, jumpAbuseMult=1, jumpAbuseResetAt=0;
 let prepaidMode=false, walletBalance=0, insufRetry=null, insufNeed=0, pendingRetry=null;
 let registerGateOpen=false, _anonBusy=false, pendingTabConfirm=false;
 // Si el navegador restaura esta página desde el bfcache (back/forward) en vez de cargarla de
@@ -1061,22 +1063,22 @@ function updateDedicaPriceHint(){
 // Aviso del multiplicador anti-abuso (x2/x3 por pedidos de prioridad/salto seguidos de la
 // misma mesa) ANTES de pagar, con cuenta regresiva de cuándo baja — antes solo se enteraba
 // en un toast DESPUÉS de que ya lo habían cobrado.
-function abuseMultHint(now){
-  if(priorityAbuseMult<=1||!priorityAbuseResetAt||priorityAbuseResetAt<=now)return'';
-  return ' · 💸 x'+priorityAbuseMult+' (baja a x'+(priorityAbuseMult-1)+' en '+mm(priorityAbuseResetAt-now)+')';
+function abuseMultHint(now,mult,resetAt){
+  if(mult<=1||!resetAt||resetAt<=now)return'';
+  return ' · 💸 x'+mult+' (baja a x'+(mult-1)+' en '+mm(resetAt-now)+')';
 }
 function updatePriOption(){
   const now=Date.now()/1000;
   const wait=price_queue_min>5?' · ~'+price_queue_min+' min de espera':'';
   if(sess&&sess.pass_until>now){$('priSub').textContent='Incluida en tu pase activo'+wait;$('priPrice').textContent='Pase';}
   else if(sess&&sess.credits>0){$('priSub').textContent='Usa 1 crédito (te quedan '+(sess.credits-1)+')'+wait;$('priPrice').textContent='1 créd.';}
-  else{$('priSub').textContent='Suena antes'+wait+' — se suma a tu cuenta'+abuseMultHint(now);$('priPrice').textContent=cop(price);}
+  else{$('priSub').textContent='Suena antes'+wait+' — se suma a tu cuenta'+abuseMultHint(now,priorityAbuseMult,priorityAbuseResetAt);$('priPrice').textContent=cop(price);}
   // El botón "Al frente (#1)" SIEMPRE se muestra (nunca se oculta) — cuando no está
   // disponible se ve deshabilitado con el motivo exacto (jumpReason, del servidor) en vez de
   // desaparecer sin explicación: evita que el cliente le pregunte al mesero por qué no está,
   // reduciendo la carga operativa del admin del bar.
   $('optSuper').classList.toggle('disabled',!jumpAvail);
-  $('superSub').textContent = jumpAvail ? ('Suena de primera, ¡ya mismo!'+abuseMultHint(now)) : jumpReason;
+  $('superSub').textContent = jumpAvail ? ('Suena de primera, ¡ya mismo!'+abuseMultHint(now,jumpAbuseMult,jumpAbuseResetAt)) : jumpReason;
   $('superPrice').textContent=cop(jumpPrice);
 }
 function pick(m){
@@ -1094,8 +1096,12 @@ function confirmReq(){
   const hasMsg=($('sheetDedicaMsg').value||'').trim().length>0;
   const dedicaNote=(hasMsg&&dedicaPrice>0)?'<br><span style="color:var(--gold);font-size:13px">💌 +'+cop(dedicaPrice)+' por la dedicatoria</span>':'';
   const now0=Date.now()/1000;
-  const abuseNote=(priorityAbuseMult>1&&priorityAbuseResetAt>now0)?
-    '<br><span style="color:var(--gold);font-size:13px">💸 Precio x'+priorityAbuseMult+' por pedidos seguidos de tu mesa — baja a x'+(priorityAbuseMult-1)+' en '+mm(priorityAbuseResetAt-now0)+'</span>':'';
+  // "Prioridad" y "Al frente" tienen cada una su propio multiplicador/aviso — se elige el que
+  // corresponde al modo que se está confirmando, no siempre el mismo.
+  const _abMult=mode==='super'?jumpAbuseMult:priorityAbuseMult;
+  const _abResetAt=mode==='super'?jumpAbuseResetAt:priorityAbuseResetAt;
+  const abuseNote=(_abMult>1&&_abResetAt>now0)?
+    '<br><span style="color:var(--gold);font-size:13px">💸 Precio x'+_abMult+' por pedidos seguidos de tu mesa — baja a x'+(_abMult-1)+' en '+mm(_abResetAt-now0)+'</span>':'';
   if(mode==='super'){
     confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> y suena de primera. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'. Solo <b>una vez por canción</b>.'+dedicaNote+abuseNote,doReq);
   } else if(mode==='pri'){
@@ -1990,6 +1996,7 @@ async function poll(){
     dedicaPrice=s.settings.dedica_price||0;
     jumpAvail=!!s.jump_available;jumpPrice=(s.jump_price_now!=null?s.jump_price_now:(s.jump_price||0));price_queue_min=s.priority_queue_min||0;jumpReason=s.jump_unavailable_reason||'';
     priorityAbuseMult=s.priority_abuse_mult_now||1;priorityAbuseResetAt=s.priority_abuse_reset_at||0;
+    jumpAbuseMult=s.jump_abuse_mult_now||1;jumpAbuseResetAt=s.jump_abuse_reset_at||0;
     allowSelfReact=!!s.settings.allow_self_react;
     CONTENT_MODE=s.settings.content_mode||'youtube';
     // La vista por defecto (búsqueda vacía) depende del modo — se decide en loadReco()/onSearch

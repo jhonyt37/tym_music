@@ -439,6 +439,13 @@ def make_venue(name):
             "free_per_window": 3,
             "free_window_min": 10,
             "jump_multiplier": 3,
+            # Anti-abuso de precio (pedido explícito: antes 60 min fijo sin poder cambiarlo, y
+            # compartido entre "Prioridad" y "Al frente" — pedir uno subía el precio del otro
+            # también). Cada tipo tiene su propia ventana configurable y su propio contador
+            # (ver priority_abuse_multiplier/record_priority_purchase, kind="prio"/"jump") — la
+            # escala 1x→2x→3x se queda fija, solo la ventana de tiempo es configurable.
+            "priority_abuse_window_min": 60,
+            "jump_abuse_window_min": 60,
             "venue_logo": "",          # logo del BAR
             "max_priority_queue_min": 0,   # bloquear nuevas prioridades si cola premium > N min (0=off)
             "max_song_duration_min": 0,    # rechazar pedidos de canciones más largas que N min (0=off)
@@ -1211,35 +1218,47 @@ def pending_view():
 # ---- Anti-abuso de prioridad ----
 # Mesas impulsivas que compran prioridad/salto al #1 una y otra vez acaparan la cola y
 # aburren a las demás mesas. En vez de bloquearlas (frustra a quien sí quiere pagar más),
-# cada compra pagada (salto o prioridad de un solo uso) de la MISMA mesa dentro de la
-# última hora encarece la siguiente: 1x la primera, 2x la segunda, 3x de ahí en adelante.
-# Pase de tiempo y créditos ya prepagados no cuentan — solo compras con cobro nuevo.
-PRIORITY_ABUSE_WINDOW_SECS = 3600
+# cada compra pagada (salto o prioridad de un solo uso) de la MISMA mesa dentro de una
+# ventana de tiempo encarece la siguiente: 1x la primera, 2x la segunda, 3x de ahí en
+# adelante. Pase de tiempo y créditos ya prepagados no cuentan — solo compras con cobro nuevo.
+# Pedido explícito: "Prioridad" (⚡, cola normal) y "Al frente" (⏫/salto, #1 inmediato) tienen
+# cada una su propio contador Y su propia ventana configurable (antes compartían uno solo fijo
+# en 60 min — pagar un salto subía el precio de la siguiente prioridad normal, y viceversa,
+# aunque fueran compras de tipo distinto). `kind` es "prio" o "jump"; la escala 1x/2x/3x se
+# queda fija para ambos, solo la ventana de tiempo es configurable por separado (Ajustes).
+def _abuse_key(kind):
+    return "priority_abuse" if kind == "prio" else "jump_abuse"
 
-def priority_abuse_multiplier(table, now):
-    hist = STATE.setdefault("priority_abuse", {})
-    times = [t for t in hist.get(table, []) if now - t < PRIORITY_ABUSE_WINDOW_SECS]
+def _abuse_window_secs(kind):
+    field = "priority_abuse_window_min" if kind == "prio" else "jump_abuse_window_min"
+    return max(1, int(STATE["settings"].get(field, 60) or 60)) * 60
+
+def priority_abuse_multiplier(table, now, kind):
+    hist = STATE.setdefault(_abuse_key(kind), {})
+    window = _abuse_window_secs(kind)
+    times = [t for t in hist.get(table, []) if now - t < window]
     hist[table] = times
     n = len(times)
     return 1 if n == 0 else (2 if n == 1 else 3)
 
-def record_priority_purchase(table, now):
-    hist = STATE.setdefault("priority_abuse", {})
+def record_priority_purchase(table, now, kind):
+    hist = STATE.setdefault(_abuse_key(kind), {})
     hist.setdefault(table, []).append(now)
 
-def priority_abuse_preview(table, now):
+def priority_abuse_preview(table, now, kind):
     """Como priority_abuse_multiplier, pero de solo lectura y pensado para mostrarle el
     precio real al cliente ANTES de pagar (bug reportado: antes solo se enteraba del x2/x3
     en un toast DESPUÉS del cobro). Devuelve (mult, reset_at) — reset_at es el momento en
     que el multiplicador baja un escalón (None si ya está en x1). Debe reflejar exactamente
     la misma fórmula que /api/request usa al cobrar de verdad."""
-    mult = priority_abuse_multiplier(table, now)
-    times = sorted(STATE.get("priority_abuse", {}).get(table, []))
+    mult = priority_abuse_multiplier(table, now, kind)
+    window = _abuse_window_secs(kind)
+    times = sorted(STATE.get(_abuse_key(kind), {}).get(table, []))
     reset_at = None
     if mult == 2 and times:
-        reset_at = times[0] + PRIORITY_ABUSE_WINDOW_SECS
+        reset_at = times[0] + window
     elif mult == 3 and len(times) >= 2:
-        reset_at = times[-2] + PRIORITY_ABUSE_WINDOW_SECS
+        reset_at = times[-2] + window
     return mult, reset_at
 
 # ---- Gate + duración dinámica para votación/duelo (llamar bajo LOCK) ----
@@ -1754,6 +1773,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "genre", "credit_packages", "time_pass",
                                        "repeat_block_min", "repeat_block_songs", "trim_end_secs",
                                        "free_per_window", "free_window_min", "jump_multiplier",
+                                       "priority_abuse_window_min", "jump_abuse_window_min",
                                        "venue_logo", "max_priority_queue_min", "max_song_duration_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
@@ -1809,11 +1829,14 @@ def public_state(token=None, admin=False, mark_dedica=None):
         # Precio real de prioridad/salto AHORA MISMO, con el multiplicador anti-abuso ya
         # aplicado — antes el cliente solo se enteraba del x2/x3 en un toast DESPUÉS de que
         # ya lo habían cobrado. Misma fórmula que /api/request usa al cobrar de verdad.
-        _abuse_mult, _abuse_reset_at = priority_abuse_preview(tbl, time.time())
-        out["priority_price_now"] = s["price_priority"] * _abuse_mult
-        out["jump_price_now"] = s["price_priority"] * s.get("jump_multiplier", 3) * _abuse_mult
-        out["priority_abuse_mult_now"] = _abuse_mult
-        out["priority_abuse_reset_at"] = _abuse_reset_at
+        _prio_mult, _prio_reset_at = priority_abuse_preview(tbl, time.time(), "prio")
+        _jump_mult, _jump_reset_at = priority_abuse_preview(tbl, time.time(), "jump")
+        out["priority_price_now"] = s["price_priority"] * _prio_mult
+        out["jump_price_now"] = s["price_priority"] * s.get("jump_multiplier", 3) * _jump_mult
+        out["priority_abuse_mult_now"] = _prio_mult
+        out["priority_abuse_reset_at"] = _prio_reset_at
+        out["jump_abuse_mult_now"] = _jump_mult
+        out["jump_abuse_reset_at"] = _jump_reset_at
         if STATE["settings"].get("prepaid_mode"):
             customer = get_customer(sess)
             out["wallet_balance"] = customer.get("balance", 0) if customer else 0
@@ -2566,7 +2589,10 @@ class H(BaseHTTPRequestHandler):
                         mode = "single"; charge = STATE["settings"]["price_priority"]
                 # Anti-abuso: solo compras con cobro nuevo (salto o prioridad de un solo uso)
                 # escalan de precio — pase de tiempo y créditos ya prepagados quedan igual.
-                abuse_mult = priority_abuse_multiplier(table, now) if charge > 0 else 1
+                # "salto" (Al frente) y "single" (Prioridad) tienen cada uno su propio contador
+                # (pedido explícito — antes compartían uno solo).
+                abuse_kind = "jump" if mode == "salto" else "prio"
+                abuse_mult = priority_abuse_multiplier(table, now, abuse_kind) if charge > 0 else 1
                 charge = charge * abuse_mult
                 # Dedicatoria (mensaje al pedir): cargo fijo adicional si el local lo configuró
                 # — se SUMA al precio de la canción (gratis/prioridad/salto), no lo reemplaza,
@@ -2584,7 +2610,7 @@ class H(BaseHTTPRequestHandler):
                         return self._send(400, err)
                     charge_via, paid_amount, charge = via, charge, 0
                 if mode in ("salto", "single"):
-                    record_priority_purchase(table, now)
+                    record_priority_purchase(table, now, abuse_kind)
                 # Punto de no retorno para el mensaje: recién acá se consume el código (si el
                 # mensaje era texto libre) — no antes, para no gastarlo si el pedido termina
                 # rechazado por otra razón (canción bloqueada, etc). Un código consumido
@@ -2723,7 +2749,9 @@ class H(BaseHTTPRequestHandler):
                 now = time.time()
                 free = sess["pass_until"] > now or sess["credits"] > 0
                 price = 0 if free else STATE["settings"]["price_priority"]
-                abuse_mult = priority_abuse_multiplier(sess["table"], now) if price > 0 else 1
+                # "Impulsar" sube una canción a prioridad normal (⚡), no a "Al frente" —
+                # cuenta contra el mismo contador anti-abuso que /api/request usa para "prio".
+                abuse_mult = priority_abuse_multiplier(sess["table"], now, "prio") if price > 0 else 1
                 price = price * abuse_mult
                 charge_via, paid_amount = None, 0
                 if price > 0 and STATE["settings"].get("prepaid_mode"):
@@ -2734,7 +2762,7 @@ class H(BaseHTTPRequestHandler):
                         return self._send(400, err)
                     charge_via, paid_amount = via, price
                 if price > 0:
-                    record_priority_purchase(sess["table"], now)
+                    record_priority_purchase(sess["table"], now, "prio")
                 target["priority"] = True
                 target["ts"] = now   # toma su lugar en la cola de prioridad desde AHORA, no desde que se pidió como normal
                 target["charge_table"] = sess["table"]
@@ -2978,6 +3006,7 @@ class H(BaseHTTPRequestHandler):
                     s["auto_approve"] = bool(d["auto_approve"])
                 for k in ("repeat_block_min", "repeat_block_songs", "trim_end_secs",
                           "free_per_window", "free_window_min", "jump_multiplier",
+                          "priority_abuse_window_min", "jump_abuse_window_min",
                           "max_priority_queue_min", "max_song_duration_min",
                           "poll_duration_secs", "duelo_duration_secs", "dedica_price"):
                     if k in d:
@@ -3434,6 +3463,7 @@ class H(BaseHTTPRequestHandler):
                 STATE["vibe_votes"] = {}
                 STATE["skip_votes"] = set()
                 STATE["priority_abuse"] = {}
+                STATE["jump_abuse"] = {}
                 STATE["celebrated_loved"] = set()
                 STATE["loved_celebration"] = None
                 _id[0] = 0
