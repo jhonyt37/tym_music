@@ -766,14 +766,21 @@ def is_local_id(yt):
     de YouTube (este archivo, ~6 lugares) necesitan revisar esto explícitamente."""
     return isinstance(yt, str) and yt.startswith("local:")
 
+def _ever_requested_yt_ids():
+    """yt ids que ya se pidieron al menos una vez (STATE["request_log"], ~3 días de retención —
+    ver /api/request). Pedido explícito: "🆕 Nueva" debe apagarse apenas alguien la pide, no solo
+    por la ventana de fecha — una canción ya descubierta no es "nueva" aunque siga reciente."""
+    return {e["yt"] for e in STATE.get("request_log", []) if e.get("yt")}
+
 def new_local_count(now):
-    """Cuántas canciones del catálogo local se agregaron en los últimos NEW_SONG_WINDOW_SECS —
-    para el badge "🆕 Nuevas" del cliente (index.html), sin que el cliente tenga que descargar
-    el catálogo completo solo para saber si hay algo nuevo que mostrar."""
+    """Cuántas canciones del catálogo local se agregaron en los últimos NEW_SONG_WINDOW_SECS Y
+    todavía nadie ha pedido — para el badge "🆕 Nuevas" del cliente (index.html), sin que el
+    cliente tenga que descargar el catálogo completo solo para saber si hay algo nuevo."""
     cutoff = now - NEW_SONG_WINDOW_SECS
+    requested = _ever_requested_yt_ids()
     return sum(1 for c in STATE["curated"]
                if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")
-               and c.get("added_at") and c["added_at"] >= cutoff)
+               and c.get("added_at") and c["added_at"] >= cutoff and c["yt"] not in requested)
 
 def _fold(s):
     """minúsculas + sin tildes/diacríticos — pedido explícito: la búsqueda del catálogo local
@@ -2458,9 +2465,13 @@ class H(BaseHTTPRequestHandler):
                         if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")]
                 if only_new:
                     # "🆕 Nuevas" (ver new_local_count en public_state) — ignora q/genre, es su
-                    # propia vista dedicada. Más reciente primero.
+                    # propia vista dedicada. Más reciente primero. Pedido explícito: una canción
+                    # deja de ser "nueva" apenas alguien la pide (no solo por fecha) — se saca en
+                    # cuanto se agrega a la cola, no espera a que pase la ventana de días.
                     _cutoff = time.time() - NEW_SONG_WINDOW_SECS
-                    pool = sorted([c for c in base if c.get("added_at") and c["added_at"] >= _cutoff],
+                    _requested = _ever_requested_yt_ids()
+                    pool = sorted([c for c in base if c.get("added_at") and c["added_at"] >= _cutoff
+                                   and c["yt"] not in _requested],
                                   key=lambda c: -c["added_at"])
                 elif genre_q:
                     gf = _fold(genre_q)
@@ -2484,6 +2495,7 @@ class H(BaseHTTPRequestHandler):
                     pool = featured if featured else base
                 now = time.time()
                 _new_cutoff = now - NEW_SONG_WINDOW_SECS
+                _requested = _ever_requested_yt_ids()
                 out = []
                 for c in pool[:40]:
                     info = repeat_block_info(c["yt"], now)
@@ -2496,7 +2508,8 @@ class H(BaseHTTPRequestHandler):
                                 "block_reason": (info or {}).get("reason"),
                                 "block_available_at": (info or {}).get("available_at"),
                                 "added_at": added_at,
-                                "is_new": bool(added_at and added_at >= _new_cutoff)})
+                                "is_new": bool(added_at and added_at >= _new_cutoff
+                                               and c["yt"] not in _requested)})
             return self._send(200, out)
         if path == "/api/genre":
             ip = self._client_ip()

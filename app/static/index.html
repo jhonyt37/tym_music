@@ -1193,6 +1193,14 @@ async function doReq(payMethod){
       // Mantiene la búsqueda/lista visible (no la resetea) para poder seguir pidiendo
       // más canciones del mismo artista/búsqueda sin tener que escribir de nuevo.
       if(chosen.yt)_queueYts.add(chosen.yt);
+      // Pedido explícito: "🆕 Nueva" debe apagarse apenas el cliente la pide, sin esperar el
+      // próximo poll (cada 2s) — el servidor ya deja de contarla como nueva desde este momento
+      // (ver _ever_requested_yt_ids en server.py), esto solo adelanta la vista local para que
+      // no se vea "🆕" en una canción que la propia persona acaba de pedir.
+      if(lastList&&chosen.yt){
+        const hit=lastList.find(s=>s.yt===chosen.yt);
+        if(hit)hit.is_new=false;
+      }
       if(lastList)renderResults(lastList,lastMax);
       refreshBal();}
     else if(j.needs_registration){showNeedsRegistration(()=>doReq());}
@@ -1253,6 +1261,15 @@ function initBellDrag(){
       // Vuelve a pegarla al costado mas cercano por si la pantalla cambio de tamaño/orientacion.
       const edgeX=(s.x+el.offsetWidth/2<window.innerWidth/2)?MARGIN:(window.innerWidth-el.offsetWidth-MARGIN);
       snapTo(edgeX,s.y,false);
+    }else{
+      // Primera vez (localStorage vacío — el caso normal, cada cliente entra desde SU propio
+      // celular): el CSS de por sí pone bottom:70px, un valor fijo que no cuenta la altura real
+      // del nav (min-height:60px + env(safe-area-inset-bottom), que en un iPhone con Face ID
+      // agrega ~34px más) — con el nav ocupando ~94px del fondo, una campana en bottom:70px
+      // queda tapada casi hasta la mitad por el nav (z-index más alto). Bug reportado en vivo:
+      // "la campana no sale en una posición visible". Se posiciona con la misma lógica segura
+      // que ya usa el drag (maxY(), calcula el nav real) en vez de confiar en el valor fijo.
+      snapTo(window.innerWidth-el.offsetWidth-MARGIN,maxY(),false);
     }}
   catch(e){}
   function start(cx,cy){
