@@ -1314,7 +1314,7 @@ function renderCurated(fullList){
   // siendo solo YouTube. Modo local: solo las entradas del catálogo marcadas featured=true —
   // el resto del catálogo sigue siendo pedible, solo no suena de fondo (ver syncCuratedCardMode).
   const list=isLocal
-    ?(fullList||[]).filter(c=>c.yt&&c.yt.startsWith('local:')&&c.featured)
+    ?(fullList||[]).filter(c=>c.yt&&c.yt.startsWith('local:')&&c.featured&&!c.excluded)
     :(fullList||[]).filter(c=>!(c.yt&&c.yt.startsWith('local:')));
   window._cur=list;const box=$('curList');box.innerHTML='';
   if(!list.length){box.innerHTML=`<div class="empty">${isLocal?'Aún no has destacado ninguna del catálogo.':'Aún no has añadido recomendadas.'}</div>`;return;}
@@ -1825,6 +1825,7 @@ function renderLocalCatalog(fullCurated){
     :'Aún no has escaneado ninguna carpeta.';
   list.forEach(c=>{
     const r=document.createElement('div');r.className='row local-cat-row';r.style.alignItems='flex-start';
+    if(c.excluded)r.style.opacity='.5'; // "salir como desvanecida" — pedido explícito
     // auto_added: el TV lo encontró solo en un re-escaneo (Fase 5) y nadie lo ha revisado
     // todavía — editar cualquier campo (a mano o con el botón de iTunes) lo marca revisado.
     const autoBadge=c.auto_added?'<span class="small" style="color:var(--gold);font-weight:700;display:block;margin-bottom:2px">🆕 Detectado automáticamente — revisa</span>':'';
@@ -1836,9 +1837,15 @@ function renderLocalCatalog(fullCurated){
     // archivo que ya no está) pero se queda visible acá para que el admin la revise/borre;
     // reaparece sola si el archivo vuelve a estar (ej. un disco de red que se desconectó).
     const missingBadge=c.missing?'<span class="small" style="color:#ef4444;font-weight:700;display:block;margin-bottom:2px">⚠ Archivo no encontrado — oculta para los clientes</span>':'';
+    // excluded (pedido explícito, reemplaza el viejo botón de borrar): antes la ✕ borraba la
+    // entrada del todo, pero el archivo seguía en la carpeta — el siguiente re-escaneo la volvía
+    // a importar como nueva, así que la ✕ "no funcionaba". Ahora solo se descarta — sigue acá
+    // desvanecida, se puede restaurar, y el re-escaneo ya no la re-importa (sigue en el catálogo).
+    const excludedBadge=c.excluded?'<span class="small" style="color:#9aa7c2;font-weight:700;display:block;margin-bottom:2px">🚫 Descartada — oculta para los clientes</span>':'';
+    const featuredBadge=c.featured?'<span class="small" style="color:var(--gold);font-weight:700;display:block;margin-bottom:2px">🌟 Destacada — suena de fondo</span>':'';
     r.innerHTML=`${adminThumbHtml(c)}
       <div class="info" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0">
-        ${autoBadge}${lockedBadge}${missingBadge}
+        ${autoBadge}${lockedBadge}${missingBadge}${excludedBadge}${featuredBadge}
         ${localTrackFieldsHtml(c)}
         <div class="small" style="color:var(--mut);opacity:.75">📄 ${esc(c.local_path||'')}</div>
       </div>`;
@@ -1885,8 +1892,28 @@ function renderLocalCatalog(fullCurated){
       itunesBtn.disabled=false;
     };
     actions.appendChild(itunesBtn);
-    const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';
-    x.onclick=async()=>{await post('/api/admin/curated',{action:'remove',yt:c.yt});tick();};
+    // "Destacar" (pedido explícito): poder marcarla para la lista de fondo sin salir de esta
+    // vista — hace lo mismo que "+ Añadir" en Contenido → Destacadas para sonar de fondo, solo
+    // que desde acá (edición del catálogo) en vez de tener que ir a buscarla de nuevo allá.
+    const featBtn=document.createElement('button');featBtn.className='btn ghost sm';
+    featBtn.textContent=c.featured?'⭐ Quitar de fondo':'🌟 Destacar';
+    featBtn.title=c.featured?'Ya no sonará de fondo (sigue en el catálogo, pedible)':'Agregar a la lista de fondo (Contenido → Destacadas)';
+    featBtn.onclick=async()=>{
+      featBtn.disabled=true;
+      c.featured=!c.featured;
+      await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,featured:c.featured});
+      renderLocalCatalog(window._fullCurated);
+    };
+    actions.appendChild(featBtn);
+    const x=document.createElement('button');x.className='btn red sm';
+    x.textContent=c.excluded?'↩️ Restaurar':'✕';
+    x.title=c.excluded?'Volver a mostrarla a los clientes':'Descartar del catálogo (se puede restaurar, no borra el archivo ni el registro)';
+    x.onclick=async()=>{
+      x.disabled=true;
+      c.excluded=!c.excluded;
+      await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,excluded:c.excluded});
+      renderLocalCatalog(window._fullCurated);
+    };
     actions.appendChild(x);
     r.appendChild(actions);
     box.appendChild(r);

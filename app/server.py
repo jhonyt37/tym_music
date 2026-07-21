@@ -1303,9 +1303,10 @@ def promote_next(manual=False):
         # canción de YouTube vía el buscador normal (esa ruta no cambia en esta fase), y esa
         # entrada no debe colarse en la rotación de un venue que ya está en modo local.
         if STATE["settings"].get("content_mode") == "local":
-            # missing: el último re-escaneo (por canción, ver maybeRescanFolder en tv.html) no
-            # encontró el archivo en disco — nunca debe sonar solo desde el fallback.
-            local_pool = [c for c in STATE["curated"] if is_local_id(c.get("yt")) and not c.get("missing")]
+            # missing: el último re-escaneo no encontró el archivo en disco. excluded: el admin
+            # la descartó a mano (✕ en el catálogo) — ninguna de las dos debe sonar de fondo.
+            local_pool = [c for c in STATE["curated"]
+                          if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")]
             # "featured" (pedido explícito): estar en el catálogo completo (pedible por
             # clientes) es distinto de estar en la lista de fondo — un admin puede elegir un
             # subconjunto, igual que "Recomendadas del local" ya funciona en modo YouTube.
@@ -2001,9 +2002,11 @@ class H(BaseHTTPRequestHandler):
             genre_q = self._q("genre")[:40].strip().lower()
             with LOCK:
                 self.set_venue(self.resolve_vid())
-                # missing: archivo que el último re-escaneo no encontró en disco — no se le
-                # ofrece a los clientes (verían el pedido fallar en /tv al querer sonar).
-                pool = [c for c in STATE["curated"] if is_local_id(c.get("yt")) and not c.get("missing")]
+                # missing: archivo que el último re-escaneo no encontró en disco. excluded:
+                # el admin la descartó a mano (✕ en el catálogo) — ninguna de las dos se le
+                # ofrece a los clientes.
+                pool = [c for c in STATE["curated"]
+                        if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")]
                 if genre_q:
                     pool = [c for c in pool if genre_q in (c.get("genre") or "").lower()]
                 elif q:
@@ -2447,6 +2450,8 @@ class H(BaseHTTPRequestHandler):
                         return self._send(400, {"error": "Esa canción ya no está en el catálogo del local — puede que la hayan quitado."})
                     if _cur_entry.get("missing"):
                         return self._send(400, {"error": "Ese archivo ya no está en la carpeta del local — puede que se haya movido o borrado."})
+                    if _cur_entry.get("excluded"):
+                        return self._send(400, {"error": "Esa canción fue descartada del catálogo por el local."})
                     dur = _cur_entry.get("duration") or DEFAULT_DUR
                     local_media_type = _cur_entry.get("media_type")
                     local_path = _cur_entry.get("local_path")
@@ -3243,6 +3248,15 @@ class H(BaseHTTPRequestHandler):
                     # ninguna como featured, sigue sonando el catálogo completo — nunca silencio.
                     if "featured" in d:
                         c["featured"] = bool(d.get("featured"))
+                    # "excluded" (pedido explícito): antes la ✕ borraba la entrada del todo, pero
+                    # el archivo seguía en la carpeta — el siguiente re-escaneo (automático por
+                    # canción, o "Forzar revisión") la volvía a importar como nueva, así que
+                    # parecía que la ✕ "no funcionaba". Ahora la ✕ solo la descarta (se sigue
+                    # viendo acá, desvanecida, con opción de restaurar) — al quedar la entrada
+                    # en el catálogo, el re-escaneo ya no la trata como nueva. Se oculta de
+                    # clientes y del fallback (ver /api/search_local y promote_next()).
+                    if "excluded" in d:
+                        c["excluded"] = bool(d.get("excluded"))
                     return self._send(200, {"ok": True, "curated": STATE["curated"]})
                 return self._send(400, {"error": "Acción inválida"})
 
