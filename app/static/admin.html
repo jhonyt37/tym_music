@@ -564,6 +564,7 @@
       </div>
       <div id="rescanReport" style="margin-top:10px"></div>
       <div id="scanReview" style="margin-top:10px"></div>
+      <div id="missingReview" style="margin-top:10px"></div>
 
       <h2 style="margin-top:16px;font-size:14px;font-weight:700">En el catálogo</h2>
       <div class="search-wrap" style="margin-bottom:8px">
@@ -1472,11 +1473,30 @@ async function scanFolder(dirHandle,onProgress){
 function localTrackFieldsHtml(v){
   const sm='padding:8px 10px;font-size:14px;margin:0';
   const lbl='color:var(--mut);display:block;margin-bottom:2px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.3px';
-  return `<div style="display:grid;grid-template-columns:2fr 1.3fr 1fr;gap:6px">
+  // Botones ⇄ entre los campos (pedido explícito, mejor UX que uno solo aparte): muchos
+  // archivos vienen con título/artista al revés, y a veces también artista/género —
+  // intercambiar justo entre los dos campos que se están mirando es más directo que un botón
+  // genérico en la fila de acciones. Se conectan en wireLocalFieldSwaps() más abajo, ya que
+  // esta función solo arma el HTML (la comparten renderLocalCatalog y renderScanReview, cada
+  // una con su propia forma de guardar el cambio).
+  return `<div class="local-fields">
     <div><label style="${lbl}">Título</label><input class="field" style="${sm}" data-f="title" value="${esc(v.title||'')}"></div>
+    <button type="button" class="local-swap-btn" data-swap="title,artist" title="Intercambiar título y artista">⇄</button>
     <div><label style="${lbl}">Artista</label><input class="field" style="${sm}" data-f="artist" value="${esc(v.artist||'')}"></div>
+    <button type="button" class="local-swap-btn" data-swap="artist,genre" title="Intercambiar artista y género">⇄</button>
     <div><label style="${lbl}">Género</label><input class="field" style="${sm}" data-f="genre" value="${esc(v.genre||'')}"></div>
   </div>`;
+}
+function wireLocalFieldSwaps(r,onSwap){
+  r.querySelectorAll('.local-swap-btn').forEach(btn=>{
+    const[fa,fb]=btn.dataset.swap.split(',');
+    btn.onclick=()=>{
+      const ia=r.querySelector(`[data-f="${fa}"]`),ib=r.querySelector(`[data-f="${fb}"]`);
+      const va=ia.value,vb=ib.value;
+      ia.value=vb;ib.value=va;
+      onSwap(fa,ia.value,fb,ib.value);
+    };
+  });
 }
 
 let _scanBatch=[],_localCatFilter='';
@@ -1649,13 +1669,46 @@ async function forceRescanLocalCatalog(){
   const news=found.filter(f=>!existingPaths.has(f.path));
   const missing=existing.filter(c=>c.local_path&&!foundPaths.has(c.local_path));
   status.textContent=`Revisión terminada — ${found.length} archivos en la carpeta.`;
+  // Resincroniza `missing` en el servidor de una — es reversible (nunca borra nada solo, se
+  // des-marca sola si el archivo reaparece) así que no hace falta esperar confirmación del
+  // admin para esto. Lo que sí pide confirmación es la eliminación DEFINITIVA (abajo, por
+  // canción) — pedido explícito: "debería meterla o sacarla del catálogo con confirmación".
+  if(found.length)await post('/api/admin/local_catalog',{action:'import',tracks:[],seen_paths:found.map(f=>f.path)});
   const parts=[];
   if(news.length)parts.push(`<div class="small" style="color:var(--gold);font-weight:700">🆕 ${news.length} canción(es) nueva(s) — revísalas abajo antes de guardar.</div>`);
-  if(missing.length)parts.push(`<div class="small" style="color:#ef4444;font-weight:700;margin-top:6px">⚠ ${missing.length} canción(es) del catálogo ya no están en la carpeta (¿se movieron o borraron?):<br>${missing.map(m=>esc(m.title)).join(', ')}</div>`);
+  if(missing.length)parts.push(`<div class="small" style="color:#ef4444;font-weight:700;margin-top:6px">⚠ ${missing.length} canción(es) del catálogo ya no están en la carpeta — ya se ocultaron de los clientes, revisa abajo si quieres quitarlas del todo.</div>`);
   if(!news.length&&!missing.length)parts.push('<div class="small" style="color:#22c55e">✅ Todo al día — no hay cambios.</div>');
   report.innerHTML=parts.join('');
   _scanBatch=news;
   renderScanReview(_scanBatch);
+  renderMissingReview(missing);
+  tick(); // refresca el catálogo ya (badges "⚠ no encontrado" recién marcados)
+}
+
+function renderMissingReview(list){
+  const box=$('missingReview');box.innerHTML='';
+  if(!list.length)return;
+  const bar=document.createElement('div');bar.style.cssText='margin-bottom:8px';
+  bar.innerHTML='<span class="small" style="color:var(--mut)">Ya no están en la carpeta — se ocultaron de los clientes solas. Puedes quitarlas del catálogo del todo:</span>';
+  box.appendChild(bar);
+  const table=document.createElement('div');table.className='list';
+  list.forEach(c=>{
+    const r=document.createElement('div');r.className='row';
+    r.innerHTML=`<span style="font-size:20px">⚠</span>
+      <div class="info"><div class="t">${esc(c.title)}</div><div class="a">${esc(c.artist||'')}${c.local_path?' · '+esc(c.local_path):''}</div></div>`;
+    const x=document.createElement('button');x.className='btn red sm';x.textContent='🗑️ Quitar del catálogo';
+    x.onclick=async()=>{
+      // confirm() nativo — mismo patrón que el resto de acciones destructivas de admin.html.
+      if(!confirm(`¿Quitar "${c.title}" del catálogo? No se puede deshacer — si el archivo reaparece más adelante, hay que volver a escanear la carpeta.`))return;
+      await post('/api/admin/curated',{action:'remove',yt:c.yt});
+      r.remove();
+      tick();
+    };
+    r.appendChild(x);
+    table.appendChild(r);
+  });
+  box.appendChild(table);
+  tickify(box);
 }
 
 function renderScanReview(list){
@@ -1677,6 +1730,7 @@ function renderScanReview(list){
     ['title','artist','genre'].forEach(f=>{
       r.querySelector(`[data-f="${f}"]`).addEventListener('input',e=>{_scanBatch[i][f]=e.target.value;});
     });
+    wireLocalFieldSwaps(r,(fa,va,fb,vb)=>{_scanBatch[i][fa]=va;_scanBatch[i][fb]=vb;});
     const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';
     x.onclick=()=>{_scanBatch.splice(i,1);renderScanReview(_scanBatch);};
     r.appendChild(x);
@@ -1720,16 +1774,21 @@ function renderLocalCatalog(fullCurated){
     ?(list.length?'':'Nada coincide con esa búsqueda.')
     :'Aún no has escaneado ninguna carpeta.';
   list.forEach(c=>{
-    const r=document.createElement('div');r.className='row';r.style.alignItems='flex-start';
+    const r=document.createElement('div');r.className='row local-cat-row';r.style.alignItems='flex-start';
     // auto_added: el TV lo encontró solo en un re-escaneo (Fase 5) y nadie lo ha revisado
     // todavía — editar cualquier campo (a mano o con el botón de iTunes) lo marca revisado.
     const autoBadge=c.auto_added?'<span class="small" style="color:var(--gold);font-weight:700;display:block;margin-bottom:2px">🆕 Detectado automáticamente — revisa</span>':'';
     // "Congelar" (pedido explícito): protege una entrada ya verificada a mano de que el botón
     // de iTunes la pise sin querer.
     const lockedBadge=c.locked?'<span class="small" style="color:#38bdf8;font-weight:700;display:block;margin-bottom:2px">🔒 Congelada — protegida de iTunes</span>':'';
+    // missing: el re-escaneo automático (por canción, ver maybeRescanFolder en tv.html) ya no
+    // encontró el archivo — se oculta del catálogo que ve el cliente (nadie puede pedir un
+    // archivo que ya no está) pero se queda visible acá para que el admin la revise/borre;
+    // reaparece sola si el archivo vuelve a estar (ej. un disco de red que se desconectó).
+    const missingBadge=c.missing?'<span class="small" style="color:#ef4444;font-weight:700;display:block;margin-bottom:2px">⚠ Archivo no encontrado — oculta para los clientes</span>':'';
     r.innerHTML=`<span style="font-size:20px">${c.media_type==='video'?'🎬':'🎵'}</span>
       <div class="info" style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:0">
-        ${autoBadge}${lockedBadge}
+        ${autoBadge}${lockedBadge}${missingBadge}
         ${localTrackFieldsHtml(c)}
         <div class="small" style="color:var(--mut);opacity:.75">📄 ${esc(c.local_path||'')}</div>
       </div>`;
@@ -1738,6 +1797,12 @@ function renderLocalCatalog(fullCurated){
       const inp=r.querySelector(`[data-f="${f}"]`);
       inp.addEventListener('change',()=>saveField(f,inp.value));
     });
+    // Botones ⇄ entre los campos (título↔artista, artista↔género) — ver localTrackFieldsHtml().
+    wireLocalFieldSwaps(r,async(fa,va,fb,vb)=>{
+      c[fa]=(fa==='title'?va||'Canción':va);c[fb]=vb;
+      await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,[fa]:va,[fb]:vb});
+    });
+    const actions=document.createElement('div');actions.className='local-cat-actions';
     const lockBtn=document.createElement('button');lockBtn.className='btn ghost sm';
     lockBtn.textContent=c.locked?'🔓 Descongelar':'🔒 Congelar';
     lockBtn.title=c.locked?'Permitir que iTunes la sobreescriba de nuevo':'Proteger esta entrada de que el botón de iTunes la sobreescriba';
@@ -1747,7 +1812,7 @@ function renderLocalCatalog(fullCurated){
       await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,locked:c.locked});
       renderLocalCatalog(window._fullCurated);
     };
-    r.appendChild(lockBtn);
+    actions.appendChild(lockBtn);
     const itunesBtn=document.createElement('button');itunesBtn.className='btn ghost sm';itunesBtn.textContent='🔎 iTunes';
     itunesBtn.title='Autocompletar género/artista cruzando con iTunes';
     itunesBtn.onclick=async()=>{
@@ -1765,10 +1830,11 @@ function renderLocalCatalog(fullCurated){
       }
       itunesBtn.disabled=false;
     };
-    r.appendChild(itunesBtn);
+    actions.appendChild(itunesBtn);
     const x=document.createElement('button');x.className='btn red sm';x.textContent='✕';
     x.onclick=async()=>{await post('/api/admin/curated',{action:'remove',yt:c.yt});tick();};
-    r.appendChild(x);
+    actions.appendChild(x);
+    r.appendChild(actions);
     box.appendChild(r);
   });
   tickify(box);

@@ -1271,7 +1271,9 @@ def promote_next(manual=False):
         # canción de YouTube vía el buscador normal (esa ruta no cambia en esta fase), y esa
         # entrada no debe colarse en la rotación de un venue que ya está en modo local.
         if STATE["settings"].get("content_mode") == "local":
-            base_pool = [c for c in STATE["curated"] if is_local_id(c.get("yt"))]
+            # missing: el último re-escaneo (por canción, ver maybeRescanFolder en tv.html) no
+            # encontró el archivo en disco — nunca debe sonar solo desde el fallback.
+            base_pool = [c for c in STATE["curated"] if is_local_id(c.get("yt")) and not c.get("missing")]
         else:
             base_pool = STATE["curated"] if STATE["curated"] else CATALOG
         shuffle = STATE["settings"].get("fallback_shuffle", True)
@@ -1953,7 +1955,9 @@ class H(BaseHTTPRequestHandler):
             q = self._q("q")[:150].strip().lower()
             with LOCK:
                 self.set_venue(self.resolve_vid())
-                pool = [c for c in STATE["curated"] if is_local_id(c.get("yt"))]
+                # missing: archivo que el último re-escaneo no encontró en disco — no se le
+                # ofrece a los clientes (verían el pedido fallar en /tv al querer sonar).
+                pool = [c for c in STATE["curated"] if is_local_id(c.get("yt")) and not c.get("missing")]
                 if q:
                     pool = [c for c in pool
                             if q in (c["title"] + " " + (c.get("artist") or "")).lower()]
@@ -2382,6 +2386,8 @@ class H(BaseHTTPRequestHandler):
                     _cur_entry = next((c for c in STATE["curated"] if c["yt"] == yt), None)
                     if not _cur_entry:
                         return self._send(400, {"error": "Esa canción ya no está en el catálogo del local — puede que la hayan quitado."})
+                    if _cur_entry.get("missing"):
+                        return self._send(400, {"error": "Ese archivo ya no está en la carpeta del local — puede que se haya movido o borrado."})
                     dur = _cur_entry.get("duration") or DEFAULT_DUR
                     local_media_type = _cur_entry.get("media_type")
                     local_path = _cur_entry.get("local_path")
@@ -3113,7 +3119,31 @@ class H(BaseHTTPRequestHandler):
                         else:
                             entry["auto_added"] = auto
                             by_yt[yt] = entry; STATE["curated"].append(entry); added += 1
-                    return self._send(200, {"ok": True, "added": added, "updated": updated, "curated": STATE["curated"]})
+                    # Resincronización (pedido explícito: "en cada canción debería resincronizar
+                    # el catálogo previniendo mostrar archivos que ya no existan"): quien escanea
+                    # (tv.html en maybeRescanFolder, o admin.html al forzar revisión) ya recorre
+                    # la carpeta entera cada vez — si manda TODAS las rutas que vio (no solo las
+                    # nuevas), acá se puede marcar `missing` a cualquier entrada local cuya ruta
+                    # ya no aparezca, y des-marcarla sola si vuelve a aparecer (ej. una carpeta de
+                    # red que se desconectó un momento) — nunca se borra nada solo, igual que el
+                    # resto de este importador.
+                    seen_paths = d.get("seen_paths")
+                    revived = missing_now = 0
+                    if isinstance(seen_paths, list):
+                        seen_set = {str(p)[:500] for p in seen_paths[:5000]}
+                        for c in STATE["curated"]:
+                            if not is_local_id(c.get("yt")) or not c.get("local_path"):
+                                continue
+                            now_missing = c["local_path"] not in seen_set
+                            if c.get("missing", False) != now_missing:
+                                c["missing"] = now_missing
+                                if now_missing:
+                                    missing_now += 1
+                                else:
+                                    revived += 1
+                    return self._send(200, {"ok": True, "added": added, "updated": updated,
+                                             "missing_now": missing_now, "revived": revived,
+                                             "curated": STATE["curated"]})
                 elif act == "edit":
                     yt = d.get("yt")
                     # Solo canciones locales por esta vía — el buscador de YouTube ya tiene su

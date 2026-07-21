@@ -702,8 +702,9 @@ async function maybeRescanFolder(){
     const existingPaths=new Set((curRes.curated||[])
       .filter(c=>c.yt&&c.yt.startsWith('local:'))
       .map(c=>c.local_path));
-    const news=[];
+    const news=[],seenPaths=[];
     for await(const entry of walkLocalDir(_localRootHandle,'')){
+      seenPaths.push(entry.path);
       if(existingPaths.has(entry.path))continue;
       const file=await entry.handle.getFile();
       let tags=null;
@@ -719,7 +720,13 @@ async function maybeRescanFolder(){
         duration:null,
       });
     }
-    if(news.length)await post('/api/admin/local_catalog',{action:'import',auto:true,tracks:news});
+    // seen_paths: TODAS las rutas de este recorrido (no solo las nuevas) — el servidor las usa
+    // para marcar `missing` cualquier canción del catálogo que ya no aparezca (pedido explícito:
+    // "en cada canción debería resincronizar... previniendo mostrar archivos que ya no existan
+    // en la lista del cliente") y para des-marcarla sola si reaparece. Se manda siempre que haya
+    // al menos un archivo (una carpeta vacía por error de permiso no debe vaciar el catálogo).
+    if(news.length||seenPaths.length)
+      await post('/api/admin/local_catalog',{action:'import',auto:true,tracks:news,seen_paths:seenPaths});
   }catch(e){/* best-effort — un re-escaneo fallido no debe afectar la reproducción */}
 }
 
