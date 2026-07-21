@@ -62,6 +62,18 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
 #bar{position:fixed;left:0;bottom:0;height:7px;width:100%;background:rgba(255,255,255,.12);z-index:5;opacity:0;transition:opacity 1.1s ease}
 #bar.show{opacity:1}
 #bar .fill{height:100%;width:0%;background:var(--pri);transition:width .8s linear}
+/* Modo solo-audio (sin video que "proteger" de que se lo tapen): nombre de la canción, QR,
+   logo, cola y reacciones quedan fijos en pantalla en vez de rotar — ver setLocalAudioView().
+   #now/#up/#reactPanel comparten el mismo pie de pantalla por diseño (por eso rotaban, no solo
+   por el video) así que acá se apilan en columna dentro de #audioStack en vez de superponerse.
+   "Lo más querido" sigue apareciendo de vez en cuando igual que antes — a propósito no se fija. */
+#audioStack{display:contents}
+body.audio-mode #audioStack{position:fixed;left:0;right:0;bottom:0;z-index:2;display:flex;
+  flex-direction:column;background:linear-gradient(transparent,rgba(0,0,0,.55) 45%,rgba(0,0,0,.92))}
+body.audio-mode #audioStack .panel{position:static;opacity:1;background:none;padding:8px 40px}
+body.audio-mode #reactPanel{order:1;padding-top:20px}
+body.audio-mode #up{order:2}
+body.audio-mode #now{order:3;padding-bottom:30px}
 /* Overlay de dedicatoria */
 #dedicaOverlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;z-index:22;pointer-events:none}
 #dedicaBox{background:rgba(10,14,22,.88);border:2px solid var(--gold);border-radius:24px;padding:30px 40px;max-width:700px;text-align:center;backdrop-filter:blur(10px);
@@ -309,6 +321,7 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   <div class="t">📲 Pon tu música</div>
   <div class="s" id="venue">…</div>
 </div>
+<div id="audioStack">
 <div class="panel" id="now">
   <div class="lbl">● Sonando ahora</div>
   <div class="title" id="title"><span id="titleText">Esperando canciones…</span></div>
@@ -319,6 +332,7 @@ html,body{height:100%;background:#000;color:#fff;overflow:hidden;
   <div id="nowReacts"></div>
 </div>
 <div class="panel" id="up"><span class="lbl" id="upLbl"></span><span id="upChips"></span></div>
+</div>
 <div class="panel" id="loved"><div class="h">❤️ Lo más querido de hoy</div><div id="lovedItems"></div></div>
 <div id="bar"><div class="fill" id="fill"></div></div>
 
@@ -579,8 +593,18 @@ function showLocalFileError(msg){
 }
 function hideLocalFileError(){const el=document.getElementById('localFileWarn');if(el)el.remove();}
 
+let _audioOnlyMode=false;
+// Elementos que quedan fijos en modo solo-audio en vez de rotar (ver burstOrPin más abajo) —
+// "loved" queda afuera a propósito, sigue apareciendo de vez en cuando igual que en video.
+const _AUDIO_PINNED=['brand','qr','now','up','reactPanel','bar'];
 function setLocalAudioView(show,np){
   $('localAudioView').style.display=show?'flex':'none';
+  _audioOnlyMode=!!show;
+  document.body.classList.toggle('audio-mode',_audioOnlyMode);
+  _AUDIO_PINNED.forEach(id=>{
+    const el=$(id);clearTimeout(el._t);
+    el.classList.toggle('show',_audioOnlyMode);
+  });
 }
 
 // ---- Re-escaneo periódico del catálogo (Fase 5) — duplica el escáner de admin.html (mismo
@@ -1299,16 +1323,22 @@ function showNewReqBanner(it){
 
 // ---- Apariciones escalonadas ----
 function burst(el,dur){el.classList.add('show');clearTimeout(el._t);el._t=setTimeout(()=>el.classList.remove('show'),dur);}
+// En modo solo-audio (sin video que "proteger" de que se lo tapen) estos elementos ya quedaron
+// fijos por setLocalAudioView() — un burst() normal del ciclo de 90s les pondría un timeout que
+// los volvería a esconder, así que acá se saltan por completo mientras dure ese modo. "loved" no
+// pasa por esto a propósito (usa burst() directo en su propio schedule más abajo) — pedido
+// explícito: debe seguir apareciendo de vez en cuando, no quedar fijo.
+function burstOrPin(el,dur){if(_audioOnlyMode)return;burst(el,dur);}
 // burstNow() antes mostraba el logo del bar (#brand) JUNTO con el nombre de la canción
 // (#now) — pedido explícito: deben ser 2 momentos distintos del ciclo, no simultáneos, ya
 // que el logo dejó de repetirse pegado al título (ver applyBrand). Ahora #brand aparece
 // primero y brevemente (saludo/identidad del local) y #now arranca justo después, sin
 // pisarse — en vez de esperar 60+s desde que carga la pantalla para ver el logo por
 // primera vez.
-function burstNow(){burst($('now'),13000);burst($('bar'),13000);}
+function burstNow(){burstOrPin($('now'),13000);burstOrPin($('bar'),13000);}
 function burstReacts(){
   const tot=parseInt(($('nowReacts').textContent.match(/\d+/g)||[]).reduce((s,n)=>s+Number(n),0)||0);
-  if(tot>0)burst($('reactPanel'),11000);
+  if(tot>0)burstOrPin($('reactPanel'),11000);
 }
 function schedule(fn,period,offset){setTimeout(()=>{fn();setInterval(fn,period);},offset);}
 const CYCLE=90000;
@@ -1316,10 +1346,10 @@ const CYCLE=90000;
 // "show" — con brand terminando justo cuando now empieza se alcanzan a ver los dos a la vez
 // a mitad del cruce. Dejar ~1.5s de aire entre que uno termina de desvanecerse y el otro
 // arranca evita ese solape.
-schedule(()=>burst($('brand'),7000),CYCLE,1500);   // 1.5-8.5s (+1.1s de fundido, listo ~9.6s)
+schedule(()=>burstOrPin($('brand'),7000),CYCLE,1500);   // 1.5-8.5s (+1.1s de fundido, listo ~9.6s)
 schedule(burstNow,CYCLE,11000);                    // 11-24s: nombre de la canción, ya sin el logo
-schedule(()=>burst($('up'),11000),CYCLE,30000);
-schedule(()=>burst($('qr'),30000),CYCLE,15000);
+schedule(()=>burstOrPin($('up'),11000),CYCLE,30000);
+schedule(()=>burstOrPin($('qr'),30000),CYCLE,15000);
 schedule(()=>{if(topLoved.length)burst($('loved'),11000);},CYCLE,75000);
 schedule(burstReacts,CYCLE,50000); // reacciones a mitad del ciclo, lejos del nombre de la canción
 
