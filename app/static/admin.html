@@ -1955,8 +1955,22 @@ async function forceRescanLocalCatalog(){
 function renderMissingReview(list){
   const box=$('missingReview');box.innerHTML='';
   if(!list.length)return;
-  const bar=document.createElement('div');bar.style.cssText='margin-bottom:8px';
+  const bar=document.createElement('div');bar.style.cssText='margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap';
   bar.innerHTML='<span class="small" style="color:var(--mut)">Ya no están en la carpeta — se ocultaron de los clientes solas. Puedes quitarlas del catálogo del todo:</span>';
+  // Pedido explícito: si cambió la carpeta entera (renombrada/movida) pueden aparecer decenas
+  // marcadas "missing" de una — confirmar una por una era demasiado manual. Un solo botón con
+  // una sola confirmación las saca todas; el listado de abajo sigue permitiendo sacar solo
+  // algunas si el admin no quiere quitarlas todas de una.
+  const bulkBtn=document.createElement('button');bulkBtn.className='btn red sm';
+  bulkBtn.textContent=`🗑️ Quitar las ${list.length} de una vez`;
+  bulkBtn.onclick=async()=>{
+    if(!confirm(`¿Quitar del catálogo las ${list.length} canciones que ya no están en la carpeta? No se puede deshacer — si algún archivo reaparece más adelante, hay que volver a escanear la carpeta.`))return;
+    const d=await post('/api/admin/curated',{action:'remove_missing'});
+    toast(`🗑️ ${d.removed!=null?d.removed:list.length} canción(es) quitada(s) del catálogo`,'ok');
+    box.innerHTML='';
+    tick();
+  };
+  bar.appendChild(bulkBtn);
   box.appendChild(bar);
   const table=document.createElement('div');table.className='list';
   list.forEach(c=>{

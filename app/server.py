@@ -3642,6 +3642,19 @@ class H(BaseHTTPRequestHandler):
                                                  "added_at": time.time()})
                 elif act == "remove":
                     STATE["curated"] = [c for c in STATE["curated"] if c["yt"] != d.get("yt")]
+                elif act == "remove_missing":
+                    # Pedido explícito: sacar una por una las que ya no están en la carpeta (con
+                    # confirm() individual cada vez) era demasiado manual si cambió la carpeta
+                    # entera (ej. se renombró/movió) y de golpe hay decenas marcadas "missing" —
+                    # esto las saca TODAS del catálogo en un solo paso, con una sola confirmación
+                    # del lado del cliente. Nunca toca una entrada que no esté marcada missing en
+                    # este momento (si el archivo reapareció justo antes de tocar el botón, se
+                    # salva sola).
+                    removed = sum(1 for c in STATE["curated"] if is_local_id(c.get("yt")) and c.get("missing"))
+                    STATE["curated"] = [c for c in STATE["curated"]
+                                        if not (is_local_id(c.get("yt")) and c.get("missing"))]
+                    save_state()
+                    return self._send(200, {"ok": True, "removed": removed, "curated": STATE["curated"]})
                 elif act == "reorder":
                     order = d.get("order") or []
                     pos = {yt: i for i, yt in enumerate(order)}
