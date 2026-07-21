@@ -2076,18 +2076,30 @@ function renderLocalCatalog(fullCurated){
               </div>`;
             resultBox.querySelector('#aududApply').onclick=async()=>{
               const applyBtn=resultBox.querySelector('#aududApply');applyBtn.disabled=true;audioIdPanel.focus();
-              r.querySelector('[data-f="title"]').value=resp.title;
-              r.querySelector('[data-f="artist"]').value=resp.artist;
-              c.title=resp.title;c.artist=resp.artist;
-              await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,title:resp.title,artist:resp.artist});
-              // AudD trae género demasiado genérico (ver classify_genre) — se reclasifica con
-              // el artista ya corregido, misma cascada que usa "Autocompletar".
-              const cl=await post('/api/admin/classify_track',{title:resp.title,artist:resp.artist,hint:c.local_path});
-              if(cl.ok){
-                c.genre=cl.genre;c.cover=cl.cover||c.cover;
-                await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,genre:cl.genre,cover:cl.cover});
+              try{
+                r.querySelector('[data-f="title"]').value=resp.title;
+                r.querySelector('[data-f="artist"]').value=resp.artist;
+                c.title=resp.title;c.artist=resp.artist;
+                await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,title:resp.title,artist:resp.artist});
+                // AudD trae género demasiado genérico (ver classify_genre) — se reclasifica con
+                // el artista ya corregido, misma cascada que usa "Autocompletar".
+                const cl=await post('/api/admin/classify_track',{title:resp.title,artist:resp.artist,hint:c.local_path});
+                if(cl.ok){
+                  c.genre=cl.genre;c.cover=cl.cover||c.cover;
+                  await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,genre:cl.genre,cover:cl.cover});
+                }
+                toast('Aplicado','ok');
+              }catch(e){
+                toast('No se pudo aplicar: '+String((e&&e.message)||e),'err');
+                applyBtn.disabled=false;
+                return;
               }
-              toast('Aplicado','ok');
+              // Suelta el foco ANTES de refrescar — mientras el panel siguiera enfocado (ver
+              // arriba, tabIndex=-1), el guard de renderLocalCatalog() ("no reconstruir mientras
+              // el foco esté dentro de la lista") también bloqueaba ESTE refresco intencional, no
+              // solo el del poll de 2s que originalmente venía a evitar. Bug real reportado: tras
+              // confirmar, no pasaba nada visible — ni toast ni cierre del acordeón.
+              audioIdPanel.blur();
               renderLocalCatalog(window._fullCurated);
             };
             resultBox.querySelector('#aududDiscard').onclick=()=>{
