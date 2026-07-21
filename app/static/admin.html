@@ -1508,6 +1508,24 @@ async function blockCurrentSong(){
   renderBlockSuggestions(suggestBlockKeywords(np.title,np.artist));
   tick();
 }
+
+// "⭐ Favorito" sobre la canción sonando (pedido explícito) — mismo mecanismo dual que ya usa
+// renderCurated()/syncCuratedCardMode(): en modo local, una canción ya está en el catálogo, así
+// que "destacarla" es solo poner featured:true en su entrada existente (no crear otra). En
+// modo YouTube no hay "catálogo" aparte — "destacarla" ES agregarla a la lista de Recomendadas.
+async function favoriteNowPlaying(np){
+  if(!np||!np.yt)return;
+  if(isLocalId(np.yt)){
+    const r=await post('/api/admin/local_catalog',{action:'edit',yt:np.yt,featured:true});
+    if(!r.ok){toast(r.error||'Error al destacar','err');return;}
+  }else{
+    const r=await post('/api/admin/curated',{action:'add',yt:np.yt,title:np.title,artist:np.artist||'',
+                                              length:mm(np.duration||0)});
+    if(!r.ok){toast(r.error||'Error al agregar','err');return;}
+  }
+  toast('⭐ "'+np.title+'" agregada a Destacadas/Recomendadas','ok');
+  tick();
+}
 function setLiveSubTab(tab){
   _liveSubTab=tab;
   $('liveSubHist').classList.toggle('on',tab==='hist');
@@ -2789,6 +2807,12 @@ async function tick(){
         if(_liveMesaFilter&&np.table!==_liveMesaFilter)r.style.opacity='.35';
         const npTs=np.played_at||np.ts;
         r.innerHTML=`<span class="pulse"></span>${miniThumbHtml(np.yt,np.media_type,np.cover)}<div class="info"><div class="t">${esc(np.title)}</div><div class="a">${np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table))}${npTs?' · sonando desde '+hm3(npTs):''}</div></div>`;
+        // "⭐ Favorito" (pedido explícito): si un cliente pidió algo bueno, agregarla a
+        // Destacadas/Recomendadas del local sin tener que ir hasta el tab Contenido y
+        // buscarla de nuevo — mismo mecanismo dual que ya usa renderCurated() según el modo.
+        const fav=document.createElement('button');fav.className='btn ghost sm';fav.textContent='⭐';fav.title='Agregar a Destacadas/Recomendadas del local';
+        fav.onclick=()=>favoriteNowPlaying(np);
+        r.appendChild(fav);
         // "🚫 Bloquear" (pedido explícito, solo tiene sentido para YouTube — un id local ya
         // tiene su propio mecanismo de exclusión en el catálogo, ver "excluded" en Modo local).
         if(!isLocalId(np.yt)){
