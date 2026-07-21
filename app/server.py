@@ -3679,6 +3679,17 @@ class H(BaseHTTPRequestHandler):
                     # cuenta como "revisada".
                     auto = bool(d.get("auto"))
                     by_yt = {c["yt"]: c for c in STATE["curated"]}
+                    # Reconciliación por huella (sha256), no solo por ruta — pedido explícito: si
+                    # el admin elige una carpeta NUEVA como raíz del catálogo (reorganización,
+                    # disco nuevo, estructura de subcarpetas distinta), los local_path de TODO el
+                    # catálogo cambian de golpe. Sin esto, cada canción se trataría como "ausente"
+                    # (la ruta vieja ya no aparece) Y como "nueva" (la ruta nueva es desconocida) —
+                    # duplicando el catálogo entero y perdiendo destacada/carátula propia/
+                    # congelada/fecha de agregado de cada entrada. Mismos bytes = misma canción,
+                    # sin importar dónde vive el archivo ahora: se reconoce la MISMA entrada (por
+                    # este dict, scoped a ESTE venue) y solo se actualiza su local_path.
+                    by_sha = {c["sha256"]: c["yt"] for c in STATE["curated"]
+                              if c.get("sha256") and is_local_id(c.get("yt"))}
                     added, updated = 0, 0
                     for t in tracks[:2000]:
                         if not isinstance(t, dict):
@@ -3686,12 +3697,13 @@ class H(BaseHTTPRequestHandler):
                         path = str(t.get("path") or "").strip()[:500]
                         if not path:
                             continue
-                        yt = "local:" + hashlib.sha1(path.encode("utf-8")).hexdigest()[:16]
+                        entry_sha = _norm_sha(t.get("sha256"))
+                        yt = (by_sha.get(entry_sha) if entry_sha else None) or \
+                             ("local:" + hashlib.sha1(path.encode("utf-8")).hexdigest()[:16])
                         entry_title = str(t.get("title") or "Canción")[:200]
                         entry_artist = str(t.get("artist") or "")[:120]
                         entry_genre = str(t.get("genre"))[:40] if t.get("genre") else None
                         entry_cover = None
-                        entry_sha = _norm_sha(t.get("sha256"))
                         # Base compartida entre bares: si este bar no trajo género (el escaneo del
                         # navegador no reconoció nada en el nombre/tags), primero se busca por
                         # huella EXACTA del archivo (más confiable — mismos bytes, no solo un

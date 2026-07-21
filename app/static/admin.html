@@ -1684,15 +1684,13 @@ async function pickLocalFolder(){
   catch(e){return;} // el usuario canceló el selector
   await idbSetDirHandle(dirHandle);
   _localDirHandle=dirHandle;
-  const status=$('scanStatus');
-  status.textContent='Escaneando…';
-  showProgress(true); // indeterminada — un recorrido de carpeta no sabe el total hasta terminar
-  try{
-    _scanBatch=await scanFolder(dirHandle,n=>status.textContent=`Escaneando… ${n} archivos encontrados`);
-  }finally{hideProgress();}
-  status.textContent=_scanBatch.length?`${_scanBatch.length} archivos listos para revisar abajo — ajusta lo que haga falta y guarda.`:
-    'No se encontraron archivos de audio/video en esa carpeta.';
-  renderScanReview(_scanBatch);
+  // Pedido explícito: elegir una carpeta debe sincronizar YA, como nueva raíz del catálogo —
+  // antes esto escaneaba y trataba TODO lo encontrado como "nuevo" sin comparar contra el
+  // catálogo que ya existía (ni marcaba ausentes, ni reconocía por sha256 lo que solo cambió
+  // de carpeta). Ahora reusa la MISMA lógica completa de "Forzar revisión" — sirve tanto para
+  // la primera vez (todo el catálogo existente está vacío, así que todo sale como "nuevo",
+  // igual que antes) como para apuntar a una carpeta distinta más adelante.
+  return forceRescanLocalCatalog();
 }
 
 // ---- Arrastrar y soltar (pedido explícito): la respuesta a "¿y si la canción está en una
@@ -1921,6 +1919,13 @@ async function forceRescanLocalCatalog(){
   // bar cada vez, aunque solo hubiera 1 nueva.
   const existing=(window._fullCurated||[]).filter(c=>c.yt&&c.yt.startsWith('local:'));
   const existingPaths=new Set(existing.map(c=>c.local_path));
+  // Huella (sha256) de lo que ya está en el catálogo — reconciliación por CONTENIDO, no solo
+  // por ruta. Clave para cuando se elige una carpeta nueva como raíz (reorganización, disco
+  // nuevo): TODAS las rutas cambian de golpe, y sin esto cada canción se vería como "ausente"
+  // (ruta vieja) Y "nueva" (ruta nueva) a la vez — duplicando el catálogo y perdiendo destacada/
+  // carátula propia/congelada/fecha de agregado. Con el sha256 se reconoce que es LA MISMA
+  // canción, solo que vive en otro lado ahora.
+  const existingShas=new Set(existing.filter(c=>c.sha256).map(c=>c.sha256));
   // OJO: solo se salta si YA tiene sha256 guardado — un catálogo importado antes de que
   // existiera esto (ver file_db/track_db) necesita UN último paso lento para calcularlo una
   // vez; de ahí en adelante, con el hash ya guardado, sí se salta y queda rápido para siempre.
@@ -1930,14 +1935,35 @@ async function forceRescanLocalCatalog(){
     found=await scanFolder(_localDirHandle,n=>status.textContent=`Revisando… ${n} archivos encontrados`,hashedPaths);
   }finally{hideProgress();}
   const foundPaths=new Set(found.map(f=>f.path));
-  const news=found.filter(f=>!existingPaths.has(f.path));
-  const missing=existing.filter(c=>c.local_path&&!foundPaths.has(c.local_path));
+  const foundShas=new Set(found.filter(f=>f.sha256).map(f=>f.sha256));
+  // "movidas": mismo contenido (sha256) que ya está en el catálogo, pero bajo una ruta nueva —
+  // ni son de verdad nuevas (no hace falta que el admin revise título/artista/género de nuevo,
+  // ya se revisaron cuando se agregaron la primera vez) ni están de verdad ausentes (el
+  // archivo sigue estando, solo cambió de carpeta/nombre). Van directo al servidor para que
+  // actualice su local_path por sha256, sin pasar por la tabla de revisión de abajo.
+  const moved=found.filter(f=>!existingPaths.has(f.path)&&f.sha256&&existingShas.has(f.sha256));
+  const news=found.filter(f=>!existingPaths.has(f.path)&&!(f.sha256&&existingShas.has(f.sha256)));
+  const missing=existing.filter(c=>c.local_path&&!foundPaths.has(c.local_path)&&!(c.sha256&&foundShas.has(c.sha256)));
   status.textContent=`Revisión terminada — ${found.length} archivos en la carpeta.`;
-  // Resincroniza `missing` en el servidor de una — es reversible (nunca borra nada solo, se
-  // des-marca sola si el archivo reaparece) así que no hace falta esperar confirmación del
-  // admin para esto. Lo que sí pide confirmación es la eliminación DEFINITIVA (abajo, por
-  // canción) — pedido explícito: "debería meterla o sacarla del catálogo con confirmación".
-  if(found.length)await post('/api/admin/local_catalog',{action:'import',tracks:[],seen_paths:found.map(f=>f.path)});
+  // Resincroniza `missing` + las "movidas" en el servidor de una — es reversible (nunca borra
+  // nada solo, se des-marca sola si el archivo reaparece) así que no hace falta esperar
+  // confirmación del admin para esto. Lo que sí pide confirmación es la eliminación DEFINITIVA
+  // (abajo, por canción o en lote) — pedido explícito: "debería meterla o sacarla del catálogo
+  // con confirmación".
+  if(found.length||moved.length){
+    // Para "movidas" se manda la metadata de la entrada YA EXISTENTE (título/artista/género/
+    // duración), no la recién escaneada — es la MISMA canción, solo cambió de ruta. Mandar lo
+    // recién leído (ej. duration siempre null, ver scanFolder — nunca calcula duración real)
+    // habría pisado datos ya buenos (duración aprendida, título corregido a mano) con un
+    // guess peor, para una canción que ni siquiera es nueva.
+    const movedTracks=moved.map(f=>{
+      const c=existing.find(x=>x.sha256===f.sha256);
+      return {path:f.path,title:c?c.title:f.title,artist:c?c.artist:f.artist,
+              genre:c?c.genre:f.genre,media_type:c?c.media_type:f.media_type,
+              duration:c?c.duration:null,sha256:f.sha256};
+    });
+    await post('/api/admin/local_catalog',{action:'import',tracks:movedTracks,seen_paths:found.map(f=>f.path)});
+  }
   // Backfill del sha256 para canciones que YA estaban en el catálogo pero no tenían hash
   // (import viejo, de antes de esta función) — se calculó igual en scanFolder() porque no
   // estaban en hashedPaths; ahora se adjunta sin tocar título/artista/género.
@@ -1947,8 +1973,9 @@ async function forceRescanLocalCatalog(){
   if(backfill.length)await post('/api/admin/local_catalog',{action:'backfill_hash',items:backfill});
   const parts=[];
   if(news.length)parts.push(`<div class="small" style="color:var(--gold);font-weight:700">🆕 ${news.length} canción(es) nueva(s) — revísalas abajo antes de guardar.</div>`);
+  if(moved.length)parts.push(`<div class="small" style="color:var(--pri);font-weight:700;margin-top:6px">📂 ${moved.length} canción(es) reconocidas por su huella — se actualizó su ubicación sola, sin perder destacada/carátula/edición.</div>`);
   if(missing.length)parts.push(`<div class="small" style="color:#ef4444;font-weight:700;margin-top:6px">⚠ ${missing.length} canción(es) del catálogo ya no están en la carpeta — ya se ocultaron de los clientes, revisa abajo si quieres quitarlas del todo.</div>`);
-  if(!news.length&&!missing.length)parts.push('<div class="small" style="color:#22c55e">✅ Todo al día — no hay cambios.</div>');
+  if(!news.length&&!missing.length&&!moved.length)parts.push('<div class="small" style="color:#22c55e">✅ Todo al día — no hay cambios.</div>');
   report.innerHTML=parts.join('');
   _scanBatch=news;
   renderScanReview(_scanBatch);
