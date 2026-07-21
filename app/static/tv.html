@@ -801,13 +801,37 @@ async function loadLocalFile(np){
     localMedia.src=URL.createObjectURL(file);
     _localBlobUrl=localMedia.src;
     localMedia.load();
-    localMedia.muted=!wantAudio;
+    // Mismo patrón que ya usa YouTube (playerVars mute:1): SIEMPRE arranca muteado — el
+    // autoplay muteado el navegador lo permite siempre, sin gesto — y desmutar es un paso
+    // aparte. Antes esto hacía localMedia.muted=!wantAudio directo: si wantAudio ya estaba en
+    // true por una sesión anterior (ver sessionStorage tym_tv_started, "redeploy sin refresh")
+    // pero esta carga en particular no venía de un clic real, el navegador rechazaba el
+    // autoplay CON sonido en silencio (igual que YouTube sin este mismo fix, ver commit
+    // 6c042e2) — el <video> se quedaba pausado del todo, pero setLocalAudioView() ya había
+    // prendido el disco+ecualizador animado sin mirar si de verdad estaba sonando: la canción
+    // no sonaba NI se veía, solo el "Forzar reinicio" (un clic real) lo resolvía.
+    localMedia.muted=true;
     localMedia.volume=1;
-    localMedia.play().catch(()=>{});
+    localMedia.play().then(()=>{
+      if(wantAudio)_tryUnmuteLocal();
+    }).catch(()=>{});
     hideLocalFileError();
   }catch(e){
     showLocalFileError('No se pudo abrir "'+(np.title||'')+'" — el archivo puede haberse movido, renombrado o borrado ('+path+').');
   }
+}
+
+// Intenta desmutar el <video> local fuera de un clic real (ej. wantAudio ya venía en true de
+// una sesión anterior) — mismo espíritu que el chequeo de YouTube en onReady (setTimeout +
+// revisar si de verdad se desmuteó). Si el navegador lo bloquea, #audioPill avisa para que un
+// clic real (activateAudio/forceRestart) lo resuelva — antes esto no existía para audio local,
+// solo para YouTube, así que el bloqueo pasaba en silencio total.
+function _tryUnmuteLocal(){
+  localMedia.muted=false;localMedia.volume=1;
+  setTimeout(()=>{
+    if(isLocalId(curYt)&&(localMedia.muted||localMedia.paused))$('audioPill').classList.add('show');
+    else $('audioPill').classList.remove('show');
+  },1200);
 }
 
 // Eventos del <video> nativo — hacen lo mismo que onStateChange/onError del player de
@@ -1539,6 +1563,13 @@ setInterval(async()=>{
     if(s.now_playing&&curYt===s.now_playing.yt&&mediaCtl.needsPlay()){
       mediaCtl.play();
       if(wantAudio){mediaCtl.unmute();mediaCtl.setVolume(100);}
+    }
+    // #audioPill (antes solo miraba player.isMuted() de YouTube — audio local nunca la
+    // mostraba, así que un bloqueo de autoplay con sonido pasaba en silencio total). Revisa en
+    // cada tick, no solo una vez al cargar, por si el estado cambia mientras suena.
+    if(wantAudio&&mediaCtl.isLocalNow()){
+      if(localMedia.muted||localMedia.paused)$('audioPill').classList.add('show');
+      else $('audioPill').classList.remove('show');
     }
 
     // Trim APRENDIDO
