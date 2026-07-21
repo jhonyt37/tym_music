@@ -41,7 +41,8 @@ NEW_SONG_WINDOW_SECS = 7 * 86400  # ventana de "🆕 nueva" en el catálogo loca
                                    # todavía (pedido explícito de mantenerlo simple por ahora)
 TV_OWNER_TIMEOUT = 8  # seg sin ping del dueño actual de la TV -> se libera (4x el intervalo de ping de 2s)
 EMOJIS = ["❤️", "🔥", "👍", "💃", "🎉"]  # reacciones positivas
-LOVED_CELEBRATION_THRESHOLD = 5  # reacciones acumuladas (todos los emojis) para "entró al top de hoy"
+LOVED_CELEBRATION_TOP_N = 5  # celebra "Top de Hoy" al entrar a estas primeras posiciones del
+                             # ranking real (loved_ranking()), no una cuenta fija de reacciones
 VIBES = ["🔥 Que todo el mundo cante", "💃 Más baile", "🎸 Más suave", "✨ Así está perfecto"]
 BIS_THRESHOLD = 3
 
@@ -1884,6 +1885,32 @@ def react_counts(item_id, token=None):
     mine = [e for e in EMOJIS if token and token in r.get(e, ())]
     return counts, mine, sum(counts.values())
 
+def loved_ranking():
+    """Ranking "lo más querido de la noche" (agrega reacciones por canción, sumadas entre todas
+    sus veces sonada hoy — now_playing+cola+historial), de mayor a menor total. Compartida entre
+    top_loved (public_state) y el chequeo de la celebración "Top de Hoy" en /api/react — antes
+    vivían duplicados en 2 lugares, con riesgo real de que se desincronizaran."""
+    np = STATE["now_playing"]
+    agg = {}
+    for it in (([np] if np else []) + STATE["items"] + STATE["history"]):
+        _, _, tot = react_counts(it["id"])
+        if tot > 0:
+            rp = STATE.get("reaction_pub", {}).get(it["id"], {})
+            pub_tables = set()
+            for e in EMOJIS:
+                for tok in rp.get(e, ()):
+                    tok_sess = get_session(tok)
+                    if tok_sess:
+                        pub_tables.add(tok_sess["table"])
+            a = agg.setdefault(it["yt"], {"yt": it["yt"], "title": _clean_title_display(it["title"]),
+                                          "artist": it.get("artist", ""), "total": 0, "tables": [],
+                                          "media_type": it.get("media_type"), "cover": it.get("cover")})
+            a["total"] += tot
+            for t in pub_tables:
+                if t not in a["tables"]:
+                    a["tables"].append(t)
+    return sorted(agg.values(), key=lambda x: -x["total"])
+
 def public_item(it, token):
     counts, mine, total = react_counts(it["id"], token)
     # Filtro de salida (no solo de entrada): cubre cola, now_playing e historial sin importar
@@ -1937,26 +1964,10 @@ def public_state(token=None, admin=False, mark_dedica=None):
             if now_ts - e["ts"] < 30 and e.get("item_id") == np["id"]
         ]
     history = [public_item(h, token) for h in STATE["history"][:8]]
-    # Ranking "lo más querido de la noche" (agrega reacciones por canción)
-    agg = {}
-    for it in (([np] if np else []) + STATE["items"] + STATE["history"]):
-        _, _, tot = react_counts(it["id"])
-        if tot > 0:
-            rp = STATE.get("reaction_pub", {}).get(it["id"], {})
-            pub_tables = set()
-            for e in EMOJIS:
-                for tok in rp.get(e, ()):
-                    tok_sess = get_session(tok)
-                    if tok_sess:
-                        pub_tables.add(tok_sess["table"])
-            a = agg.setdefault(it["yt"], {"yt": it["yt"], "title": _clean_title_display(it["title"]),
-                                          "artist": it.get("artist", ""), "total": 0, "tables": [],
-                                          "media_type": it.get("media_type"), "cover": it.get("cover")})
-            a["total"] += tot
-            for t in pub_tables:
-                if t not in a["tables"]:
-                    a["tables"].append(t)
-    top_loved = sorted(agg.values(), key=lambda x: -x["total"])[:10]
+    # Ranking "lo más querido de la noche" (agrega reacciones por canción) — ver loved_ranking(),
+    # compartida con el chequeo de la celebración "Top de Hoy" en /api/react (antes vivían
+    # duplicados, con riesgo real de que se desincronizaran).
+    top_loved = loved_ranking()[:10]
     req_songs = {}
     for e in STATE.get("request_log", []):
         yt = e.get("yt", "")
@@ -3160,23 +3171,26 @@ class H(BaseHTTPRequestHandler):
                     log.append({"emoji": emoji, "table": sess["table"] if pub else None,
                                 "ts": now_ts, "item_id": item_id})
                     STATE["react_log"] = [e for e in log if now_ts - e["ts"] < 60]
-                    # Celebración "entró al top de hoy": si esta reacción hace que el total
-                    # acumulado de la canción (sumado entre todas sus veces sonada hoy —
-                    # now_playing+cola+historial, igual que el ranking "Lo más querido") cruce
-                    # el umbral por primera vez, se dispara la animación en el TV. Una sola vez
-                    # por canción por noche (celebrated_loved).
+                    # Celebración "entró al top de hoy": pedido explícito — antes se disparaba
+                    # con una cuenta FIJA de reacciones (LOVED_CELEBRATION_THRESHOLD=5), sin
+                    # mirar el ranking real ("no está revisando el top actual"). Una noche floja,
+                    # 5 reacciones ya eran el puesto #1; una noche llena, 5 ni siquiera entraban
+                    # al top 10 — el mismo número no significa lo mismo según qué tan reñida esté
+                    # la noche. Ahora se mide por POSICIÓN: se recalcula el ranking real
+                    # (loved_ranking(), el mismo que usa "Lo más querido" del cliente/TV) después
+                    # de esta reacción, y se celebra si la canción entra al top 5 — no solo al
+                    # puesto #1. Sigue disparando una sola vez por canción por noche
+                    # (celebrated_loved).
                     if _react_item and _react_item["yt"] not in STATE["celebrated_loved"]:
                         yt = _react_item["yt"]
-                        yt_total = sum(
-                            react_counts(it["id"])[2]
-                            for it in (([_np_r] if _np_r else []) + STATE["items"] + STATE["history"])
-                            if it["yt"] == yt
-                        )
-                        if yt_total >= LOVED_CELEBRATION_THRESHOLD:
+                        ranking = loved_ranking()
+                        rank = next((i + 1 for i, a in enumerate(ranking) if a["yt"] == yt), None)
+                        if rank is not None and rank <= LOVED_CELEBRATION_TOP_N:
                             STATE["celebrated_loved"].add(yt)
+                            entry = ranking[rank - 1]
                             STATE["loved_celebration"] = {
-                                "yt": yt, "title": _clean_title_display(_react_item["title"]),
-                                "artist": _react_item.get("artist", ""), "total": yt_total, "ts": now_ts,
+                                "yt": yt, "title": entry["title"], "artist": entry["artist"],
+                                "total": entry["total"], "rank": rank, "ts": now_ts,
                             }
                 counts, mine, total = react_counts(item_id, tok)
                 return self._send(200, {"ok": True, "reactions": counts, "my_reacts": mine, "react_total": total})
