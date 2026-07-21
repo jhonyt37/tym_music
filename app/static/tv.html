@@ -236,10 +236,14 @@ body.audio-mode #now{order:3;padding-bottom:30px}
   animation:localDiscSpin 12s linear infinite}
 #localAudioView .disc{width:100%;height:100%;border-radius:50%;display:flex;align-items:center;
   justify-content:center;border:2px solid rgba(255,255,255,.08);
-  background:repeating-radial-gradient(circle,#1b2435 0,#1b2435 4px,#242f46 4px,#242f46 8px)}
+  background:repeating-radial-gradient(circle,#1b2435 0,#1b2435 4px,#242f46 4px,#242f46 8px);
+  background-size:cover;background-position:center}
+/* Carátula real (pedido explícito): cuando la canción tiene carátula (iTunes, ver
+   itunes_cover en server.py), se pinta como la superficie del disco — el patrón genérico de
+   arriba queda de respaldo mientras no hay carátula o no cargó todavía. */
 #localAudioView .disc-hole{width:92px;height:92px;border-radius:50%;background:var(--pri);
   display:flex;align-items:center;justify-content:center;font-size:38px;
-  box-shadow:inset 0 0 20px rgba(0,0,0,.4)}
+  box-shadow:inset 0 0 20px rgba(0,0,0,.4),0 0 0 4px rgba(0,0,0,.35)}
 @keyframes localDiscSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
 #localAudioView .eq{display:flex;align-items:flex-end;gap:7px;height:46px;margin-top:36px;z-index:1}
 #localAudioView .eq span{width:7px;border-radius:4px;background:var(--pri);
@@ -300,7 +304,7 @@ body.audio-mode #now{order:3;padding-bottom:30px}
 <video id="localMedia" playsinline></video>
 <div id="localAudioView">
   <div class="glow"></div>
-  <div class="cover"><div class="disc"><div class="disc-hole">🎵</div></div></div>
+  <div class="cover"><div class="disc" id="localDisc"><div class="disc-hole" id="localDiscHole">🎵</div></div></div>
   <div class="eq"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
 </div>
 <!-- Intercepta toques sueltos sobre el video para que no disparen el play/pausa nativo del
@@ -605,6 +609,14 @@ function setLocalAudioView(show,np){
     const el=$(id);clearTimeout(el._t);
     el.classList.toggle('show',_audioOnlyMode);
   });
+  // Carátula real (pedido explícito: mostrarla junto al fondo animado que ya corre en esta
+  // vista) — si la canción no tiene carátula (iTunes no la encontró, o el admin no la buscó
+  // aún), el disco se queda con su patrón genérico de vinilo de siempre.
+  const disc=$('localDisc');
+  if(disc){
+    if(show&&np&&np.cover){disc.style.backgroundImage=`url("${np.cover}")`;}
+    else{disc.style.backgroundImage='';}
+  }
 }
 
 // ---- Re-escaneo periódico del catálogo (Fase 5) — duplica el escáner de admin.html (mismo

@@ -1393,7 +1393,7 @@ def promote_next(manual=False):
             "ts": now, "charged": False, "fallback": True, "played_at": now,
             "duration": s.get("duration", DEFAULT_DUR), "position": 0,
             "media_type": s.get("media_type"), "local_path": s.get("local_path"),
-            "genre": s.get("genre")} if s else None)
+            "genre": s.get("genre"), "cover": s.get("cover")} if s else None)
     return STATE["now_playing"]
 
 def in_play_or_queue(yt):
@@ -1562,6 +1562,7 @@ def public_item(it, token):
             "requeue_count": it.get("requeue_count", 0),
             "ts": it.get("ts"), "played_at": it.get("played_at"),
             "media_type": it.get("media_type"), "local_path": it.get("local_path"),
+            "cover": it.get("cover"),
             "reactions": counts, "my_reacts": mine, "react_total": total}
 
 def public_state(token=None, admin=False, mark_dedica=None):
@@ -1589,7 +1590,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                   "paid": np.get("charge_on_play", 0) > 0 or np.get("paid_amount", 0) > 0,
                   "duration": np.get("duration", DEFAULT_DUR), "position": np.get("position", 0),
                   "media_type": np.get("media_type"), "local_path": np.get("local_path"),
-                  "genre": np.get("genre"),
+                  "genre": np.get("genre"), "cover": np.get("cover"),
                   "learned_end": STATE["learned_end"].get(np["yt"]),
                   "message": (np.get("message") or "") if np.get("message_status", "approved") == "approved" else "",
                   "ts": np.get("ts"), "played_at": np.get("played_at"),
@@ -2494,7 +2495,7 @@ class H(BaseHTTPRequestHandler):
                 # sin YouTube (ver plan federated-knitting-lagoon.md), necesarios para que /tv
                 # sepa qué archivo abrir y si mostrar la vista de audio o de video. Se resuelve
                 # ANTES del chequeo de duración máxima para que aplique sobre el valor real.
-                local_media_type, local_path, local_genre = None, None, None
+                local_media_type, local_path, local_genre, local_cover = None, None, None, None
                 if is_local_id(yt):
                     _cur_entry = next((c for c in STATE["curated"] if c["yt"] == yt), None)
                     if not _cur_entry:
@@ -2510,6 +2511,9 @@ class H(BaseHTTPRequestHandler):
                     # sugerir por artista/género igual que en YouTube, sin llamar a iTunes de
                     # nuevo — el catálogo ya trae el género que el admin clasificó).
                     local_genre = _cur_entry.get("genre")
+                    # carátula real (iTunes, ver itunes_cover) — pedido explícito: mostrarla en
+                    # /tv junto al fondo animado de la vista de solo-audio, cuando exista.
+                    local_cover = _cur_entry.get("cover")
                 _max_dur_min = int(STATE["settings"].get("max_song_duration_min", 0) or 0)
                 if _max_dur_min > 0 and dur > _max_dur_min * 60:
                     return self._send(400, {"error": f"Esta canción dura más de {_max_dur_min} min, el máximo permitido en este local 🎵",
@@ -2633,7 +2637,8 @@ class H(BaseHTTPRequestHandler):
                         "ts": time.time(), "charge_on_play": charge, "charged": bool(charge_via),
                         "charge_kind": ckind, "charge_via": charge_via, "paid_amount": paid_amount,
                         "message": req_msg, "message_status": msg_status, "message_mod_reason": _msg_reason,
-                        "media_type": local_media_type, "local_path": local_path, "genre": local_genre}
+                        "media_type": local_media_type, "local_path": local_path, "genre": local_genre,
+                        "cover": local_cover}
                 STATE["items"].append(item)
                 bump_count(yt, title, artist)
                 log_order(table, d.get("token"), mode, title, yt)   # analítica (free/premium)
