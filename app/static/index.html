@@ -617,7 +617,7 @@ let VENUE_TZ='America/Bogota';
 let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='', lastList=null, lastMax=12;
 let showingNewLocal=false;
 let assistActive=false, assistId=null, _lastBuzzTs=0;
-let _simLoadedForId=null, _nowYt=null;
+let _simLoadedForId=null, _nowYt=null, _nowCover=null;
 let _npState=null;
 let _queueYts=new Set();
 const $=id=>document.getElementById(id);
@@ -1607,8 +1607,9 @@ function openNowDetail(){
   const img2=$('nowDetailImg');
   const link=$('nowDetailLink');
   if(isLocalId(_nowYt)){
-    // Canción del catálogo del bar: no hay thumbnail ni página de YouTube que mostrar.
-    img2.removeAttribute('src');
+    // Canción del catálogo del bar: no hay página de YouTube que mostrar, pero SÍ puede haber
+    // carátula real (iTunes o subida a mano) — mismo bug que #nowImg, arreglado igual.
+    if(_nowCover)img2.src=_nowCover;else img2.removeAttribute('src');
     link.style.display='none';
   }else{
     img2.src=`https://i.ytimg.com/vi/${_nowYt}/hqdefault.jpg`;
@@ -2180,7 +2181,16 @@ async function poll(){
     // se actualiza junto con el resto de settings, no solo cuando cambia la canción.
     const vlogo=s.settings.venue_logo;
     if(vlogo){$('nowLogo').src=vlogo;$('nowLogo').style.display='';}else{$('nowLogo').style.display='none';}
-    if(np){if(isLocalId(np.yt))$('nowImg').removeAttribute('src');else $('nowImg').src=img(np.yt);
+    if(np){
+      // Carátula real (iTunes / carátula propia) para canciones del catálogo local — antes esta
+      // línea SIEMPRE quitaba el src para cualquier canción local, ignorando np.cover por
+      // completo (quedó de antes de que existiera soporte de carátulas locales y nunca se
+      // actualizó). miniThumbHtml() en listas sí lo hacía bien; acá, al ser un <img> fijo (no
+      // reconstruido con innerHTML), hay que setear/quitar el src a mano en cada poll.
+      _nowCover=np.cover||null;
+      if(isLocalId(np.yt)){
+        if(np.cover)$('nowImg').src=np.cover;else $('nowImg').removeAttribute('src');
+      }else $('nowImg').src=img(np.yt);
       $('nowTText').textContent=np.title;$('nowA').textContent=np.artist||'';
       $('nowW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table));
       _npState={pos0:np.position||0,t0:Date.now()/1000,dur:np.duration||1};
