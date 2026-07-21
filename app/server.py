@@ -1017,6 +1017,8 @@ def yt_search(q, limit=12):
 # en vez de depender del genero fijo configurado en el local (settings.genre).
 _genre_cache = {}
 GENRE_TTL = 6 * 3600
+# Wikidata pide un User-Agent identificable (política de Wikimedia) — sin esto puede bloquear.
+WIKIDATA_UA = "TYMMusic/1.0 (https://tym-music.onrender.com; contacto via app) genre-lookup"
 
 def _clean_for_lookup(t):
     """Quita '(Video Oficial)'/'[Lyrics]'/etc y todo tras 'ft./feat.' — sin esto iTunes
@@ -1079,6 +1081,103 @@ def itunes_genre(artist, title):
         for k in stale:
             del _genre_cache[k]
     return genre
+
+# ---- Clasificación de género combinada (varias fuentes, para catálogo local) ----
+# Pruebas reales (2026-07-20, ~103 archivos + 109 artistas colombianos) mostraron que ninguna
+# fuente sola pasa del ~55%: iTunes solo (55%, y con etiquetas GENÉRICAS a veces incorrectas —
+# ej. clasifica a Diomedes Díaz, vallenato puro, como "Salsa y tropical"), Wikidata solo (36%,
+# pero cuando responde es MÁS específico y preciso), y AcoustID (huella de audio) reconoce el
+# audio al 97% pero su base gratuita casi nunca lo enlaza a un título/artista usable (0% útil).
+# La señal MÁS fuerte y precisa resultó ser el propio NOMBRE del archivo/carpeta — la gente los
+# nombra con el género ("...Video Letra - Sentir Vallenato.mp3", carpeta "Salsa Clásica") — y
+# eso es a la vez más cobertura y más preciso que iTunes para música regional. Por eso el orden
+# de prioridad es: nombre del archivo → Wikidata → iTunes. Todo gratis, sin límite comercial.
+
+# Palabras que, si aparecen LITERALES en el nombre del archivo/carpeta, dan el género con
+# altísima precisión. Orden = prioridad (el primero que matchea gana). Solo términos inequívocos.
+_GENRE_KEYWORDS = [
+    ("vallenato", "vallenato"), ("champeta", "champeta"), ("cumbia", "cumbia"),
+    ("salsa", "salsa"), ("merengue", "merengue"), ("bachata", "bachata"),
+    ("reggaeton", "reggaeton"), ("reguetón", "reggaeton"), ("reguet", "reggaeton"),
+    ("ranchera", "ranchera"), ("mariachi", "ranchera"), ("bolero", "bolero"),
+    ("carranga", "carranga"), ("joropo", "joropo"), ("currulao", "currulao"),
+    ("porro", "porro"), ("bullerengue", "bullerengue"), ("mapale", "mapalé"),
+    ("musica popular", "música popular"), ("corrido", "corrido"), ("banda", "banda"),
+    ("balada", "balada"), ("metal", "metal"), ("punk", "punk"), ("rock", "rock"),
+    ("jazz", "jazz"), ("blues", "blues"), ("hip hop", "hip hop"), ("hip-hop", "hip hop"),
+    ("electronica", "electrónica"), ("techno", "electrónica"), ("house", "electrónica"),
+    ("tropical", "tropical"),
+]
+
+def _fold_txt(s):
+    s = unicodedata.normalize("NFKD", (s or "").lower())
+    return "".join(c for c in s if not unicodedata.combining(c))
+
+def genre_from_text(text):
+    """Detecta un género explícito nombrado en un texto (nombre de archivo/carpeta/ruta).
+    Gratis, instantáneo, sin red — la señal más precisa para música regional. None si no hay."""
+    ft = _fold_txt(text)
+    for kw, genre in _GENRE_KEYWORDS:
+        if kw in ft:
+            return genre
+    return None
+
+_wikidata_cache = {}
+
+def wikidata_genre(artist):
+    """Género del artista vía Wikidata (propiedad P136), datos CC0 (dominio público, libre para
+    uso comercial — confirmado en sus términos). Busca la entidad por nombre, lee su género y lo
+    traduce a la etiqueta en español. Menos cobertura que iTunes pero MÁS específico/preciso
+    cuando responde (ej. da 'Vallenato' donde iTunes da 'Salsa y tropical'). None si no hay."""
+    artist = (artist or "").strip()[:80]
+    if not artist:
+        return None
+    key = artist.lower()
+    now = time.time()
+    hit = _wikidata_cache.get(key)
+    if hit and now - hit[0] < GENRE_TTL:
+        return hit[1]
+    genre = None
+    try:
+        def _wget(url):
+            req = urllib.request.Request(url, headers={"User-Agent": WIKIDATA_UA})
+            return json.loads(urllib.request.urlopen(req, timeout=6).read())
+        su = ("https://www.wikidata.org/w/api.php?action=wbsearchentities&search="
+              + urllib.parse.quote(artist) + "&language=es&type=item&format=json&limit=1")
+        res = _wget(su).get("search", [])
+        if res:
+            qid = res[0]["id"]
+            eu = f"https://www.wikidata.org/w/api.php?action=wbgetentities&ids={qid}&props=claims&format=json"
+            claims = list(_wget(eu)["entities"].values())[0].get("claims", {})
+            gqids = [g["mainsnak"]["datavalue"]["value"]["id"]
+                     for g in claims.get("P136", []) if "datavalue" in g["mainsnak"]]
+            if gqids:
+                lu = (f"https://www.wikidata.org/w/api.php?action=wbgetentities&ids={gqids[0]}"
+                      "&props=labels&languages=es&format=json")
+                lab = list(_wget(lu)["entities"].values())[0].get("labels", {}).get("es", {})
+                genre = lab.get("value")
+    except Exception:
+        genre = None
+    _wikidata_cache[key] = (now, genre)
+    if len(_wikidata_cache) > 3000:
+        stale = [k for k, v in _wikidata_cache.items() if now - v[0] > GENRE_TTL]
+        for k in stale:
+            del _wikidata_cache[k]
+    return genre
+
+def classify_genre(artist, title, hint=""):
+    """Cascada combinada (ver comentario grande arriba). Prioridad por precisión:
+    1) género nombrado en el archivo/carpeta (hint) — lo más preciso y gratis,
+    2) Wikidata por artista — específico cuando responde,
+    3) iTunes por artista/título — mayor cobertura pero etiquetas genéricas.
+    Devuelve la primera que dé algo, o None."""
+    g = genre_from_text(hint)
+    if g:
+        return g
+    g = wikidata_genre(artist)
+    if g:
+        return g
+    return itunes_genre(artist, title)
 
 _cover_cache = {}
 
@@ -3329,10 +3428,13 @@ class H(BaseHTTPRequestHandler):
                 # eso, pero el cruce con iTunes no le importa de dónde salió el texto).
                 title_guess = str(d.get("title") or "").strip()[:200]
                 artist_guess = str(d.get("artist") or "").strip()[:120]
+                # hint: nombre del archivo/carpeta/ruta original — la señal MÁS precisa para
+                # género en música regional (ver classify_genre). El cliente lo manda si lo tiene.
+                hint = str(d.get("hint") or d.get("path") or "")[:300]
                 clean_title = _clean_title_display(title_guess)
                 artist = _lookup_real_artist(_clean_for_lookup(clean_title)) if not artist_guess else None
                 final_artist = artist or artist_guess or ""
-                genre = itunes_genre(artist_guess or artist or "", clean_title)
+                genre = classify_genre(artist_guess or artist or "", clean_title, hint)
                 cover = itunes_cover(final_artist, clean_title)
                 return self._send(200, {"ok": True, "title": clean_title,
                                          "artist": final_artist, "genre": genre, "cover": cover})

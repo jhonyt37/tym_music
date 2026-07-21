@@ -1417,6 +1417,25 @@ function _cleanGuessPiece(s){
 
 // Adivina título/artista a partir del nombre de archivo — el patrón más común en
 // descargas reales es "Artista - Título.ext"; si no hay guion, todo es título.
+// Género nombrado en la ruta del archivo/carpeta — la señal más precisa para música regional
+// (ver classify_genre/_GENRE_KEYWORDS en server.py; esta lista es su espejo del lado cliente).
+// Corre instantáneo, sin red, durante el escaneo — la mayoría de archivos quedan clasificados
+// antes de tocar iTunes/Wikidata. Devuelve '' si no hay ninguno.
+const _GENRE_KEYWORDS_JS=[
+  ['vallenato','vallenato'],['champeta','champeta'],['cumbia','cumbia'],['salsa','salsa'],
+  ['merengue','merengue'],['bachata','bachata'],['reggaeton','reggaeton'],['reguet','reggaeton'],
+  ['ranchera','ranchera'],['mariachi','ranchera'],['bolero','bolero'],['carranga','carranga'],
+  ['joropo','joropo'],['currulao','currulao'],['porro','porro'],['bullerengue','bullerengue'],
+  ['mapale','mapalé'],['musica popular','música popular'],['corrido','corrido'],['banda','banda'],
+  ['balada','balada'],['metal','metal'],['punk','punk'],['rock','rock'],['jazz','jazz'],
+  ['blues','blues'],['hip hop','hip hop'],['hip-hop','hip hop'],['electronica','electrónica'],
+  ['techno','electrónica'],['house','electrónica'],['tropical','tropical'],
+];
+function genreFromPath(text){
+  const ft=fold(text||'');
+  for(const [kw,g] of _GENRE_KEYWORDS_JS)if(ft.includes(kw))return g;
+  return '';
+}
 function guessFromFilename(filename){
   let noExt=filename.replace(/\.[a-zA-Z0-9]+$/,'');
   // Numero de pista al inicio (ej. "01 - ", "01. ", "01_") — no es el artista.
@@ -1536,7 +1555,8 @@ async function scanFolder(dirHandle,onProgress){
       path:entry.path,
       title:(tags&&tags.title)||guess.title||entry.handle.name,
       artist:(tags&&tags.artist)||guess.artist||'',
-      genre:(tags&&tags.genre)||topFolder||'',
+      // Prioridad: tag ID3 > género nombrado en la ruta completa > carpeta contenedora cruda.
+      genre:(tags&&tags.genre)||genreFromPath(entry.path)||topFolder||'',
       media_type:entry.mediaType,
       duration:null,
     });
@@ -1726,7 +1746,7 @@ async function copyDroppedFile(found){
         path:res.path,
         title:(tags&&tags.title)||guess.title||res.file.name,
         artist:(tags&&tags.artist)||guess.artist||'',
-        genre:(tags&&tags.genre)||topFolder||'',
+        genre:(tags&&tags.genre)||genreFromPath(res.path)||topFolder||'',
         media_type:res.mediaType,
         duration:null,
       });
@@ -1756,11 +1776,18 @@ async function bulkFetchCovers(){
     status.textContent=`Buscando carátulas… ${i+1}/${targets.length}`;
     setProgress(100*(i+1)/targets.length);
     try{
-      const cl=await post('/api/admin/classify_track',{title:c.title,artist:c.artist});
+      const cl=await post('/api/admin/classify_track',{title:c.title,artist:c.artist,hint:c.local_path});
+      // De paso, si la canción no tenía género, aprovechamos la clasificación (cascada
+      // nombre→Wikidata→iTunes) para llenarlo — no solo la carátula.
+      const gpatch=(cl.ok&&cl.genre&&!c.genre)?{genre:cl.genre}:{};
       if(cl.ok&&cl.cover){
         c.cover=cl.cover;
-        await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,cover:cl.cover});
+        if(gpatch.genre)c.genre=cl.genre;
+        await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,cover:cl.cover,...gpatch});
         found++;
+      }else if(gpatch.genre){
+        c.genre=cl.genre;
+        await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,genre:cl.genre});
       }
     }catch(e){/* una falla individual no debe frenar el resto del lote */}
     if(i<targets.length-1)await new Promise(r=>setTimeout(r,250));
@@ -1967,14 +1994,15 @@ function renderLocalCatalog(fullCurated){
       renderLocalCatalog(window._fullCurated);
     };
     actions.appendChild(lockBtn);
-    const itunesBtn=document.createElement('button');itunesBtn.className='btn ghost sm';itunesBtn.textContent='🔎 iTunes';
-    itunesBtn.title='Autocompletar género/artista cruzando con iTunes';
+    const itunesBtn=document.createElement('button');itunesBtn.className='btn ghost sm';itunesBtn.textContent='🔎 Autocompletar';
+    itunesBtn.title='Autocompletar género/artista/carátula (nombre del archivo → Wikidata → iTunes)';
     itunesBtn.onclick=async()=>{
       // admin.html no tiene un modal de confirmación propio — confirm() nativo, como el resto
-      // de acciones destructivas/de riesgo en este archivo.
-      if(c.locked&&!confirm(`"${c.title}" está congelada — ¿de todas formas quieres que iTunes la sobreescriba?`))return;
+      // de acciones destructivas/de riesgo en este archivo. hint: la ruta del archivo es la
+      // señal más precisa de género para música regional (ver classify_genre en server.py).
+      if(c.locked&&!confirm(`"${c.title}" está congelada — ¿de todas formas quieres autocompletar y sobreescribir?`))return;
       itunesBtn.disabled=true;
-      const cl=await post('/api/admin/classify_track',{title:c.title,artist:c.artist});
+      const cl=await post('/api/admin/classify_track',{title:c.title,artist:c.artist,hint:c.local_path});
       if(cl.ok){
         r.querySelector('[data-f="title"]').value=cl.title;
         r.querySelector('[data-f="artist"]').value=cl.artist;
@@ -1983,7 +2011,7 @@ function renderLocalCatalog(fullCurated){
         // la URL que ya cruzó classify_track por título/artista.
         c.cover=cl.cover||c.cover;
         await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,title:cl.title,artist:cl.artist,genre:cl.genre,cover:cl.cover});
-        toast(cl.cover?'Actualizado con iTunes (con carátula)':'Actualizado con iTunes','ok');
+        toast(cl.cover?'Autocompletado (con carátula)':'Autocompletado','ok');
         renderLocalCatalog(window._fullCurated);
       }
       itunesBtn.disabled=false;

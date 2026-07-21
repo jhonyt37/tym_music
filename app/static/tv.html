@@ -644,6 +644,23 @@ function _cleanGuessPiece(s){
   t=t.replace(/\s+/g,' ').trim(' -');
   return t;
 }
+// Género nombrado en la ruta — espejo de _GENRE_KEYWORDS (server.py) y genreFromPath (admin.html).
+const _GENRE_KEYWORDS_JS=[
+  ['vallenato','vallenato'],['champeta','champeta'],['cumbia','cumbia'],['salsa','salsa'],
+  ['merengue','merengue'],['bachata','bachata'],['reggaeton','reggaeton'],['reguet','reggaeton'],
+  ['ranchera','ranchera'],['mariachi','ranchera'],['bolero','bolero'],['carranga','carranga'],
+  ['joropo','joropo'],['currulao','currulao'],['porro','porro'],['bullerengue','bullerengue'],
+  ['mapale','mapalé'],['musica popular','música popular'],['corrido','corrido'],['banda','banda'],
+  ['balada','balada'],['metal','metal'],['punk','punk'],['rock','rock'],['jazz','jazz'],
+  ['blues','blues'],['hip hop','hip hop'],['hip-hop','hip hop'],['electronica','electrónica'],
+  ['techno','electrónica'],['house','electrónica'],['tropical','tropical'],
+];
+function _foldTv(s){return String(s||'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'');}
+function genreFromPath(text){
+  const ft=_foldTv(text);
+  for(const [kw,g] of _GENRE_KEYWORDS_JS)if(ft.includes(kw))return g;
+  return '';
+}
 function guessFromFilename(filename){
   let noExt=filename.replace(/\.[a-zA-Z0-9]+$/,'');
   noExt=noExt.replace(/^\d{1,3}[\s._-]+/,'');
@@ -727,7 +744,7 @@ async function maybeRescanFolder(){
         path:entry.path,
         title:(tags&&tags.title)||guess.title||entry.handle.name,
         artist:(tags&&tags.artist)||guess.artist||'',
-        genre:(tags&&tags.genre)||topFolder||'',
+        genre:(tags&&tags.genre)||genreFromPath(entry.path)||topFolder||'',
         media_type:entry.mediaType,
         duration:null,
       });
