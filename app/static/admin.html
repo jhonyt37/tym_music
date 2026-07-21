@@ -1584,12 +1584,22 @@ async function sha256File(file){
   }
 }
 
-async function scanFolder(dirHandle,onProgress){
+async function scanFolder(dirHandle,onProgress,knownPaths){
   const found=[];
   let n=0;
   for await(const entry of walkLocalDir(dirHandle,'')){
     n++;
     if(onProgress)onProgress(n);
+    // Pedido explícito: "si alguien carga una canción esto debería ser súper rápido" — un
+    // archivo que YA está en el catálogo no necesita abrirse de nuevo: leer tags ID3 y calcular
+    // el sha256 son las 2 operaciones caras de este escaneo (leen el archivo completo), y su
+    // resultado ni siquiera se usa para un archivo ya conocido (forceRescanLocalCatalog lo
+    // filtra de "nuevos" de todas formas). Solo se necesita el path, para el reconciliado de
+    // "missing" — sin tocar el contenido del archivo en absoluto.
+    if(knownPaths&&knownPaths.has(entry.path)){
+      found.push({path:entry.path,_known:true});
+      continue;
+    }
     const file=await entry.handle.getFile();
     let tags=null;
     if(entry.mediaType==='audio')tags=await readId3Tags(file);
@@ -1901,13 +1911,21 @@ async function forceRescanLocalCatalog(){
   }
   status.textContent='Revisando carpeta…';
   showProgress(true);
-  let found;
-  try{
-    found=await scanFolder(_localDirHandle,n=>status.textContent=`Revisando… ${n} archivos encontrados`);
-  }finally{hideProgress();}
-  const foundPaths=new Set(found.map(f=>f.path));
+  // Calculado ANTES del escaneo (no después, como antes) para poder saltarse el trabajo caro
+  // (leer tags + sha256) en cada archivo que ya conocemos — ver el nuevo parámetro knownPaths
+  // en scanFolder(). Antes "Forzar revisión" volvía a abrir y hashear TODAS las canciones del
+  // bar cada vez, aunque solo hubiera 1 nueva.
   const existing=(window._fullCurated||[]).filter(c=>c.yt&&c.yt.startsWith('local:'));
   const existingPaths=new Set(existing.map(c=>c.local_path));
+  // OJO: solo se salta si YA tiene sha256 guardado — un catálogo importado antes de que
+  // existiera esto (ver file_db/track_db) necesita UN último paso lento para calcularlo una
+  // vez; de ahí en adelante, con el hash ya guardado, sí se salta y queda rápido para siempre.
+  const hashedPaths=new Set(existing.filter(c=>c.sha256).map(c=>c.local_path));
+  let found;
+  try{
+    found=await scanFolder(_localDirHandle,n=>status.textContent=`Revisando… ${n} archivos encontrados`,hashedPaths);
+  }finally{hideProgress();}
+  const foundPaths=new Set(found.map(f=>f.path));
   const news=found.filter(f=>!existingPaths.has(f.path));
   const missing=existing.filter(c=>c.local_path&&!foundPaths.has(c.local_path));
   status.textContent=`Revisión terminada — ${found.length} archivos en la carpeta.`;
@@ -1916,6 +1934,13 @@ async function forceRescanLocalCatalog(){
   // admin para esto. Lo que sí pide confirmación es la eliminación DEFINITIVA (abajo, por
   // canción) — pedido explícito: "debería meterla o sacarla del catálogo con confirmación".
   if(found.length)await post('/api/admin/local_catalog',{action:'import',tracks:[],seen_paths:found.map(f=>f.path)});
+  // Backfill del sha256 para canciones que YA estaban en el catálogo pero no tenían hash
+  // (import viejo, de antes de esta función) — se calculó igual en scanFolder() porque no
+  // estaban en hashedPaths; ahora se adjunta sin tocar título/artista/género.
+  const backfill=found.filter(f=>!f._known&&f.sha256&&existingPaths.has(f.path))
+    .map(f=>{const c=existing.find(x=>x.local_path===f.path);return c?{yt:c.yt,sha256:f.sha256}:null;})
+    .filter(Boolean);
+  if(backfill.length)await post('/api/admin/local_catalog',{action:'backfill_hash',items:backfill});
   const parts=[];
   if(news.length)parts.push(`<div class="small" style="color:var(--gold);font-weight:700">🆕 ${news.length} canción(es) nueva(s) — revísalas abajo antes de guardar.</div>`);
   if(missing.length)parts.push(`<div class="small" style="color:#ef4444;font-weight:700;margin-top:6px">⚠ ${missing.length} canción(es) del catálogo ya no están en la carpeta — ya se ocultaron de los clientes, revisa abajo si quieres quitarlas del todo.</div>`);

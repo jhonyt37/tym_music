@@ -3745,6 +3745,32 @@ class H(BaseHTTPRequestHandler):
                     c["custom_cover"] = False
                     save_state()
                     return self._send(200, {"ok": True})
+                elif act == "backfill_hash":
+                    # "Forzar revisión" ahora se salta un archivo SOLO si ya tiene sha256 (ver
+                    # scanFolder en admin.html — pedido explícito: "esto debería ser súper
+                    # rápido de detectar y refrescar" cuando alguien carga UNA canción, no
+                    # rehashear las 400 de siempre). Un catálogo importado antes de que
+                    # existiera el sha256 necesita este único paso para calcularlo una vez;
+                    # nunca toca título/artista/género — solo adjunta el hash y, si el género
+                    # ya estaba puesto, lo comparte con file_db (no verificado — es un
+                    # backfill automático, no una corrección manual del admin).
+                    items = d.get("items") or []
+                    by_yt = {c["yt"]: c for c in STATE["curated"]}
+                    n = 0
+                    for it in items[:2000]:
+                        if not isinstance(it, dict):
+                            continue
+                        yt = it.get("yt")
+                        sha = _norm_sha(it.get("sha256"))
+                        c = by_yt.get(yt)
+                        if not c or not sha or not is_local_id(yt):
+                            continue
+                        c["sha256"] = sha
+                        n += 1
+                        if c.get("genre") or c.get("cover"):
+                            file_db_contribute(sha, c.get("genre"), c.get("cover"))
+                    save_state()
+                    return self._send(200, {"ok": True, "updated": n})
                 return self._send(400, {"error": "Acción inválida"})
 
             if path == "/api/admin/cover_suggestions":
