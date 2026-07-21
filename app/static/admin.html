@@ -1950,7 +1950,18 @@ async function forceRescanLocalCatalog(){
   // confirmación del admin para esto. Lo que sí pide confirmación es la eliminación DEFINITIVA
   // (abajo, por canción o en lote) — pedido explícito: "debería meterla o sacarla del catálogo
   // con confirmación".
-  if(found.length||moved.length){
+  // OJO: la condición NO puede ser "si se encontró algo" — el caso que más importa es
+  // exactamente el contrario: una carpeta vacía o equivocada (found.length===0) es cuando MÁS
+  // hace falta mandar el seen_paths (vacío) al servidor, para que TODO el catálogo existente
+  // quede marcado "missing" de verdad. Bug real encontrado en video del usuario: con
+  // "if(found.length)" a secas, elegir una carpeta vacía mostraba el aviso "⚠ 461 canciones ya
+  // no están" y la lista para quitarlas en admin.html, pero como found.length era 0 el POST de
+  // sincronización nunca se mandaba — el servidor nunca se enteraba, así que ningún `missing`
+  // quedaba puesto de verdad ahí. Resultado: "Quitar las 461 de una vez" borraba 0 (nada estaba
+  // realmente marcado) y /tv seguía sonando el catálogo completo, sin ocultar nada — el aviso
+  // en pantalla era pura ilusión, nunca se persistió. Ahora se manda siempre que haya algo que
+  // pueda necesitar actualizarse: catálogo existente, o algo nuevo/movido encontrado.
+  if(existing.length||found.length||moved.length){
     // Para "movidas" se manda la metadata de la entrada YA EXISTENTE (título/artista/género/
     // duración), no la recién escaneada — es la MISMA canción, solo cambió de ruta. Mandar lo
     // recién leído (ej. duration siempre null, ver scanFolder — nunca calcula duración real)
