@@ -619,6 +619,14 @@ let _queueYts=new Set();
 const $=id=>document.getElementById(id);
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const isLocalId=yt=>typeof yt==='string'&&yt.startsWith('local:');
+// Miniatura de una canción — YouTube tiene thumbnail real, una canción local no (nunca hubo
+// imagen que pedirle a nadie), así que un ícono genérico evita la imagen rota que salía antes
+// en cola/historial/rankings/etc (bug encontrado auditando "Por si te gustó" — esta rotura era
+// más amplia que esa sola pantalla, cualquier lista con miniatura la tenía).
+function miniThumbHtml(yt,mediaType){
+  if(isLocalId(yt))return`<div class="mini" style="display:flex;align-items:center;justify-content:center;font-size:20px;background:var(--bg2)">${mediaType==='video'?'🎬':'🎵'}</div>`;
+  return`<img class="mini" src="${img(yt)}" onerror="this.src='https://i.ytimg.com/vi/${yt}/hqdefault.jpg';this.onerror=null">`;
+}
 let CONTENT_MODE='youtube', _defaultViewMode=null;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const mm=s=>{s=Math.max(0,Math.round(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
@@ -844,10 +852,7 @@ function renderResults(list, max=12){
     }else{
       const sub=[s.artist,s.length].filter(Boolean).join(' · ');
       const inQ=_queueYts.has(s.yt);
-      const thumb=isLocalId(s.yt)
-        ?`<div class="mini" style="display:flex;align-items:center;justify-content:center;font-size:20px">${s.media_type==='video'?'🎬':'🎵'}</div>`
-        :`<img class="mini" src="${img(s.yt)}" onerror="this.src='https://i.ytimg.com/vi/${s.yt}/hqdefault.jpg';this.onerror=null">`;
-      r.innerHTML=`${thumb}<div class="info"><div class="t">${esc(stripDuplicateArtist(s.title,s.artist))}</div><div class="a">${esc(sub)}</div></div>${inQ?'<span class="chip-queue">En cola</span>':'<div class="btn sm" style="pointer-events:none">Pedir</div>'}`;
+      r.innerHTML=`${miniThumbHtml(s.yt,s.media_type)}<div class="info"><div class="t">${esc(stripDuplicateArtist(s.title,s.artist))}</div><div class="a">${esc(sub)}</div></div>${inQ?'<span class="chip-queue">En cola</span>':'<div class="btn sm" style="pointer-events:none">Pedir</div>'}`;
       r.onclick=()=>openSheet(s);
     }
     res.appendChild(r);
@@ -878,6 +883,8 @@ function normTitle(t){
     .trim();
 }
 async function loadSimilar(artists,genres,recentTitles){
+  // Defensa extra (el guard principal está en el call site) — 100% YouTube, no aplica en local.
+  if(CONTENT_MODE==='local'){$('simBox').style.display='none';return;}
   const unique=[...new Set((Array.isArray(artists)?artists:[artists]).filter(Boolean))].slice(0,3);
   // genres: género real de la canción (iTunes) + género del local, si son distintos —
   // así si iTunes no responde o trae poco, el género del local sigue completando (fallback).
@@ -1398,7 +1405,7 @@ function renderHistorialSocial(history,bisVotes,bisThreshold,myBisVotes){
   history.forEach(it=>{
     const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
     const playedTs=it.played_at||it.ts;
-    div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}${playedTs?' · sonó '+hm(playedTs):''}</div></div>`;
+    div.innerHTML=`${miniThumbHtml(it.yt,it.media_type)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}${playedTs?' · sonó '+hm(playedTs):''}</div></div>`;
     const react_total=it.react_total||0;
     if(react_total>=5){
       const bisCount=(bisVotes&&bisVotes[it.yt])||0;
@@ -1482,13 +1489,19 @@ async function sendDedica(){
 function openNowDetail(){
   if(!_nowYt)return;
   const img2=$('nowDetailImg');
-  img2.src=`https://i.ytimg.com/vi/${_nowYt}/hqdefault.jpg`;
+  const link=$('nowDetailLink');
+  if(isLocalId(_nowYt)){
+    // Canción del catálogo del bar: no hay thumbnail ni página de YouTube que mostrar.
+    img2.removeAttribute('src');
+    link.style.display='none';
+  }else{
+    img2.src=`https://i.ytimg.com/vi/${_nowYt}/hqdefault.jpg`;
+    link.href='https://youtube.com/watch?v='+_nowYt;
+    link.style.display='';
+  }
   $('nowDetailTitle').textContent=$('nowT').textContent;
   $('nowDetailArtist').textContent=$('nowA').textContent;
   $('nowDetailWho').textContent=$('nowW').textContent;
-  const link=$('nowDetailLink');
-  link.href='https://youtube.com/watch?v='+_nowYt;
-  link.style.display='';
   $('nowDetailBg').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
 }
 function closeNowDetail(){
@@ -1748,7 +1761,7 @@ function songRow(it,opts){
   const div=document.createElement('div');div.className='row';div.style.flexWrap='wrap';
   const tag=it.super?'⏫ ':(it.priority?'⚡ ':'');
   const tsHtml=it.ts?` · <span style="opacity:.7">pedida ${hm(it.ts)}</span>`:'';
-  div.innerHTML=`<img class="mini" src="${img(it.yt)}" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+esc(it.table||it.artist||'')+tsHtml}</div></div>`;
+  div.innerHTML=`${miniThumbHtml(it.yt,it.media_type)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}${it.mine?playStatusBadge(it):''}</div><div class="a">${tag+esc(it.table||it.artist||'')+tsHtml}</div></div>`;
   if(opts&&opts.boost){
     if(!it.priority){const b=document.createElement('button');b.className='btn sm gold';b.textContent='⚡ Impulsar';b.onclick=()=>boost(it.id,it.mine);div.appendChild(b);}
     // Siempre visible (nunca oculto) — deshabilitado con el motivo en el title (tooltip) cuando
@@ -1879,7 +1892,7 @@ function renderTopRequested(items){
   if(!items||!items.length){box.innerHTML='<div class="empty">Aún sin pedidos registrados.</div>';return;}
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank tappable';
-    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love" style="color:var(--pri)">🎵 ${it.count}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div>${miniThumbHtml(it.yt,it.media_type)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love" style="color:var(--pri)">🎵 ${it.count}</div>`;
     d.onclick=()=>openSheet(it);
     box.appendChild(d);
   });
@@ -1893,7 +1906,7 @@ function renderMyLikes(items){
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank';
     const emojis=(it.my_reacts||[]).join(' ');
-    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love">${emojis}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div>${miniThumbHtml(it.yt,it.media_type)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div></div><div class="love">${emojis}</div>`;
     box.appendChild(d);
   });
   tickify(box);
@@ -1906,7 +1919,7 @@ function renderLoved(items){
   items.forEach((it,i)=>{
     const d=document.createElement('div');d.className='rank';
     const tables=it.tables&&it.tables.length?it.tables.slice(0,4).join(' · ')+(it.tables.length>4?' y '+(it.tables.length-4)+' más':''):'';
-    d.innerHTML=`<div class="n">${i+1}</div><img class="mini" src="https://i.ytimg.com/vi/${it.yt}/hqdefault.jpg" onerror="this.src='https://i.ytimg.com/vi/${it.yt}/mqdefault.jpg';this.onerror=null"><div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div>${tables?`<div style="font-size:11px;color:var(--pri);margin-top:2px">🙌 ${esc(tables)}</div>`:''}</div><div class="love">❤️ ${it.total}</div>`;
+    d.innerHTML=`<div class="n">${i+1}</div>${miniThumbHtml(it.yt,it.media_type)}<div class="info"><div class="t">${esc(stripDuplicateArtist(it.title,it.artist))}</div><div class="a">${esc(it.artist||'')}</div>${tables?`<div style="font-size:11px;color:var(--pri);margin-top:2px">🙌 ${esc(tables)}</div>`:''}</div><div class="love">❤️ ${it.total}</div>`;
     box.appendChild(d);
   });
   tickify(box);
@@ -2005,8 +2018,11 @@ async function poll(){
       if(!still){assistActive=false;assistId=null;updateAssistBtn();toast('✓ Alguien está en camino 👋','ok');}
     }
 
-    // Sugerencias basadas en lo que suena (fallback también, si tiene artista)
-    if(np&&np.artist&&np.id!==_simLoadedForId){
+    // Sugerencias basadas en lo que suena (fallback también, si tiene artista) — 100%
+    // YouTube (/api/search por artista/género + /api/genre de iTunes), no aplica en modo
+    // catálogo local (bug reportado: salían resultados de YouTube con el local en modo local).
+    if(CONTENT_MODE==='local'){$('simBox').style.display='none';_simLoadedForId=null;}
+    else if(np&&np.artist&&np.id!==_simLoadedForId){
       _simLoadedForId=np.id;_nowYt=np.yt;
       const simArtists=[np.artist,(s.history[0]||{}).artist,(s.history[1]||{}).artist];
       const recentTitles=[np.title,...(s.history||[]).map(h=>h.title)];
@@ -2026,7 +2042,8 @@ async function poll(){
     // se actualiza junto con el resto de settings, no solo cuando cambia la canción.
     const vlogo=s.settings.venue_logo;
     if(vlogo){$('nowLogo').src=vlogo;$('nowLogo').style.display='';}else{$('nowLogo').style.display='none';}
-    if(np){$('nowImg').src=img(np.yt);$('nowTText').textContent=np.title;$('nowA').textContent=np.artist||'';
+    if(np){if(isLocalId(np.yt))$('nowImg').removeAttribute('src');else $('nowImg').src=img(np.yt);
+      $('nowTText').textContent=np.title;$('nowA').textContent=np.artist||'';
       $('nowW').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table));
       _npState={pos0:np.position||0,t0:Date.now()/1000,dur:np.duration||1};
     }else{_npState=null;$('nowTText').textContent='—';$('nowA').textContent='Nadie ha puesto música aún';$('nowW').textContent='';
