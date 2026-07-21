@@ -37,6 +37,8 @@ REDIS_URL   = os.environ.get("UPSTASH_REDIS_REST_URL", "").rstrip("/")
 REDIS_TOKEN = os.environ.get("UPSTASH_REDIS_REST_TOKEN", "")
 REDIS_KEY   = "tym_state"
 DEFAULT_DUR = 210  # 3:30 si no se conoce la duracion
+NEW_SONG_WINDOW_SECS = 7 * 86400  # ventana de "🆕 nueva" en el catálogo local — no configurable
+                                   # todavía (pedido explícito de mantenerlo simple por ahora)
 TV_OWNER_TIMEOUT = 8  # seg sin ping del dueño actual de la TV -> se libera (4x el intervalo de ping de 2s)
 EMOJIS = ["❤️", "🔥", "👍", "💃", "🎉"]  # reacciones positivas
 LOVED_CELEBRATION_THRESHOLD = 5  # reacciones acumuladas (todos los emojis) para "entró al top de hoy"
@@ -759,6 +761,15 @@ def is_local_id(yt):
     necesita cambios; solo los puntos que validan formato o hacen una llamada de red específica
     de YouTube (este archivo, ~6 lugares) necesitan revisar esto explícitamente."""
     return isinstance(yt, str) and yt.startswith("local:")
+
+def new_local_count(now):
+    """Cuántas canciones del catálogo local se agregaron en los últimos NEW_SONG_WINDOW_SECS —
+    para el badge "🆕 Nuevas" del cliente (index.html), sin que el cliente tenga que descargar
+    el catálogo completo solo para saber si hay algo nuevo que mostrar."""
+    cutoff = now - NEW_SONG_WINDOW_SECS
+    return sum(1 for c in STATE["curated"]
+               if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")
+               and c.get("added_at") and c["added_at"] >= cutoff)
 
 def _fold(s):
     """minúsculas + sin tildes/diacríticos — pedido explícito: la búsqueda del catálogo local
@@ -2121,6 +2132,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         "tv_active": (time.time() - STATE.get("tv_lastseen", 0)) < 15,
         "qr_force": time.time() < STATE.get("qr_force_until", 0),
         "active_sessions": active_persons_count(),
+        "new_local_count": new_local_count(time.time()) if s.get("content_mode") == "local" else 0,
         "assists": [a for a in STATE.get("assists", []) if not a.get("resolved")],
         "queue": qout,
         "queue_count": len(q),
@@ -2414,6 +2426,7 @@ class H(BaseHTTPRequestHandler):
             # nada externo. Filtro aparte de `q` (no se mezclan) para no dar falsos positivos si
             # el nombre del género aparece suelto en un título.
             genre_q = self._q("genre")[:40].strip().lower()
+            only_new = self._q("new") == "1"
             with LOCK:
                 self.set_venue(self.resolve_vid())
                 # missing: archivo que el último re-escaneo no encontró en disco. excluded:
@@ -2421,7 +2434,13 @@ class H(BaseHTTPRequestHandler):
                 # ofrece a los clientes.
                 base = [c for c in STATE["curated"]
                         if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")]
-                if genre_q:
+                if only_new:
+                    # "🆕 Nuevas" (ver new_local_count en public_state) — ignora q/genre, es su
+                    # propia vista dedicada. Más reciente primero.
+                    _cutoff = time.time() - NEW_SONG_WINDOW_SECS
+                    pool = sorted([c for c in base if c.get("added_at") and c["added_at"] >= _cutoff],
+                                  key=lambda c: -c["added_at"])
+                elif genre_q:
                     gf = _fold(genre_q)
                     pool = [c for c in base if gf in _fold(c.get("genre") or "")]
                 elif q:
@@ -2442,16 +2461,20 @@ class H(BaseHTTPRequestHandler):
                     featured = [c for c in base if c.get("featured")]
                     pool = featured if featured else base
                 now = time.time()
+                _new_cutoff = now - NEW_SONG_WINDOW_SECS
                 out = []
                 for c in pool[:40]:
                     info = repeat_block_info(c["yt"], now)
+                    added_at = c.get("added_at")
                     out.append({"yt": c["yt"], "title": c["title"], "artist": c.get("artist", ""),
                                 "duration": c.get("duration") or DEFAULT_DUR,
                                 "media_type": c.get("media_type"), "cover": c.get("cover"),
                                 "featured": bool(c.get("featured")),
                                 "blocked": bool(info),
                                 "block_reason": (info or {}).get("reason"),
-                                "block_available_at": (info or {}).get("available_at")})
+                                "block_available_at": (info or {}).get("available_at"),
+                                "added_at": added_at,
+                                "is_new": bool(added_at and added_at >= _new_cutoff)})
             return self._send(200, out)
         if path == "/api/genre":
             ip = self._client_ip()
@@ -3615,7 +3638,8 @@ class H(BaseHTTPRequestHandler):
                                                  "duration": _parse_len(d.get("length")) or DEFAULT_DUR,
                                                  "genre": (str(d.get("genre"))[:40] if d.get("genre") else None),
                                                  "media_type": (d.get("media_type") if d.get("media_type") in ("audio", "video") else None),
-                                                 "local_path": (str(d.get("local_path"))[:500] if d.get("local_path") else None)})
+                                                 "local_path": (str(d.get("local_path"))[:500] if d.get("local_path") else None),
+                                                 "added_at": time.time()})
                 elif act == "remove":
                     STATE["curated"] = [c for c in STATE["curated"] if c["yt"] != d.get("yt")]
                 elif act == "reorder":
@@ -3684,6 +3708,12 @@ class H(BaseHTTPRequestHandler):
                             by_yt[yt].update(entry); updated += 1
                         else:
                             entry["auto_added"] = auto
+                            # Solo en la rama de "nueva de verdad" — si esto viviera en el dict
+                            # `entry` de arriba, un re-escaneo (TV o "Forzar revisión") pisaría
+                            # added_at de canciones YA existentes en cada pasada, vía el
+                            # by_yt[yt].update(entry) de la rama "updated" (ver "🆕 Nuevas" en
+                            # el cliente, que se calcula a partir de este campo).
+                            entry["added_at"] = time.time()
                             by_yt[yt] = entry; STATE["curated"].append(entry); added += 1
                     # Resincronización (pedido explícito: "en cada canción debería resincronizar
                     # el catálogo previniendo mostrar archivos que ya no existan"): quien escanea

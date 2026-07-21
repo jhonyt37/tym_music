@@ -270,6 +270,7 @@ body{padding-bottom:80px}
         <input class="search" id="q" placeholder="Buscar canción, artista o pega un link de YouTube…" autocomplete="off">
         <button type="button" class="search-clear" id="qClear" aria-label="Borrar búsqueda">✕</button>
       </div>
+      <div id="newLocalChip" class="chipt" style="display:none;width:fit-content;margin-top:10px" onclick="toggleNewLocal()">🆕 <span id="newLocalCount">0</span> canciones nuevas</div>
       <div id="recoBox" style="margin-top:14px">
         <div class="chips" id="recoChips"></div>
         <div class="list" id="results"></div>
@@ -614,6 +615,7 @@ const VENUE=new URLSearchParams(location.search).get('v')||'';
 let token=localStorage.getItem('tym_token_'+VENUE)||'', sess=null, packages=[], pass_obj={minutes:30,price:5000};
 let VENUE_TZ='America/Bogota';
 let reco=null, recoTab='mas_pedido', searchTimer=null, lastTerm='', lastList=null, lastMax=12;
+let showingNewLocal=false;
 let assistActive=false, assistId=null, _lastBuzzTs=0;
 let _simLoadedForId=null, _nowYt=null;
 let _npState=null;
@@ -817,6 +819,9 @@ function onSearch(term){
   // del bar en vez de las tarjetas de recomendación (que no aplican en este modo).
   if(CONTENT_MODE==='local'){
     $('recoChips').style.display='none';
+    // Escribir algo en el buscador sale de la vista "🆕 Nuevas" — el chip solo filtra
+    // cuando el cliente lo pide explícitamente tocándolo, no se queda pegado.
+    if(showingNewLocal){showingNewLocal=false;$('newLocalChip').classList.remove('on');}
     searchLocalCatalog(term.trim());
     return;
   }
@@ -833,14 +838,23 @@ function onSearch(term){
     }catch(e){$('results').innerHTML='<div class="empty">No se pudo buscar. Intenta de nuevo.</div>';}
   },350);
 }
-function searchLocalCatalog(term){
+function searchLocalCatalog(term,onlyNew=false){
   $('results').innerHTML='<div class="empty">Buscando…</div>';
   lastTerm=term;
   searchTimer=setTimeout(async()=>{
-    try{const list=await (await fetch('/api/search_local?v='+encodeURIComponent(VENUE)+'&q='+encodeURIComponent(term))).json();
+    try{const url='/api/search_local?v='+encodeURIComponent(VENUE)+'&q='+encodeURIComponent(term)+(onlyNew?'&new=1':'');
+      const list=await (await fetch(url)).json();
       if(term!==lastTerm)return; renderResults(list);
     }catch(e){$('results').innerHTML='<div class="empty">No se pudo buscar. Intenta de nuevo.</div>';}
   },350);
+}
+// Chip "🆕 N canciones nuevas" (solo modo local) — filtra la lista a lo agregado al
+// catálogo en los últimos días (NEW_SONG_WINDOW_SECS en el servidor), más reciente primero.
+function toggleNewLocal(){
+  showingNewLocal=!showingNewLocal;
+  $('newLocalChip').classList.toggle('on',showingNewLocal);
+  $('q').value='';
+  searchLocalCatalog('',showingNewLocal);
 }
 // Nota de "no disponible todavía" para una canción bloqueada por la regla de no-repetir —
 // con ETA exacta si el bloqueo es por minutos (block_reason:'min'), genérica si es por
@@ -869,7 +883,10 @@ function buildResultRow(s,isBlocked){
   if(isBlocked)tag=`<span class="chip-soon">🔜 ${esc(blockNote(s))}</span>`;
   else if(inQ)tag='<span class="chip-queue">En cola</span>';
   else tag='<div class="btn sm" style="pointer-events:none">Pedir</div>';
-  r.innerHTML=`${miniThumbHtml(s.yt,s.media_type,s.cover)}<div class="info"><div class="t">${esc(stripDuplicateArtist(s.title,s.artist))}</div><div class="a">${esc(sub)}</div></div>${tag}`;
+  // "🆕" en la fila (no solo en la vista filtrada del chip) — visible también buscando por
+  // texto o navegando el catálogo normal, no solo en la lista dedicada.
+  const newBadge=s.is_new?'<span class="chip-soon" style="max-width:none;background:rgba(34,197,94,.14);border-color:rgba(34,197,94,.35);color:var(--green)">🆕</span>':'';
+  r.innerHTML=`${miniThumbHtml(s.yt,s.media_type,s.cover)}<div class="info"><div class="t">${esc(stripDuplicateArtist(s.title,s.artist))}</div><div class="a">${esc(sub)}</div></div>${newBadge}${tag}`;
   if(!isBlocked)r.onclick=()=>openSheet(s);
   return r;
 }
@@ -2049,6 +2066,17 @@ async function poll(){
       // pegar un link nunca funciona (onSearch() ya lo trata como texto plano, no como link) —
       // confuso para el cliente. Se actualiza junto con la vista por defecto de arriba.
       $('q').placeholder=CONTENT_MODE==='local'?'Buscar canción o artista…':'Buscar canción, artista o pega un link de YouTube…';
+    }
+    // Chip "🆕 N canciones nuevas" — se actualiza en cada poll (cada 2s), sin request aparte;
+    // si el conteo cae a 0 mientras el cliente está viendo esa vista filtrada (ej. el admin
+    // las excluyó o ya pasó la ventana de "nueva"), vuelve sola al catálogo normal.
+    if(CONTENT_MODE==='local'){
+      const nNew=s.new_local_count||0;
+      $('newLocalChip').style.display=nNew>0?'':'none';
+      $('newLocalCount').textContent=nNew;
+      if(nNew===0&&showingNewLocal){showingNewLocal=false;searchLocalCatalog($('q').value.trim());}
+    }else{
+      $('newLocalChip').style.display='none';
     }
     // Si el sheet de pedir está abierto, refresca el precio/cuenta regresiva del multiplicador
     // en vivo (poll corre cada 2s) en vez de dejarlos congelados desde que se abrió el sheet.
