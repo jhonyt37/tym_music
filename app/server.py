@@ -3587,11 +3587,20 @@ class H(BaseHTTPRequestHandler):
                     except Exception:
                         duration_secs = 120
                     now = time.time()
+                    # notify_clients (pedido explícito, opt-in por mensaje — "siempre y cuando
+                    # el bar ponga informar a los clientes"): manda notificación push real
+                    # (misma _send_venue_push() que ya usan las votaciones automáticas) y hace
+                    # que el cliente lo muestre en el tab "Ahora" — sin este flag, el anuncio se
+                    # queda como siempre, solo en la pantalla del TV.
+                    notify = bool(d.get("notify_clients"))
                     ann = {"id": nid(), "text": text,
                            "color": str(d.get("color", "#f59e0b"))[:20],
-                           "created_at": now, "active": True,
+                           "created_at": now, "active": True, "notify_clients": notify,
                            "duration_secs": duration_secs, "expires_at": now + duration_secs}
                     STATE.setdefault("announcements", []).append(ann)
+                    if notify:
+                        venue_name = STATE["settings"].get("venue_name", "TYM Music")
+                        _send_venue_push(vid, f"📢 {venue_name}", text)
                 elif act == "toggle":
                     aid = d.get("id")
                     for a in STATE.get("announcements", []):

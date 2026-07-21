@@ -280,6 +280,7 @@ body{padding-bottom:80px}
 
   <!-- ===== AHORA (antes "Suena") ===== -->
   <section class="tab" id="tab-ahora">
+    <div class="card" id="clientAnnCard" style="display:none;border-color:var(--gold);background:rgba(245,179,1,.08)"></div>
     <div class="card now-live" id="nowCard">
       <div class="now-live-lbl">🟢 EN VIVO</div>
       <h2><span class="pulse"></span>Sonando ahora</h2>
@@ -1262,11 +1263,19 @@ function initBellDrag(){
   const BELL_SIZE=60;
   // Limites verticales seguros: nunca tapar el nav de abajo ni quedar pegada arriba del todo.
   function maxY(){const navH=(document.querySelector('.nav')||{}).offsetHeight||60;return window.innerHeight-navH-(el.offsetHeight||BELL_SIZE)-MARGIN;}
+  // Clampa X contra el ancho real de la pantalla — sin esto, un valor guardado en
+  // localStorage de ANTES de este fix (calculado con offsetWidth=0, el bug original) se
+  // restauraba tal cual en cada carga, así que el fix de la posición inicial no alcanzaba para
+  // arreglar la campana en un celular que ya la había visto mal posicionada una vez: seguía
+  // "casi invisible" en la esquina porque el valor corrupto nunca se corregía solo, sin importar
+  // qué tan bien calculado estuviera el valor NUEVO. Bug reportado 2 veces seguidas por el
+  // mismo motivo real, no una regresión del segundo intento.
+  function clampX(x){return Math.max(MARGIN,Math.min(x,window.innerWidth-(el.offsetWidth||BELL_SIZE)-MARGIN));}
   function snapTo(x,y,animate){
-    const sy=Math.max(MARGIN,Math.min(y,maxY()));
+    const sx=clampX(x),sy=Math.max(MARGIN,Math.min(y,maxY()));
     if(animate){el.style.transition='left .25s cubic-bezier(.34,1.4,.64,1),top .2s ease';setTimeout(()=>{el.style.transition='';},260);}
-    el.style.right='auto';el.style.bottom='auto';el.style.left=x+'px';el.style.top=sy+'px';
-    try{localStorage.setItem('bell_pos',JSON.stringify({x,y:sy}));}catch(e){}
+    el.style.right='auto';el.style.bottom='auto';el.style.left=sx+'px';el.style.top=sy+'px';
+    try{localStorage.setItem('bell_pos',JSON.stringify({x:sx,y:sy}));}catch(e){}
   }
   try{const s=JSON.parse(localStorage.getItem('bell_pos')||'null');
     if(s){
@@ -2074,6 +2083,7 @@ function renderLoved(items){
 
 // ---------- Poll ----------
 let _lastNpId=null,_lastPollActive=false,_lastDueloActive=false;
+let _seenAnnIds=new Set();
 async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
@@ -2295,6 +2305,23 @@ async function poll(){
       if(!onSocialTab)$('badgePoll').style.display='';
     }
     _lastDueloActive=_dueloNowActive;
+    // Anuncios del bar con "avisar a los clientes" (pedido explícito, opt-in por mensaje) —
+    // antes s.announcements llegaba al cliente pero index.html nunca lo tocaba (solo tv.html lo
+    // mostraba) — mismo patrón de aviso que ya usan votación/duelo: toast + notificación push
+    // (llega igual aunque el cliente tenga la pestaña cerrada, si ya aceptó notificaciones antes)
+    // + banner fijo en el tab "Ahora" mientras siga activo.
+    const clientAnns=(s.announcements||[]).filter(a=>a.notify_clients);
+    clientAnns.forEach(a=>{
+      if(_seenAnnIds.has(a.id))return;
+      _seenAnnIds.add(a.id);
+      toast('📢 '+a.text,'ok',5000);
+      _triggerPushVote('📢 '+(s.settings.venue_name||'TYM Music'),a.text,'tym-ann-'+a.id);
+    });
+    const annCard=$('clientAnnCard');
+    if(clientAnns.length){
+      const latest=clientAnns[clientAnns.length-1];
+      annCard.style.display='';annCard.textContent='📢 '+latest.text;
+    }else annCard.style.display='none';
     renderVibe(s.vibe);
     renderDedicaCard(s.tables,s.session,s.settings.dedica_presets);
     renderSheetDedicaPresets(s.settings.dedica_presets);

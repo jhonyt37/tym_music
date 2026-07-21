@@ -266,6 +266,10 @@
             </select>
             <button class="btn sm" onclick="createAnnouncement()">+ Agregar</button>
           </div>
+          <label class="opt" style="margin-top:8px">
+            <div><b>📱 Avisar también a los clientes</b><div class="small">Además del TV, les llega como notificación push (si ya la aceptaron antes) y queda fijo en su tab "Ahora" mientras dure — apagado por defecto, para no molestar en cada anuncio.</div></div>
+            <input type="checkbox" id="annNotifyClients" style="width:22px;height:22px">
+          </label>
 
           <details class="settingsSection" style="margin-top:14px">
             <summary><span class="sec">Historial de anuncios enviados</span><span class="chev">▸</span></summary>
@@ -3417,9 +3421,10 @@ async function createAnnouncement(){
   const text=($('annText').value||'').trim();
   const color=$('annColor')&&$('annColor').value||'#f59e0b';
   const duration_secs=Number(($('annDuration')&&$('annDuration').value)||120);
+  const notify_clients=!!($('annNotifyClients')&&$('annNotifyClients').checked);
   if(!text){toast('Escribe el texto del anuncio','err');return;}
-  const j=await post('/api/admin/announcement',{action:'create',text,color,duration_secs});
-  if(j.ok){$('annText').value='';renderAnnouncements(j.announcements);toast('Anuncio creado ✓','ok');}
+  const j=await post('/api/admin/announcement',{action:'create',text,color,duration_secs,notify_clients});
+  if(j.ok){$('annText').value='';if($('annNotifyClients'))$('annNotifyClients').checked=false;renderAnnouncements(j.announcements);toast('Anuncio creado ✓','ok');}
   else toast(j.error||'Error','err');
 }
 async function toggleAnnouncement(id){
