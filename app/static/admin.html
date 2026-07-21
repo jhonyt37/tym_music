@@ -552,6 +552,7 @@
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button class="btn ghost" id="pickFolderBtn" onclick="pickLocalFolder()">📁 Elegir carpeta…</button>
         <button class="btn ghost" id="forceRescanBtn" onclick="forceRescanLocalCatalog()">🔄 Forzar revisión del catálogo</button>
+        <button class="btn ghost" id="bulkCoverBtn" onclick="bulkFetchCovers()">🖼️ Buscar carátulas faltantes</button>
       </div>
       <div class="small" id="scanStatus" style="margin-top:8px"></div>
 
@@ -571,7 +572,7 @@
 
       <h2 style="margin-top:16px;font-size:14px;font-weight:700">En el catálogo</h2>
       <div class="search-wrap" style="margin-bottom:8px">
-        <input class="search" id="localCatSearch" placeholder="Buscar por título, artista o género…" autocomplete="off" oninput="_localCatFilter=this.value.trim().toLowerCase();renderLocalCatalog(window._fullCurated)">
+        <input class="search" id="localCatSearch" placeholder="Buscar por título, artista o género…" autocomplete="off" oninput="_localCatFilter=fold(this.value.trim());renderLocalCatalog(window._fullCurated)">
         <button type="button" class="search-clear" id="localCatSearchClear" aria-label="Borrar búsqueda">✕</button>
       </div>
       <div class="small" style="color:var(--mut);margin-bottom:6px" id="localCatEmptyHint"></div>
@@ -813,6 +814,8 @@ function initPasswordToggle(id){
 const img=yt=>`https://i.ytimg.com/vi/${yt}/mqdefault.jpg`;
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// minúsculas + sin tildes — pedido explícito: las búsquedas deben tolerar tildes/mayúsculas.
+const fold=s=>String(s??'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'');
 function applyTicker(el){
   if(el.dataset.tkd)return;
   if(!el.getClientRects().length)return; // oculto — no marcar, reintentar después
@@ -1694,6 +1697,37 @@ async function copyDroppedFile(found){
   });
 })();
 
+// Pedido explícito: buscar carátulas en lote para las canciones que aún no tienen (en vez de
+// tener que abrir cada una y tocar "🔎 iTunes" una por una). Solo toca el campo `cover` — a
+// diferencia del botón individual, NO toca título/artista/género, para no arriesgar pisar una
+// edición manual solo por estar buscando la imagen. Respeta "Congelar" igual que el botón
+// individual (se salta las congeladas, no las cuenta como fallo). Secuencial con una pausa
+// corta entre canción y canción — un lote de golpe en paralelo podría saturar la API de iTunes.
+async function bulkFetchCovers(){
+  const btn=$('bulkCoverBtn'),status=$('scanStatus');
+  const targets=(window._fullCurated||[]).filter(c=>c.yt&&c.yt.startsWith('local:')&&!c.cover&&!c.locked&&!c.excluded);
+  if(!targets.length){toast('Ya todas tienen carátula (o están congeladas/descartadas)','ok');return;}
+  btn.disabled=true;
+  let found=0;
+  for(let i=0;i<targets.length;i++){
+    const c=targets[i];
+    status.textContent=`Buscando carátulas… ${i+1}/${targets.length}`;
+    try{
+      const cl=await post('/api/admin/classify_track',{title:c.title,artist:c.artist});
+      if(cl.ok&&cl.cover){
+        c.cover=cl.cover;
+        await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,cover:cl.cover});
+        found++;
+      }
+    }catch(e){/* una falla individual no debe frenar el resto del lote */}
+    if(i<targets.length-1)await new Promise(r=>setTimeout(r,250));
+  }
+  status.textContent=`Listo — ${found} carátula(s) nueva(s) de ${targets.length} revisadas.`;
+  btn.disabled=false;
+  renderLocalCatalog(window._fullCurated);
+  toast(found?`🖼️ ${found} carátula(s) encontradas`:'No se encontraron carátulas nuevas','ok');
+}
+
 // "Forzar revisión" (Fase 5): re-escanea la carpeta ya concedida (sin selector nativo si el
 // permiso sigue vigente) y compara contra el catálogo actual — nuevo → tabla de revisión de
 // siempre; ya no se encuentra en disco → aviso, no se borra solo (puede ser un disco de red
@@ -1817,7 +1851,7 @@ function renderLocalCatalog(fullCurated){
   const list=window._fullCurated.filter(c=>c.yt&&c.yt.startsWith('local:'))
     .filter(c=>{
       if(!_localCatFilter)return true;
-      return (c.title+' '+(c.artist||'')+' '+(c.genre||'')+' '+(c.local_path||'')).toLowerCase().includes(_localCatFilter);
+      return fold(c.title+' '+(c.artist||'')+' '+(c.genre||'')+' '+(c.local_path||'')).includes(_localCatFilter);
     });
   box.innerHTML='';
   hint.textContent=window._fullCurated.some(c=>c.yt&&c.yt.startsWith('local:'))

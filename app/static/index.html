@@ -2001,6 +2001,10 @@ async function poll(){
       _defaultViewMode=CONTENT_MODE;
       if(CONTENT_MODE==='local'){$('recoChips').style.display='none';searchLocalCatalog('');}
       else{$('recoChips').style.display='flex';renderReco();}
+      // El placeholder invitaba a "pegar un link de YouTube" incluso en modo local, donde
+      // pegar un link nunca funciona (onSearch() ya lo trata como texto plano, no como link) —
+      // confuso para el cliente. Se actualiza junto con la vista por defecto de arriba.
+      $('q').placeholder=CONTENT_MODE==='local'?'Buscar canción o artista…':'Buscar canción, artista o pega un link de YouTube…';
     }
     // Si el sheet de pedir está abierto, refresca el precio/cuenta regresiva del multiplicador
     // en vivo (poll corre cada 2s) en vez de dejarlos congelados desde que se abrió el sheet.

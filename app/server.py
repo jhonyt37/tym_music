@@ -7,6 +7,7 @@ Novedades: sesion de mesa por PIN, paquetes (creditos + pase), progreso de
 reproduccion, recomendadas (mas pedido / del local / populares / genero).
 """
 import json, os, re, socket, threading, time, random, datetime, struct, zlib
+import unicodedata, difflib
 import hashlib, hmac, secrets, smtplib
 from email.mime.text import MIMEText
 import urllib.request, urllib.parse
@@ -734,6 +735,28 @@ def is_local_id(yt):
     necesita cambios; solo los puntos que validan formato o hacen una llamada de red específica
     de YouTube (este archivo, ~6 lugares) necesitan revisar esto explícitamente."""
     return isinstance(yt, str) and yt.startswith("local:")
+
+def _fold(s):
+    """minúsculas + sin tildes/diacríticos — pedido explícito: la búsqueda del catálogo local
+    debe tolerar tildes/mayúsculas ("cancion" debe encontrar "canción" y viceversa)."""
+    s = unicodedata.normalize("NFKD", (s or "").lower())
+    return "".join(ch for ch in s if not unicodedata.combining(ch))
+
+def _fuzzy_local_search(pool, qf):
+    """Respaldo cuando la búsqueda exacta (por substring, ya con tildes normalizadas) no
+    encuentra nada — pedido explícito: tolerar palabras mal escritas. Compara cada palabra de
+    la búsqueda contra las palabras de título+artista con SequenceMatcher (stdlib, sin
+    dependencias externas); exige que TODAS las palabras de la búsqueda tengan una pareja
+    razonablemente parecida, para no devolver resultados demasiado sueltos."""
+    qwords = [w for w in qf.split() if len(w) >= 3]
+    if not qwords:
+        return []
+    out = []
+    for c in pool:
+        twords = _fold(c["title"] + " " + (c.get("artist") or "")).split()
+        if all(any(difflib.SequenceMatcher(None, qw, tw).ratio() >= 0.72 for tw in twords) for qw in qwords):
+            out.append(c)
+    return out
 
 def yt_id(text):
     text = (text or "").strip()
@@ -2005,23 +2028,28 @@ class H(BaseHTTPRequestHandler):
                 # missing: archivo que el último re-escaneo no encontró en disco. excluded:
                 # el admin la descartó a mano (✕ en el catálogo) — ninguna de las dos se le
                 # ofrece a los clientes.
-                pool = [c for c in STATE["curated"]
+                base = [c for c in STATE["curated"]
                         if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")]
                 if genre_q:
-                    pool = [c for c in pool if genre_q in (c.get("genre") or "").lower()]
+                    gf = _fold(genre_q)
+                    pool = [c for c in base if gf in _fold(c.get("genre") or "")]
                 elif q:
                     # Con texto, se busca en TODO el catálogo — el cliente tiene que poder pedir
-                    # cualquier cosa que el bar tenga, esté o no destacada.
-                    pool = [c for c in pool
-                            if q in (c["title"] + " " + (c.get("artist") or "")).lower()]
+                    # cualquier cosa que el bar tenga, esté o no destacada. _fold() tolera
+                    # tildes/mayúsculas; si el substring exacto no encuentra nada, se reintenta
+                    # con tolerancia a palabras mal escritas (_fuzzy_local_search).
+                    qf = _fold(q)
+                    pool = [c for c in base if qf in _fold(c["title"] + " " + (c.get("artist") or ""))]
+                    if not pool:
+                        pool = _fuzzy_local_search(base, qf)
                 else:
                     # Sin texto (pantalla de "Pedir" recién abierta): pedido explícito — lo que
                     # se sugiere por defecto debe ser lo que el bar destacó (featured, ver
                     # "Recomendadas del local" en /admin cuando content_mode=="local"), no un
                     # corte arbitrario de todo el catálogo. Si nadie ha destacado nada todavía,
                     # se cae al catálogo completo — nunca una pantalla vacía.
-                    featured = [c for c in pool if c.get("featured")]
-                    pool = featured if featured else pool
+                    featured = [c for c in base if c.get("featured")]
+                    pool = featured if featured else base
                 out = [{"yt": c["yt"], "title": c["title"], "artist": c.get("artist", ""),
                         "duration": c.get("duration") or DEFAULT_DUR,
                         "media_type": c.get("media_type"), "cover": c.get("cover"),
