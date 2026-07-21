@@ -598,7 +598,7 @@ function applyTheme(t){
   r.setProperty('--card',th.card);r.setProperty('--line',th.line);
   document.querySelector('meta[name="theme-color"]').content=th.bg;
 }
-let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0, jumpReason='', dedicaPrice=0;
+let CAT=[], price=1000, chosen=null, mode='normal', myLikes=null, jumpAvail=false, jumpPrice=0, price_queue_min=0, jumpReason='', dedicaPrice=0, queueCount=0;
 // "Prioridad" (⚡) y "Al frente" (⏫) tienen cada una su propio contador anti-abuso en el
 // servidor (pedido explícito — antes compartían uno solo, pagar uno subía el precio del otro).
 let priorityAbuseMult=1, priorityAbuseResetAt=0, jumpAbuseMult=1, jumpAbuseResetAt=0;
@@ -1156,15 +1156,20 @@ function confirmReq(){
   const _abResetAt=mode==='super'?jumpAbuseResetAt:priorityAbuseResetAt;
   const abuseNote=(_abMult>1&&_abResetAt>now0)?
     '<br><span style="color:var(--gold);font-size:13px">💸 Precio x'+_abMult+' por pedidos seguidos de tu mesa — baja a x'+(_abMult-1)+' en '+mm(_abResetAt-now0)+'</span>':'';
+  // Pedido explícito: si la cola está vacía, pagar por prioridad/salto no cambia nada — un
+  // pedido normal (gratis) ya suena de siguiente igual. Se avisa ANTES de cobrar (no se
+  // bloquea el botón — si igual quiere asegurar el puesto por si alguien pide justo antes,
+  // puede) en vez de dejar que pague sin saber que no hacía falta.
+  const emptyQNote=queueCount===0?'<br><span style="color:var(--gold);font-size:13px">💡 La cola está vacía — un pedido normal (gratis) ya suena de siguiente. No hace falta pagar, salvo que quieras asegurar el puesto por si alguien más pide antes que tú.</span>':'';
   if(mode==='super'){
-    confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> y suena de primera. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'. Solo <b>una vez por canción</b>.'+dedicaNote+abuseNote,doReq);
+    confirmModal('Saltar al #1 ⏫','Tu canción pasará al <b>primer lugar</b> y suena de primera. Se cobrará <b>'+cop(jumpPrice)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'. Solo <b>una vez por canción</b>.'+dedicaNote+abuseNote+emptyQNote,doReq);
   } else if(mode==='pri'){
     const now=Date.now()/1000;let msg;
     if(sess&&sess.pass_until>now) msg='Tu <b>pase activo</b> cubre esta prioridad (sin cargo extra).';
     else if(sess&&sess.credits>0) msg='Usarás <b>1 crédito</b> de prioridad (te quedan '+(sess.credits-1)+').';
     else msg='Se cobrará <b>'+cop(price)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+'.'+abuseNote;
     if(price_queue_min>5) msg+='<br><span style="color:#9aa7c2;font-size:13px">⏱ Cola de prioridades: ~'+price_queue_min+' min de espera antes de la tuya</span>';
-    confirmModal('Pedir con prioridad ⚡',msg+dedicaNote,doReq);
+    confirmModal('Pedir con prioridad ⚡',msg+dedicaNote+emptyQNote,doReq);
   } else if(hasMsg&&dedicaPrice>0){
     confirmModal('💌 Pedir con dedicatoria','Se cobrará <b>'+cop(dedicaPrice)+'</b> a tu cuenta'+(sess?' ('+esc(sess.table)+')':'')+' por la dedicatoria.',doReq);
   } else doReq();
@@ -2075,6 +2080,7 @@ async function poll(){
     price=(s.priority_price_now!=null?s.priority_price_now:s.settings.price_priority);packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
     dedicaPrice=s.settings.dedica_price||0;
     jumpAvail=!!s.jump_available;jumpPrice=(s.jump_price_now!=null?s.jump_price_now:(s.jump_price||0));price_queue_min=s.priority_queue_min||0;jumpReason=s.jump_unavailable_reason||'';
+    queueCount=s.queue_count||0;
     priorityAbuseMult=s.priority_abuse_mult_now||1;priorityAbuseResetAt=s.priority_abuse_reset_at||0;
     jumpAbuseMult=s.jump_abuse_mult_now||1;jumpAbuseResetAt=s.jump_abuse_reset_at||0;
     allowSelfReact=!!s.settings.allow_self_react;
