@@ -1710,20 +1710,32 @@ def in_play_or_queue(yt):
         return True
     return any(i["yt"] == yt for i in STATE["items"])
 
-def repeat_block_reason(yt, now):
+def repeat_block_info(yt, now):
+    """None si se puede pedir. Si no, {"reason":"songs"/"min", "available_at": ts|None} —
+    "songs" no tiene ETA fija (depende de cuántas canciones más suenen, no del reloj);
+    "min" sí, se usa para mostrar cuenta regresiva en "Próximamente" en el cliente."""
     if yt in STATE.get("repeat_exceptions", set()):
         return None
     s = STATE["settings"]
     n = max(0, int(s.get("repeat_block_songs", 3)))
     if n and any(h.get("yt") == yt for h in STATE["history"][:n]):
-        return "songs"
+        return {"reason": "songs", "available_at": None}
     mins = int(s.get("repeat_block_min", 0))
     if mins > 0:
         cutoff = now - mins * 60
+        latest = None
         for h in STATE["history"]:
-            if h.get("yt") == yt and h.get("played_at", h.get("ts", 0)) >= cutoff:
-                return "min"
+            if h.get("yt") == yt:
+                t = h.get("played_at", h.get("ts", 0))
+                if t >= cutoff and (latest is None or t > latest):
+                    latest = t
+        if latest is not None:
+            return {"reason": "min", "available_at": latest + mins * 60}
     return None
+
+def repeat_block_reason(yt, now):
+    info = repeat_block_info(yt, now)
+    return info["reason"] if info else None
 
 def bump_count(yt, title, artist):
     c = STATE["req_counts"].get(yt)
@@ -2371,7 +2383,23 @@ class H(BaseHTTPRequestHandler):
             if not _rate_ok(ip, "search"):
                 return self._send(429, {"error": "Demasiadas búsquedas. Espera un momento."})
             q = self._q("q")[:150]
-            return self._send(200, yt_search(q))
+            results = yt_search(q)
+            now = time.time()
+            # yt_search() cachea la lista en memoria compartida entre TODOS los bares (por
+            # texto de búsqueda) — nunca hay que mutar esos dicts directamente, o el estado de
+            # bloqueo de un bar se filtraría al resultado cacheado de otro bar. Se arma una
+            # copia nueva por request con el bloqueo de ESTE venue.
+            with LOCK:
+                self.set_venue(self.resolve_vid())
+                out = []
+                for r in results:
+                    info = repeat_block_info(r.get("yt"), now)
+                    item = dict(r)
+                    item["blocked"] = bool(info)
+                    item["block_reason"] = (info or {}).get("reason")
+                    item["block_available_at"] = (info or {}).get("available_at")
+                    out.append(item)
+            return self._send(200, out)
         if path == "/api/search_local":
             # Fase 3 del modo catálogo local (ver plan federated-knitting-lagoon.md) — busca por
             # texto sobre STATE["curated"] filtrado a entradas locales, sin llamar nunca a
@@ -2413,10 +2441,17 @@ class H(BaseHTTPRequestHandler):
                     # se cae al catálogo completo — nunca una pantalla vacía.
                     featured = [c for c in base if c.get("featured")]
                     pool = featured if featured else base
-                out = [{"yt": c["yt"], "title": c["title"], "artist": c.get("artist", ""),
-                        "duration": c.get("duration") or DEFAULT_DUR,
-                        "media_type": c.get("media_type"), "cover": c.get("cover"),
-                        "featured": bool(c.get("featured"))} for c in pool[:40]]
+                now = time.time()
+                out = []
+                for c in pool[:40]:
+                    info = repeat_block_info(c["yt"], now)
+                    out.append({"yt": c["yt"], "title": c["title"], "artist": c.get("artist", ""),
+                                "duration": c.get("duration") or DEFAULT_DUR,
+                                "media_type": c.get("media_type"), "cover": c.get("cover"),
+                                "featured": bool(c.get("featured")),
+                                "blocked": bool(info),
+                                "block_reason": (info or {}).get("reason"),
+                                "block_available_at": (info or {}).get("available_at")})
             return self._send(200, out)
         if path == "/api/genre":
             ip = self._client_ip()

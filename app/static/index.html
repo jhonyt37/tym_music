@@ -828,7 +828,7 @@ function onSearch(term){
   $('results').innerHTML='<div class="empty">Buscando…</div>';
   lastTerm=term;
   searchTimer=setTimeout(async()=>{
-    try{const list=await (await fetch('/api/search?q='+encodeURIComponent(term))).json();
+    try{const list=await (await fetch('/api/search?v='+encodeURIComponent(VENUE)+'&q='+encodeURIComponent(term))).json();
       if(term!==lastTerm)return; renderResults(list);
     }catch(e){$('results').innerHTML='<div class="empty">No se pudo buscar. Intenta de nuevo.</div>';}
   },350);
@@ -842,6 +842,37 @@ function searchLocalCatalog(term){
     }catch(e){$('results').innerHTML='<div class="empty">No se pudo buscar. Intenta de nuevo.</div>';}
   },350);
 }
+// Nota de "no disponible todavía" para una canción bloqueada por la regla de no-repetir —
+// con ETA exacta si el bloqueo es por minutos (block_reason:'min'), genérica si es por
+// cantidad de canciones (block_reason:'songs', sin hora fija, depende de qué más suene).
+function blockNote(s){
+  if(s.block_reason==='min'&&s.block_available_at){
+    const secs=s.block_available_at-Date.now()/1000;
+    if(secs>0){
+      const m=Math.ceil(secs/60);
+      return 'Disponible en '+(m<=1?'~1 min':'~'+m+' min');
+    }
+  }
+  return 'Sonó hace poco, espera un momento';
+}
+function buildResultRow(s,isBlocked){
+  const r=document.createElement('div');r.className='row'+(isBlocked?'':' tappable');
+  if(isBlocked)r.style.opacity='.6';
+  if(s._link){
+    r.innerHTML=`<div style="font-size:26px;flex-shrink:0">🔗</div><div class="info" style="flex:1"><div class="t">Canción desde link</div><div class="a" style="word-break:break-all;font-size:11px">${esc(s._link.slice(0,60))}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
+    r.onclick=()=>openSheetLink(s._link);
+    return r;
+  }
+  const sub=[s.artist,s.length].filter(Boolean).join(' · ');
+  const inQ=_queueYts.has(s.yt);
+  let tag;
+  if(isBlocked)tag=`<span class="chip-soon">🔜 ${esc(blockNote(s))}</span>`;
+  else if(inQ)tag='<span class="chip-queue">En cola</span>';
+  else tag='<div class="btn sm" style="pointer-events:none">Pedir</div>';
+  r.innerHTML=`${miniThumbHtml(s.yt,s.media_type,s.cover)}<div class="info"><div class="t">${esc(stripDuplicateArtist(s.title,s.artist))}</div><div class="a">${esc(sub)}</div></div>${tag}`;
+  if(!isBlocked)r.onclick=()=>openSheet(s);
+  return r;
+}
 function renderResults(list, max=12){
   lastList=list;lastMax=max;
   const res=$('results');res.innerHTML='';
@@ -851,19 +882,19 @@ function renderResults(list, max=12){
       :'<div class="empty">Sin resultados. Prueba otro nombre o pega un link de YouTube.</div>';
     return;
   }
-  list.slice(0,max).forEach(s=>{
-    const r=document.createElement('div');r.className='row tappable';
-    if(s._link){
-      r.innerHTML=`<div style="font-size:26px;flex-shrink:0">🔗</div><div class="info" style="flex:1"><div class="t">Canción desde link</div><div class="a" style="word-break:break-all;font-size:11px">${esc(s._link.slice(0,60))}</div></div><div class="btn sm" style="pointer-events:none">Pedir</div>`;
-      r.onclick=()=>openSheetLink(s._link);
-    }else{
-      const sub=[s.artist,s.length].filter(Boolean).join(' · ');
-      const inQ=_queueYts.has(s.yt);
-      r.innerHTML=`${miniThumbHtml(s.yt,s.media_type,s.cover)}<div class="info"><div class="t">${esc(stripDuplicateArtist(s.title,s.artist))}</div><div class="a">${esc(sub)}</div></div>${inQ?'<span class="chip-queue">En cola</span>':'<div class="btn sm" style="pointer-events:none">Pedir</div>'}`;
-      r.onclick=()=>openSheet(s);
-    }
-    res.appendChild(r);
-  });
+  // Las bloqueadas por la regla de no-repetir (sonaron hace poco) van aparte, deshabilitadas
+  // — antes se mostraban igual que cualquier otra, con "Pedir" activo, y solo se enteraba el
+  // cliente al chocar con el error DESPUÉS de tocar la canción y confirmar.
+  const avail=list.filter(s=>!s.blocked).slice(0,max);
+  const blocked=list.filter(s=>s.blocked);
+  avail.forEach(s=>res.appendChild(buildResultRow(s,false)));
+  if(blocked.length){
+    const hdr=document.createElement('div');
+    hdr.className='empty';hdr.style.cssText='text-align:left;font-size:12px;margin:14px 0 6px;opacity:.7';
+    hdr.textContent='🔜 Próximamente podrás pedir';
+    res.appendChild(hdr);
+    blocked.slice(0,max).forEach(s=>res.appendChild(buildResultRow(s,true)));
+  }
   tickify(res);
 }
 

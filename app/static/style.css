@@ -43,6 +43,7 @@ header.bar{
 .my-next-banner{background:rgba(245,179,1,.12);border:1px solid rgba(245,179,1,.4);border-radius:12px;padding:10px 14px;font-size:14px;font-weight:700;color:var(--gold);display:flex;align-items:center;gap:8px;margin-top:10px}
 /* ---- Chip "en cola" en resultados ---- */
 .chip-queue{font-size:11px;padding:3px 8px;border-radius:999px;background:rgba(59,130,246,.15);border:1px solid rgba(59,130,246,.4);color:var(--pri);font-weight:700;white-space:nowrap;flex-none}
+.chip-soon{font-size:10.5px;padding:3px 8px;border-radius:999px;background:rgba(245,179,1,.14);border:1px solid rgba(245,179,1,.35);color:var(--gold);font-weight:700;white-space:normal;text-align:right;max-width:110px;flex-none;line-height:1.25}
 /* ---- Botón skip vote ---- */
 .skip-btn{width:100%;margin-top:12px;padding:10px;border-radius:12px;border:1px solid var(--line);background:var(--bg2);color:var(--mut);font-size:13px;font-weight:700;cursor:pointer;touch-action:manipulation;transition:background .15s,color .15s,border-color .15s}
 .skip-btn.voted{border-color:var(--red);color:var(--red);background:rgba(239,68,68,.1)}
