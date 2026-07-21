@@ -538,6 +538,13 @@ TYM = {
     "accounts": {},            # token -> {id,venue,table,opened_at,closed_at,total,orders_free,orders_premium}
     "vapid": {},               # {private_key_pem, public_key_b64}
     "push_subs": {},           # venue_id -> [{endpoint, keys:{p256dh,auth}}]
+    # Caché de identificación por audio (AudD, ver identify_audio_bytes) — COMPARTIDA entre
+    # TODOS los bares, no por venue. Pedido explícito: "nuestra propia huella musical antes de
+    # ir hasta AudD" — muchos bares seguramente tienen el mismo mp3 (bajado del mismo sitio/
+    # grupo), así que si un bar ya lo identificó, el siguiente no gasta cuota de AudD para lo
+    # mismo. Clave = sha256 del archivo completo (huella exacta, gratis, sin dependencias
+    # nuevas) -> {"artist","title","ts"}.
+    "audd_cache": {},
 }
 
 CUR_VID = DEFAULT_VID   # bar del request actual (se fija bajo LOCK)
@@ -1210,6 +1217,62 @@ def itunes_cover(artist, title):
         for k in stale:
             del _cover_cache[k]
     return cover
+
+# ---- Identificación por audio (AudD) — SOLO última instancia manual, nunca automática/masiva.
+# Pruebas reales (2026-07-20, 50 archivos) confirmaron 100% de respuesta pero con errores de
+# identificación reales (sobre todo en vallenato) y género propio demasiado genérico — por eso
+# el resultado se muestra como preview y el admin debe confirmar antes de aplicarlo (ver UI en
+# admin.html). Token vía variable de entorno para poder rotarlo a otra cuenta (otras 300
+# gratis) sin tocar código mientras se valida si vale la pena pagar el plan comercial.
+AUDD_API_TOKEN = os.environ.get("AUDD_API_TOKEN", "")
+AUDD_MAX_BYTES = 15 * 1024 * 1024
+
+def _multipart_encode(fields, files):
+    """Codifica multipart/form-data a mano (sin `requests`, todo el proyecto usa urllib).
+    fields: {name: str}. files: {name: (filename, bytes, content_type)}."""
+    boundary = "----TYMAudd" + secrets.token_hex(16)
+    parts = []
+    for name, value in fields.items():
+        parts.append(
+            f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode("utf-8")
+        )
+    for name, (filename, data, ctype) in files.items():
+        parts.append(
+            (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"; filename="{filename}"\r\n'
+             f'Content-Type: {ctype}\r\n\r\n').encode("utf-8") + data + b"\r\n"
+        )
+    parts.append(f"--{boundary}--\r\n".encode("utf-8"))
+    body = b"".join(parts)
+    return body, f"multipart/form-data; boundary={boundary}"
+
+def identify_audio_bytes(audio_bytes, filename):
+    """Identifica un clip de audio vía AudD, con caché compartida (todos los bares) por
+    sha256 exacto del archivo — pedido explícito: 'nuestra propia huella musical antes de ir
+    hasta AudD', para no gastar cuota en un mp3 que otro bar ya identificó. Devuelve
+    {"ok":True,"artist":...,"title":...,"cached":bool} o {"ok":False,"error":...}."""
+    digest = hashlib.sha256(audio_bytes).hexdigest()
+    cached = TYM["audd_cache"].get(digest)
+    if cached:
+        return {"ok": True, "artist": cached["artist"], "title": cached["title"], "cached": True}
+    if not AUDD_API_TOKEN:
+        return {"ok": False, "error": "AudD no configurado (falta AUDD_API_TOKEN)"}
+    try:
+        body, content_type = _multipart_encode(
+            {"api_token": AUDD_API_TOKEN, "return": "apple_music"},
+            {"file": (filename or "clip.mp3", audio_bytes, "application/octet-stream")},
+        )
+        req = urllib.request.Request(
+            "https://api.audd.io/", data=body, headers={"Content-Type": content_type}
+        )
+        resp = json.loads(urllib.request.urlopen(req, timeout=25).read())
+    except Exception as e:
+        return {"ok": False, "error": f"AudD no respondió ({e})"}
+    result = resp.get("result") if resp.get("status") == "success" else None
+    if not result or not (result.get("artist") or result.get("title")):
+        return {"ok": False, "error": "No se pudo identificar la canción"}
+    artist, title = result.get("artist") or "", result.get("title") or ""
+    TYM["audd_cache"][digest] = {"artist": artist, "title": title, "ts": time.time()}
+    return {"ok": True, "artist": artist, "title": title, "cached": False}
 
 # ---- Moderación de dedicatorias — heurística de palabras clave (sin IA, sin costo, sin
 # dependencias externas). Menos precisa que un modelo de lenguaje (no entiende contexto,
@@ -2307,6 +2370,39 @@ class H(BaseHTTPRequestHandler):
 
         return self._send(404, {"error": "not found"})
 
+    def _handle_identify_audio(self):
+        """Identificación manual de audio (AudD) — último recurso, un archivo a la vez, nunca
+        automático/masivo (pedido explícito). El cuerpo es el audio crudo (no JSON); el nombre
+        del archivo va en el query string (?filename=...) para no mezclarse con el binario."""
+        n = int(self.headers.get("Content-Length", 0) or 0)
+        if not self.authed_venue():
+            if n:
+                remaining = n
+                while remaining > 0:
+                    chunk = self.rfile.read(min(remaining, 65536))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+            return self._send(401, {"error": "No autorizado"})
+        if not n or n > AUDD_MAX_BYTES:
+            if n:
+                remaining = n
+                while remaining > 0:
+                    chunk = self.rfile.read(min(remaining, 65536))
+                    if not chunk:
+                        break
+                    remaining -= len(chunk)
+            return self._send(400, {"error": "Archivo vacío o demasiado grande (máx 15MB)"})
+        audio_bytes = self.rfile.read(n)
+        qs = parse_qs(urlparse(self.path).query)
+        filename = (qs.get("filename") or ["clip.mp3"])[0][:200]
+        result = identify_audio_bytes(audio_bytes, filename)
+        if not result["ok"]:
+            return self._send(200, {"ok": False, "error": result["error"]})
+        if not result["cached"]:
+            save_state()
+        return self._send(200, result)
+
     def _body(self):
         n = int(self.headers.get("Content-Length", 0) or 0)
         if not n:
@@ -2335,6 +2431,11 @@ class H(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        # Intercepta ANTES de _body(): ese método asume JSON y acota a 3MB, pero acá llega el
+        # audio crudo (binario, puede pesar varios MB) — necesita su propio límite y su propio
+        # drenado del socket en caso de rechazo (mismo motivo que el comentario en _body()).
+        if path == "/api/admin/identify_audio":
+            return self._handle_identify_audio()
         d = self._body()
         # ---- Login / logout (dueños TYM) ----
         if path == "/api/login":
@@ -4126,7 +4227,7 @@ def load_state():
         return
     try:
         if "tym" in d:
-            for k in ("socials", "tym_logo", "subscribers", "events", "accounts", "vapid", "push_subs"):
+            for k in ("socials", "tym_logo", "subscribers", "events", "accounts", "vapid", "push_subs", "audd_cache"):
                 if k in d["tym"]:
                     TYM[k] = d["tym"][k]
             # Carga todos los owners desde la DB (iniciales + creados dinámicamente)

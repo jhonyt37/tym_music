@@ -1684,6 +1684,24 @@ async function fileExistsIn(dir,name){
   try{await dir.getFileHandle(name);return true;}catch(e){return false;}
 }
 
+// Resuelve un local_path guardado (ej. "Vallenatos/cancion.mp3") al archivo real dentro de la
+// carpeta permitida — mismo recorrido getDirectoryHandle/getFileHandle que ya usa
+// copyDroppedFile() de arriba, reutilizado acá para leer (no escribir) en la identificación
+// por audio (AudD).
+async function resolveLocalFile(path){
+  if(!_localDirHandle){
+    const saved=await idbGetDirHandle();
+    if(saved){try{if(await saved.queryPermission({mode:'read'})==='granted')_localDirHandle=saved;}catch(e){}}
+  }
+  if(!_localDirHandle)throw new Error('Sin acceso a la carpeta local — elígela de nuevo con el botón de arriba');
+  const parts=(path||'').split('/');
+  const filename=parts.pop();
+  let dir=_localDirHandle;
+  for(const part of parts)dir=await dir.getDirectoryHandle(part);
+  const fh=await dir.getFileHandle(filename);
+  return await fh.getFile();
+}
+
 // Copia un archivo encontrado en lo que se soltó DENTRO de la carpeta permitida, recreando
 // las subcarpetas que traiga su ruta relativa. Nunca sobreescribe algo que ya esté ahí (podría
 // ser una canción distinta con el mismo nombre) — lo salta y lo reporta.
@@ -1994,6 +2012,74 @@ function renderLocalCatalog(fullCurated){
       renderLocalCatalog(window._fullCurated);
     };
     actions.appendChild(lockBtn);
+    // Identificación por audio (AudD) — ÚLTIMO recurso, solo manual, un archivo a la vez
+    // (pedido explícito: nunca automático/masivo, ya que las pruebas reales encontraron
+    // errores de identificación sobre todo en vallenato). Deliberadamente poco vistoso —
+    // opacidad baja, sin ícono llamativo — para que el admin use primero "Autocompletar"
+    // (gratis, sin límite) y solo llegue acá cuando esa opción de verdad no sirvió.
+    const audioIdToggle=document.createElement('button');audioIdToggle.type='button';
+    audioIdToggle.className='btn ghost sm';audioIdToggle.style.cssText='opacity:.5';
+    audioIdToggle.textContent='🎧';
+    audioIdToggle.title='Último recurso: identificar por audio (AudD) — solo si "Autocompletar" no sirvió';
+    actions.appendChild(audioIdToggle);
+    const audioIdPanel=document.createElement('div');
+    // tabIndex -1: foco programático (nunca por Tab) — necesario para el guard de arriba
+    // ("mientras el foco esté DENTRO de esta lista, no se re-dibuja nada"). Sin esto,
+    // deshabilitar el botón "Analizar" le quita el foco a document.body, el próximo poll de
+    // 2s reconstruye toda la fila y el panel se cierra ANTES de que el admin vea el resultado.
+    audioIdPanel.tabIndex=-1;
+    audioIdPanel.style.cssText='display:none;margin-top:6px;padding:8px;border:1px dashed var(--bd);border-radius:8px;width:100%;outline:none';
+    audioIdToggle.onclick=()=>{
+      const open=audioIdPanel.style.display!=='none';
+      audioIdPanel.style.display=open?'none':'block';
+      if(!open&&!audioIdPanel.dataset.built){
+        audioIdPanel.dataset.built='1';
+        audioIdPanel.innerHTML=`<div class="small" style="color:var(--mut);margin-bottom:6px">Identificación por audio (AudD) — último recurso. El resultado NO se aplica solo, hay que confirmarlo.</div>
+          <button type="button" class="btn ghost sm" id="aududGo">🎧 Analizar audio</button>
+          <div class="small" id="aududResult" style="margin-top:6px"></div>`;
+        audioIdPanel.querySelector('#aududGo').onclick=async()=>{
+          const goBtn=audioIdPanel.querySelector('#aududGo'),resultBox=audioIdPanel.querySelector('#aududResult');
+          goBtn.disabled=true;audioIdPanel.focus();resultBox.textContent='Leyendo archivo…';
+          try{
+            const file=await resolveLocalFile(c.local_path);
+            resultBox.textContent='Consultando AudD…';
+            const url='/api/admin/identify_audio?filename='+encodeURIComponent(file.name||'clip.mp3');
+            const resp=await(await fetch(url,{method:'POST',body:file})).json();
+            if(!resp.ok){
+              resultBox.innerHTML=`<span style="color:#ef4444">${esc(resp.error||'No se pudo identificar')}</span>`;
+              goBtn.disabled=false;return;
+            }
+            resultBox.innerHTML=`Resultado${resp.cached?' (ya identificada antes por otro bar)':''}: <b>${esc(resp.artist)} — ${esc(resp.title)}</b>
+              <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">
+                <button type="button" class="btn ghost sm" id="aududApply">✅ Confirmar y aplicar</button>
+                <button type="button" class="btn ghost sm" id="aududDiscard">Descartar</button>
+              </div>`;
+            resultBox.querySelector('#aududApply').onclick=async()=>{
+              const applyBtn=resultBox.querySelector('#aududApply');applyBtn.disabled=true;audioIdPanel.focus();
+              r.querySelector('[data-f="title"]').value=resp.title;
+              r.querySelector('[data-f="artist"]').value=resp.artist;
+              c.title=resp.title;c.artist=resp.artist;
+              await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,title:resp.title,artist:resp.artist});
+              // AudD trae género demasiado genérico (ver classify_genre) — se reclasifica con
+              // el artista ya corregido, misma cascada que usa "Autocompletar".
+              const cl=await post('/api/admin/classify_track',{title:resp.title,artist:resp.artist,hint:c.local_path});
+              if(cl.ok){
+                c.genre=cl.genre;c.cover=cl.cover||c.cover;
+                await post('/api/admin/local_catalog',{action:'edit',yt:c.yt,genre:cl.genre,cover:cl.cover});
+              }
+              toast('Aplicado','ok');
+              renderLocalCatalog(window._fullCurated);
+            };
+            resultBox.querySelector('#aududDiscard').onclick=()=>{
+              audioIdPanel.style.display='none';audioIdPanel.dataset.built='';
+            };
+          }catch(e){
+            resultBox.innerHTML=`<span style="color:#ef4444">${esc(String((e&&e.message)||e))}</span>`;
+          }
+          goBtn.disabled=false;
+        };
+      }
+    };
     const itunesBtn=document.createElement('button');itunesBtn.className='btn ghost sm';itunesBtn.textContent='🔎 Autocompletar';
     itunesBtn.title='Autocompletar género/artista/carátula (nombre del archivo → Wikidata → iTunes)';
     itunesBtn.onclick=async()=>{
@@ -2041,6 +2127,7 @@ function renderLocalCatalog(fullCurated){
     };
     actions.appendChild(x);
     r.appendChild(actions);
+    r.appendChild(audioIdPanel);
     box.appendChild(r);
   });
   tickify(box);
