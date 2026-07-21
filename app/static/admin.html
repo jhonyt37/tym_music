@@ -3,6 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e1320">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TYM Admin">
+<link rel="apple-touch-icon" href="/icon.svg">
+<link rel="manifest" href="/manifest-admin.json">
+<script>if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js');</script>
 <title>TYM · Panel del dueño</title>
 <link rel="stylesheet" href="/style.css">
 <style>
@@ -112,6 +120,24 @@
      ============================================================ -->
 <div id="tab-live" class="tabpanel active">
   <div class="wrap wide">
+
+    <!-- Instalar app + notificaciones push (pedido explícito) — arriba de todo, en vivo, para
+         que se vea justo donde está el valor (avisos de asistencia). Empieza oculta: cada
+         sección se muestra sola según haga falta (ver setupAdminPwa()). -->
+    <div id="adminPwaInstallBox" style="display:none;margin-bottom:14px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:14px;padding:14px">
+      <div style="font-weight:700;margin-bottom:4px">📲 Instala el panel en tu celular</div>
+      <div class="small" style="margin-bottom:10px">Ábrelo desde tu pantalla de inicio, sin buscar el navegador cada vez.</div>
+      <button class="btn block" id="adminPwaInstallBtn">⬇ Instalar app</button>
+    </div>
+    <div id="adminPwaIosBox" style="display:none;margin-bottom:14px;background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);border-radius:14px;padding:14px">
+      <div style="font-weight:700;margin-bottom:6px">📲 Instala el panel en iPhone</div>
+      <div class="small">Toca <b>Compartir</b> (⬆) en Safari y luego <b>"Añadir a pantalla de inicio"</b>.</div>
+    </div>
+    <div id="adminNotifyBox" style="display:none;margin-bottom:14px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:14px;padding:14px">
+      <div style="font-weight:700;margin-bottom:4px">🔔 Recibe avisos de asistencia en tu celular</div>
+      <div class="small" style="margin-bottom:10px">Te llega una notificación cuando una mesa pide ayuda, aunque tengas el panel cerrado o la pantalla apagada.</div>
+      <button class="btn block" id="adminNotifyBtn">🔔 Activar notificaciones</button>
+    </div>
 
     <!-- Strip resumen de hoy -->
     <div id="todayStrip" class="kpis" style="margin-bottom:14px;display:none"></div>
@@ -3498,11 +3524,72 @@ async function forgotPassword(){
 }
 async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
 
+// ---------- Instalar app + notificaciones push (pedido explícito) ----------
+// Primera versión, a propósito acotada: solo asistencia por ahora ("hagamos primero lo de las
+// asistencias") — pedidos/errores quedan para después, una vez se confirme que esto llega bien
+// a un celular real. Mismo patrón que ya usa index.html para el cliente (beforeinstallprompt +
+// detección iOS), pero canal de suscripción push SEPARADO (/api/admin/push/subscribe,
+// owner_push_subs en el servidor) — el dueño no debe recibir los mismos avisos que un cliente.
+let _adminPwaPrompt=null;
+window.addEventListener('beforeinstallprompt',e=>{
+  e.preventDefault();_adminPwaPrompt=e;
+  const box=$('adminPwaInstallBox');if(box)box.style.display='';
+});
+window.addEventListener('appinstalled',()=>{
+  _adminPwaPrompt=null;
+  const box=$('adminPwaInstallBox');if(box)box.style.display='none';
+  toast('¡App instalada! 🎉','ok');
+});
+function _urlB64ToUint8Array(b64){
+  const pad='='.repeat((4-b64.length%4)%4);
+  const raw=atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/'));
+  return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
+}
+async function _subscribeAdminPush(){
+  try{
+    if(!('serviceWorker' in navigator)||!('PushManager' in window))return false;
+    const reg=await navigator.serviceWorker.ready;
+    const r=await fetch('/api/push/vapid-public-key');
+    if(!r.ok)return false;
+    const {public_key}=await r.json();
+    if(!public_key)return false;
+    const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_urlB64ToUint8Array(public_key)});
+    await post('/api/admin/push/subscribe',{subscription:sub.toJSON()});
+    return true;
+  }catch(e){return false;}
+}
+function setupAdminPwa(){
+  const isIos=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;
+  const isStandalone=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+  if(isIos&&!isStandalone){const box=$('adminPwaIosBox');if(box)box.style.display='';}
+  const btn=$('adminPwaInstallBtn');
+  if(btn)btn.onclick=async()=>{
+    if(!_adminPwaPrompt)return;
+    _adminPwaPrompt.prompt();
+    const{outcome}=await _adminPwaPrompt.userChoice;
+    if(outcome==='accepted'){_adminPwaPrompt=null;$('adminPwaInstallBox').style.display='none';}
+  };
+  // El botón de activar notificaciones solo se muestra si de verdad hace falta — ya concedido
+  // (o el navegador no soporta Notification) no tiene nada que ofrecer.
+  if('Notification' in window && Notification.permission!=='granted'){
+    const nbox=$('adminNotifyBox');if(nbox)nbox.style.display='';
+    const nbtn=$('adminNotifyBtn');
+    if(nbtn)nbtn.onclick=async()=>{
+      const p=await Notification.requestPermission();
+      if(p!=='granted'){toast('No se activaron las notificaciones — puedes intentarlo de nuevo cuando quieras','err');return;}
+      const ok=await _subscribeAdminPush();
+      if(ok){$('adminNotifyBox').style.display='none';toast('🔔 Notificaciones activadas','ok');}
+      else toast('No se pudo activar — intenta de nuevo en un momento','err');
+    };
+  }
+}
+
 (async()=>{
   const me=await fetch('/api/me');
   if(!me.ok){$('loginGate').style.display='flex';return;}
   const j=await me.json();$('venueTag').textContent=j.venue_name;
   try{const t=sessionStorage.getItem('adminTab');if(t)showTab(t);}catch(e){}
+  setupAdminPwa();
   loadTables();tick();setInterval(tick,2500);
   loadAnalytics();setInterval(loadAnalytics,15000);
 })();

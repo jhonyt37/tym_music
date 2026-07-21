@@ -349,21 +349,24 @@ def _ensure_vapid_keys():
     except Exception as exc:
         print(f"⚠️  No se pudieron generar VAPID keys: {exc}")
 
-def _send_venue_push(vid, title, body, url="/"):
+def _send_push_to(sub_key, vid, title, body, url, tag):
+    """Manda un push real (Web Push/VAPID) a cada suscripción guardada bajo TYM[sub_key][vid] —
+    compartida entre clientes (push_subs) y dueño/staff (owner_push_subs, canal separado a
+    propósito). Limpia solas las suscripciones muertas (404/410 = el navegador ya no existe)."""
     if not _WEBPUSH_OK:
         return
     vapid = TYM.get("vapid", {})
     priv_pem = vapid.get("private_key_pem")
     if not priv_pem:
         return
-    subs = TYM.get("push_subs", {}).get(vid, [])
+    subs = TYM.get(sub_key, {}).get(vid, [])
     dead = []
     for sub in subs:
         try:
             webpush(
                 subscription_info=sub,
                 data=json.dumps({"title": title, "body": body, "url": url,
-                                 "icon": "/icon-192.png", "tag": "tym-poll"}),
+                                 "icon": "/icon-192.png", "tag": tag}),
                 vapid_private_key=priv_pem,
                 vapid_claims={"sub": "mailto:tym@example.com"},
             )
@@ -373,7 +376,13 @@ def _send_venue_push(vid, title, body, url="/"):
         except Exception:
             pass
     if dead:
-        TYM["push_subs"][vid] = [s for s in subs if s not in dead]
+        TYM[sub_key][vid] = [s for s in subs if s not in dead]
+
+def _send_venue_push(vid, title, body, url="/"):
+    _send_push_to("push_subs", vid, title, body, url, "tym-poll")
+
+def _send_owner_push(vid, title, body, url="/admin"):
+    _send_push_to("owner_push_subs", vid, title, body, url, "tym-owner")
 
 # ---- Rate limiting (por IP) ----
 _RATE = {}
@@ -543,7 +552,10 @@ TYM = {
     "events": [],              # analítica: {venue, table, account, ts, ev, ...}
     "accounts": {},            # token -> {id,venue,table,opened_at,closed_at,total,orders_free,orders_premium}
     "vapid": {},               # {private_key_pem, public_key_b64}
-    "push_subs": {},           # venue_id -> [{endpoint, keys:{p256dh,auth}}]
+    "push_subs": {},           # venue_id -> [{endpoint, keys:{p256dh,auth}}] — clientes
+    "owner_push_subs": {},     # venue_id -> [{endpoint, keys:{p256dh,auth}}] — dueño/staff en
+                                # /admin, canal separado a propósito: el dueño no debe recibir
+                                # los mismos avisos que le llegan a un cliente (votaciones, etc.)
     # Caché de identificación por audio (AudD, ver identify_audio_bytes) — COMPARTIDA entre
     # TODOS los bares, no por venue. Pedido explícito: "nuestra propia huella musical antes de
     # ir hasta AudD" — muchos bares seguramente tienen el mismo mp3 (bajado del mismo sitio/
@@ -2610,6 +2622,23 @@ class H(BaseHTTPRequestHandler):
                      {"src": "/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable"},
                  ]}
             return self._send(200, m, "application/manifest+json; charset=utf-8")
+        if path == "/manifest-admin.json":
+            # App aparte de la del cliente (pedido explícito: "instalar app al admin") — mismo
+            # ícono/service worker (uno solo por origen, ver /sw.js), pero start_url:/admin para
+            # que abra el panel del dueño, no la app de pedir canciones. Nombre personalizado con
+            # el local si ya hay sesión de dueño (cookie); genérico si se pide antes de loguearse.
+            av = self.authed_venue()
+            name = "Panel" if not av else ("TYM Master" if av == "*" else VENUES.get(av, {}).get("settings", {}).get("venue_name", "Panel"))
+            m = {"name": f"TYM Admin — {name}", "short_name": "TYM Admin",
+                 "description": "Panel del dueño — pedidos, cola, mesas, notificaciones",
+                 "start_url": "/admin", "display": "standalone",
+                 "background_color": "#0e1320", "theme_color": "#0e1320",
+                 "icons": [
+                     {"src": "/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any maskable"},
+                     {"src": "/icon-192.png", "type": "image/png", "sizes": "192x192", "purpose": "any maskable"},
+                     {"src": "/icon-512.png", "type": "image/png", "sizes": "512x512", "purpose": "any maskable"},
+                 ]}
+            return self._send(200, m, "application/manifest+json; charset=utf-8")
         if path == "/icon.svg":
             svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">'
                    '<rect width="100" height="100" rx="20" fill="#0e1320"/>'
@@ -2769,6 +2798,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/remove", "/api/admin/settings", "/api/admin/tables", "/api/admin/stations",
                        "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset",
                        "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/content_block",
+                       "/api/admin/push/subscribe",
                        "/api/admin/move", "/api/admin/reorder",
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
                        "/api/admin/duelo", "/api/admin/duelo/close",
@@ -3340,6 +3370,20 @@ class H(BaseHTTPRequestHandler):
                     subs.append(sub)
                 return self._send(200, {"ok": True})
 
+            # ---- Suscripción push del dueño/staff en /admin (pedido explícito: notificarle
+            # llamados de asistencia aunque no tenga la pestaña abierta/enfocada) — vid sale de
+            # la sesión de admin autenticada, nunca del body, para que nadie pueda suscribirse a
+            # los avisos de un bar ajeno mandando un vid distinto. ----
+            if path == "/api/admin/push/subscribe":
+                sub = d.get("subscription")
+                if not sub or not sub.get("endpoint"):
+                    return self._send(400, {"error": "subscription inválida"})
+                subs = TYM.setdefault("owner_push_subs", {}).setdefault(vid, [])
+                endpoint = sub["endpoint"]
+                if not any(s.get("endpoint") == endpoint for s in subs):
+                    subs.append(sub)
+                return self._send(200, {"ok": True})
+
             # ---- Solicitud de asistencia en mesa ----
             if path == "/api/assist":
                 sess = get_session(d.get("token"))
@@ -3362,6 +3406,8 @@ class H(BaseHTTPRequestHandler):
                         return self._send(400, {"error": "Espera antes de volver a llamar", "wait": int(30 - since_buzzed)})
                     a["buzzed_at"] = now_t
                     a["buzz_count"] = a.get("buzz_count", 1) + 1
+                    _send_owner_push(vid, "🔔 " + a["table"] + " insiste en pedir ayuda",
+                                      "Llevan esperando desde hace un rato — atiéndelos.")
                     return self._send(200, {"ok": True, "buzzed": True, "id": a["id"]})
                 if d.get("buzz"):
                     for a in STATE.get("assists", []):
@@ -3381,6 +3427,8 @@ class H(BaseHTTPRequestHandler):
                 TYM["events"].append({"venue": CUR_VID, "table": sess["table"],
                                        "account": tok, "ts": time.time(),
                                        "ev": "assist_requested"})
+                _send_owner_push(vid, "🔔 " + sess["table"] + " pide ayuda",
+                                  "Toca para ver qué necesitan.")
                 return self._send(200, {"ok": True, "id": aid})
 
             if path == "/api/admin/assist_resolve":
@@ -4713,7 +4761,7 @@ def load_state():
         return
     try:
         if "tym" in d:
-            for k in ("socials", "tym_logo", "subscribers", "events", "accounts", "vapid", "push_subs", "audd_cache", "track_db", "file_db"):
+            for k in ("socials", "tym_logo", "subscribers", "events", "accounts", "vapid", "push_subs", "owner_push_subs", "audd_cache", "track_db", "file_db"):
                 if k in d["tym"]:
                     TYM[k] = d["tym"][k]
             # Carga todos los owners desde la DB (iniciales + creados dinámicamente)
