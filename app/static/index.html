@@ -1248,8 +1248,15 @@ function initBellDrag(){
   const el=$('floatBell');
   let ox=0,oy=0,bx=0,by=0,moved=false,_ht=null;
   const MARGIN=14;
+  // #floatBell es display:none hasta que updateAssistBtn() le agrega .show (recién cuando hay
+  // sesión, más adelante en el arranque) — initBellDrag() corre ANTES de eso, así que
+  // el.offsetWidth/offsetHeight miden 0 en este momento (elemento sin layout). Bug real
+  // reportado con captura: la campana aparecía pegada al borde derecho, cortada a la mitad —
+  // exactamente lo que da `window.innerWidth - 0 - MARGIN` como x. 60 es el tamaño real fijo
+  // por CSS (#floatBell{width:60px;height:60px}), se usa de respaldo cuando aún no hay layout.
+  const BELL_SIZE=60;
   // Limites verticales seguros: nunca tapar el nav de abajo ni quedar pegada arriba del todo.
-  function maxY(){const navH=(document.querySelector('.nav')||{}).offsetHeight||60;return window.innerHeight-navH-el.offsetHeight-MARGIN;}
+  function maxY(){const navH=(document.querySelector('.nav')||{}).offsetHeight||60;return window.innerHeight-navH-(el.offsetHeight||BELL_SIZE)-MARGIN;}
   function snapTo(x,y,animate){
     const sy=Math.max(MARGIN,Math.min(y,maxY()));
     if(animate){el.style.transition='left .25s cubic-bezier(.34,1.4,.64,1),top .2s ease';setTimeout(()=>{el.style.transition='';},260);}
@@ -1259,7 +1266,8 @@ function initBellDrag(){
   try{const s=JSON.parse(localStorage.getItem('bell_pos')||'null');
     if(s){
       // Vuelve a pegarla al costado mas cercano por si la pantalla cambio de tamaño/orientacion.
-      const edgeX=(s.x+el.offsetWidth/2<window.innerWidth/2)?MARGIN:(window.innerWidth-el.offsetWidth-MARGIN);
+      const w=el.offsetWidth||BELL_SIZE;
+      const edgeX=(s.x+w/2<window.innerWidth/2)?MARGIN:(window.innerWidth-w-MARGIN);
       snapTo(edgeX,s.y,false);
     }else{
       // Primera vez (localStorage vacío — el caso normal, cada cliente entra desde SU propio
@@ -1269,7 +1277,7 @@ function initBellDrag(){
       // queda tapada casi hasta la mitad por el nav (z-index más alto). Bug reportado en vivo:
       // "la campana no sale en una posición visible". Se posiciona con la misma lógica segura
       // que ya usa el drag (maxY(), calcula el nav real) en vez de confiar en el valor fijo.
-      snapTo(window.innerWidth-el.offsetWidth-MARGIN,maxY(),false);
+      snapTo(window.innerWidth-BELL_SIZE-MARGIN,maxY(),false);
     }}
   catch(e){}
   function start(cx,cy){

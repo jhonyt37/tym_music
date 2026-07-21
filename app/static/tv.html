@@ -801,36 +801,44 @@ async function loadLocalFile(np){
     localMedia.src=URL.createObjectURL(file);
     _localBlobUrl=localMedia.src;
     localMedia.load();
-    // Mismo patrón que ya usa YouTube (playerVars mute:1): SIEMPRE arranca muteado — el
-    // autoplay muteado el navegador lo permite siempre, sin gesto — y desmutar es un paso
-    // aparte. Antes esto hacía localMedia.muted=!wantAudio directo: si wantAudio ya estaba en
-    // true por una sesión anterior (ver sessionStorage tym_tv_started, "redeploy sin refresh")
-    // pero esta carga en particular no venía de un clic real, el navegador rechazaba el
-    // autoplay CON sonido en silencio (igual que YouTube sin este mismo fix, ver commit
-    // 6c042e2) — el <video> se quedaba pausado del todo, pero setLocalAudioView() ya había
-    // prendido el disco+ecualizador animado sin mirar si de verdad estaba sonando: la canción
-    // no sonaba NI se veía, solo el "Forzar reinicio" (un clic real) lo resolvía.
-    localMedia.muted=true;
+    // Pedido explícito: NO arrancar muteado por defecto — si wantAudio ya está en true (ej.
+    // sesión anterior, "redeploy sin refresh"), la mayoría de las veces el navegador SÍ deja
+    // seguir sonando sin pedir un clic nuevo (una pestaña de TV que lleva rato abierta ya tiene
+    // el permiso de autoplay con sonido del sitio) — forzar mudo siempre habría cambiado eso a
+    // "el local tiene que ir a tocar la pantalla en cada redeploy", peor que el bug original.
+    // Se intenta CON sonido primero, igual que antes; solo si el navegador lo rechaza de plano
+    // (catch) o lo deja muteado/pausado en silencio (bug real reportado: pasaba sin avisar) se
+    // cae a mudo — que sí es SIEMPRE permitido — y recién ahí se avisa con #audioPill.
+    localMedia.muted=!wantAudio;
     localMedia.volume=1;
     localMedia.play().then(()=>{
-      if(wantAudio)_tryUnmuteLocal();
-    }).catch(()=>{});
+      if(wantAudio)_checkLocalAudioBlocked();
+    }).catch(()=>{
+      localMedia.muted=true;
+      localMedia.play().catch(()=>{});
+      if(wantAudio)$('audioPill').classList.add('show');
+    });
     hideLocalFileError();
   }catch(e){
     showLocalFileError('No se pudo abrir "'+(np.title||'')+'" — el archivo puede haberse movido, renombrado o borrado ('+path+').');
   }
 }
 
-// Intenta desmutar el <video> local fuera de un clic real (ej. wantAudio ya venía en true de
-// una sesión anterior) — mismo espíritu que el chequeo de YouTube en onReady (setTimeout +
-// revisar si de verdad se desmuteó). Si el navegador lo bloquea, #audioPill avisa para que un
-// clic real (activateAudio/forceRestart) lo resuelva — antes esto no existía para audio local,
-// solo para YouTube, así que el bloqueo pasaba en silencio total.
-function _tryUnmuteLocal(){
-  localMedia.muted=false;localMedia.volume=1;
+// Confirma que play() con sonido de verdad "pegó" — mismo espíritu que el chequeo de YouTube
+// en onReady (setTimeout + revisar si de verdad quedó sonando). Un play() resuelto no
+// garantiza que haya sonido: el navegador puede haberlo dejado muteado o pausado en silencio
+// (bug real reportado: pasaba sin avisar). Si no pegó, recupera al menos el video (muteado,
+// siempre permitido) y avisa con #audioPill — antes esto no existía para audio local, solo
+// para YouTube, así que el bloqueo pasaba en silencio total sin que el operador se enterara.
+function _checkLocalAudioBlocked(){
   setTimeout(()=>{
-    if(isLocalId(curYt)&&(localMedia.muted||localMedia.paused))$('audioPill').classList.add('show');
-    else $('audioPill').classList.remove('show');
+    if(!isLocalId(curYt))return;
+    if(localMedia.muted||localMedia.paused){
+      if(localMedia.paused){localMedia.muted=true;localMedia.play().catch(()=>{});}
+      $('audioPill').classList.add('show');
+    }else{
+      $('audioPill').classList.remove('show');
+    }
   },1200);
 }
 
