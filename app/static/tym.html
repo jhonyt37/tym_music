@@ -118,11 +118,17 @@ function initPasswordToggle(id){
 ['lgPass','nPass'].forEach(initPasswordToggle);
 let VENMAP={};
 async function doLogin(){
-  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});
+  const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value.trim()})});
   if(r.ok){location.reload();return;}
   $('lgErr').style.color='var(--red)';
-  if(r.status===403){const j=await r.json().catch(()=>({}));$('lgErr').textContent=j.error||'Cuenta bloqueada.';}
-  else $('lgErr').textContent='Usuario o contraseña incorrectos';
+  // Bug real encontrado investigando "la clave nueva no funciona": un 429 (demasiados intentos
+  // seguidos) se mostraba IGUAL que una clave mala ("Usuario o contraseña incorrectos") — quien
+  // probó varias veces rápido nunca se enteraba que en realidad estaba bloqueado un momento por
+  // el rate limit, no que la clave estuviera mal. Ahora se muestra el mensaje real del servidor
+  // para cualquier status que no sea 401 (única situación donde "clave incorrecta" es cierto).
+  if(r.status===401){$('lgErr').textContent='Usuario o contraseña incorrectos';return;}
+  const j=await r.json().catch(()=>({}));
+  $('lgErr').textContent=j.error||'Usuario o contraseña incorrectos';
 }
 async function forgotPassword(){
   const u=($('lgUser').value||'').trim();

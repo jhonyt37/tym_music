@@ -2690,7 +2690,11 @@ class H(BaseHTTPRequestHandler):
                 return self._send(429, {"error": "Demasiados intentos. Espera un momento."})
             u = (d.get("user") or "").strip()
             o = TYM["owners"].get(u)
-            pwd = d.get("pass") or ""
+            # .strip() — la clave que manda /api/forgot_password se copia y pega del correo casi
+            # siempre; un espacio o salto de línea de más (fácil que se cuele pegando desde
+            # Gmail) rompía el login en silencio, con el mismo "usuario o contraseña
+            # incorrectos" de una clave realmente mal escrita, sin ninguna pista del motivo real.
+            pwd = (d.get("pass") or "").strip()
             ok, needs_rehash = verify_password(pwd, o.get("pass_hash") if o else _DUMMY_PASS_HASH)
             if not o or not ok:
                 return self._send(401, {"error": "Usuario o contraseña incorrectos"})
