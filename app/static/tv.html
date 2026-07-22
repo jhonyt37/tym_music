@@ -95,6 +95,21 @@ body.audio-mode #now{order:3;padding-bottom:30px}
 #lovedCelebration .title{font-size:40px;font-weight:900;color:#ff5a7a;text-shadow:0 2px 14px rgba(0,0,0,.85)}
 #lovedCelebration .sub{font-size:24px;font-weight:700;color:#fff;margin-top:10px}
 
+/* Celebración: arranca una votación — fuegos artificiales (estallido desde un punto, no
+   lluvia cayendo) para diferenciarla visualmente de la de Top de Hoy. */
+.firework-particle{position:fixed;z-index:52;pointer-events:none;will-change:transform,opacity;
+  animation:fireworkBurst 1.3s ease-out forwards;filter:drop-shadow(0 2px 6px rgba(0,0,0,.5))}
+@keyframes fireworkBurst{
+  0%{transform:translate(-50%,-50%) translate(0,0) scale(.4);opacity:1}
+  100%{transform:translate(-50%,-50%) translate(var(--dx),var(--dy)) scale(1.15);opacity:0}
+}
+#pollCelebration{position:fixed;inset:0;z-index:51;display:none;align-items:center;justify-content:center;pointer-events:none}
+#pollCelebration .box{background:rgba(10,14,22,.9);border:3px solid #3b82f6;border-radius:28px;
+  padding:38px 56px;text-align:center;backdrop-filter:blur(10px);box-shadow:0 0 70px rgba(59,130,246,.55);
+  animation:dedicaIn .5s cubic-bezier(.34,1.56,.64,1), dedicaHeartbeat 1.1s ease-in-out .5s infinite}
+#pollCelebration .title{font-size:40px;font-weight:900;color:#3b82f6;text-shadow:0 2px 14px rgba(0,0,0,.85)}
+#pollCelebration .sub{font-size:22px;font-weight:700;color:#fff;margin-top:10px}
+
 /* Mensaje de canción (dedicatoria inline al pedir) */
 #songMsg{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;z-index:19;padding:30px}
 #songMsgText{font-size:54px;font-weight:800;color:#fff;text-shadow:0 3px 18px rgba(0,0,0,.95);text-align:center;opacity:0;max-width:80%}
@@ -425,6 +440,15 @@ body.audio-mode #now{order:3;padding-bottom:30px}
   </div>
 </div>
 
+<!-- Celebración: arrancó una votación nueva — pedido explícito, debe notarse tanto como la
+     de "Top de Hoy" para que los clientes miren la pantalla y se enteren que hay que votar. -->
+<div id="pollCelebration">
+  <div class="box">
+    <div class="title">🗳️ ¡Nueva votación! 🗳️</div>
+    <div class="sub" id="pollCelebrationSub"></div>
+  </div>
+</div>
+
 <!-- Mensaje de canción (dedicatoria inline) -->
 <div id="songMsg"><div id="songMsgText"></div></div>
 
@@ -516,11 +540,28 @@ const THEMES={azul:{pri:'#3b82f6',bg:'#000'},purpura:{pri:'#a855f7',bg:'#050208'
 function applyTheme(t){const th=THEMES[t]||THEMES.azul,r=document.documentElement.style;r.setProperty('--pri',th.pri);document.body.style.background=th.bg;}
 $('qrImg').src='/api/qr'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
 
-// Wake Lock
+// Wake Lock — reportado en vivo: el computador se sigue suspendiendo tras dejarlo un rato
+// sonando. El wake lock del navegador es "best effort": el sistema operativo puede soltarlo
+// solo (batería baja, algún timer interno) sin avisar más que con su propio evento 'release',
+// y antes solo se pedía de nuevo al volver de estar oculta la pestaña — si nunca se ocultaba
+// (el caso normal de un TV en un solo tab todo el turno) y el navegador lo soltaba solo, nunca
+// se volvía a pedir. Ahora escucha ese evento y reintenta, y de paso reintenta cada 4 min como
+// respaldo. IMPORTANTE (hay que decírselo al dueño): esto NO puede vencer una política del
+// propio sistema operativo — tapa de laptop cerrada, o "suspender siempre a los X min" puesto
+// a mano en la config de energía del sistema. Para un TV que corre horas seguidas, lo más
+// confiable es desactivar la suspensión automática en la configuración de energía del propio
+// computador, esto solo ayuda dentro de lo que el navegador puede pedirle al sistema.
 let _wl=null;
-async function keepAwake(){if(!('wakeLock' in navigator))return;try{_wl=await navigator.wakeLock.request('screen');}catch(e){}}
+async function keepAwake(){
+  if(!('wakeLock' in navigator))return;
+  try{
+    _wl=await navigator.wakeLock.request('screen');
+    _wl.addEventListener('release',()=>{ if(document.visibilityState==='visible')keepAwake(); });
+  }catch(e){}
+}
 keepAwake();
 document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')keepAwake();});
+setInterval(()=>{if(document.visibilityState==='visible')keepAwake();},4*60*1000);
 
 // ---- Estado principal ----
 let player,ready=false,curYt=null,curId=null,wantAudio=false,manualPause=false;
@@ -1047,11 +1088,41 @@ function showLovedCelebration(c){
   setTimeout(()=>{$('lovedCelebration').style.display='none';},6500);
 }
 
+// ---- Celebración: arranca una votación nueva (pedido explícito, "que llame la atención de
+// los clientes como cuando entra al Top de Hoy") — estallido tipo fuegos artificiales desde
+// varios puntos aleatorios de la pantalla, distinto a la lluvia de Top de Hoy a propósito.
+const FIREWORK_EMOJIS=['🎆','🎇','✨','💥','🌟'];
+function spawnFirework(){
+  const cx=10+Math.random()*80,cy=15+Math.random()*50;
+  const n=10+Math.floor(Math.random()*6);
+  for(let i=0;i<n;i++){
+    const s=document.createElement('div');s.className='firework-particle';
+    s.textContent=FIREWORK_EMOJIS[Math.floor(Math.random()*FIREWORK_EMOJIS.length)];
+    const angle=Math.random()*Math.PI*2,dist=60+Math.random()*140;
+    s.style.setProperty('--dx',(Math.cos(angle)*dist)+'px');
+    s.style.setProperty('--dy',(Math.sin(angle)*dist)+'px');
+    s.style.left=cx+'%';s.style.top=cy+'%';
+    s.style.fontSize=(20+Math.random()*22)+'px';
+    document.body.appendChild(s);
+    setTimeout(()=>s.remove(),1400);
+  }
+}
+let _lastPollCelebrationAt=0,_fireworkTimer=null;
+function showPollCelebration(poll){
+  $('pollCelebrationSub').textContent=(poll.options||[]).map(o=>o.title).join(' · ');
+  $('pollCelebration').style.display='flex';
+  clearInterval(_fireworkTimer);
+  spawnFirework();
+  let n=0;
+  _fireworkTimer=setInterval(()=>{spawnFirework();n++;if(n>=6){clearInterval(_fireworkTimer);_fireworkTimer=null;}},450);
+  setTimeout(()=>{$('pollCelebration').style.display='none';},4500);
+}
+
 // ---- Dedicatoria overlay ----
 function showDedicaOverlay(ded,displaySecs){
   $('dedicaFrom').innerHTML='<span class="pulse"></span>💌 De '+esc(ded.from_table);
   $('dedicaMsgTv').textContent=ded.message;
-  $('dedicaToTv').textContent='Para '+ded.to_table;
+  $('dedicaToTv').textContent=ded.to_table==='__all__'?'Para todo el bar 🎉':'Para '+ded.to_table;
   const ov=$('dedicaOverlay');ov.style.display='flex';
   clearTimeout(_dedicaTimeout);
   _dedicaTimeout=setTimeout(()=>{ov.style.display='none';_dedicaToMark=ded.id;_dedicaTimeout=null;},(displaySecs||5)*1000);
@@ -1645,7 +1716,13 @@ setInterval(async()=>{
       }
     }
 
-    // Poll TV
+    // Poll TV — celebración (fuegos artificiales) apenas arranca una votación NUEVA,
+    // comparando created_at (no solo "active") para no repetirla en cada poll() de 2s
+    // mientras la misma votación sigue corriendo.
+    if(s.poll&&s.poll.active&&s.poll.created_at>_lastPollCelebrationAt){
+      _lastPollCelebrationAt=s.poll.created_at;
+      showPollCelebration(s.poll);
+    }
     renderPollTV(s.poll);
     renderDueloTV(s.duelo);
     renderAnnouncementsTV(s.announcements||[]);

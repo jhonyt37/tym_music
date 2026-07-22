@@ -146,7 +146,6 @@
         <div style="font-weight:700;margin-bottom:4px" id="adminNotifyTitle">🔔 Recibe avisos de asistencia en tu celular</div>
         <div class="small" style="margin-bottom:10px" id="adminNotifySub">Te llega una notificación cuando una mesa pide ayuda, aunque tengas el panel cerrado o la pantalla apagada.</div>
         <button class="btn block" id="adminNotifyBtn">🔔 Activar notificaciones</button>
-        <button type="button" class="btn ghost block sm" style="margin-top:8px" onclick="sendTestPush()">📨 Enviar notificación de prueba</button>
         <!-- Sin devtools a mano en un celular real, esto es lo único que permite ver POR QUÉ
              falló — pensado para sacarle screenshot y mandarlo. -->
         <div class="small" style="margin-top:10px;color:var(--mut)">Detalle técnico (por si algo falla — puedes sacarle captura):</div>
@@ -1559,48 +1558,101 @@ async function requeueLast(){
 // entero tiene más alcance del que parece, por eso la confirmación separada); (3) sugerencias
 // de palabras sueltas del título para bloquear a mano, una por una (nunca automático).
 let _lastNP=null;
-const BLOCK_SUGGEST_STOP=new Set(['de','la','el','los','las','un','una','y','ft','feat',
+const BLOCK_SUGGEST_JUNK=new Set(['de','la','el','los','las','un','una','y','ft','feat',
   'featuring','official','oficial','video','letra','lyrics','hd','mv','remix','cover','audio',
   'en','vivo','live','music','clip','vevo','the','of','a']);
+// Palabras SUELTAS que sí es razonable ofrecer solas — descriptores de contenido no-musical
+// (sirven para filtrar tráilers/entrevistas, no canciones reales). Cualquier otra palabra
+// suelta del título (ej. "amor", "corazón") NO se sugiere: bloquearla de rebote afectaría
+// canciones legítimas que nada tienen que ver con lo que se quiere bloquear — el nombre del
+// artista ya se ofrece aparte, con "bloquear canal".
+const BLOCK_SUGGEST_TRIVIAL_SINGLE=new Set(['pelicula','película','movie','documental',
+  'documentary','comedia','comedy','trailer','podcast','entrevista','interview','gameplay',
+  'tutorial','noticias','news','reaccion','reacción','reaction']);
 function suggestBlockKeywords(title,artist){
   const artistWords=new Set((artist||'').toLowerCase().split(/[^a-z0-9áéíóúñ]+/i).filter(Boolean));
-  const words=(title||'').toLowerCase().split(/[^a-z0-9áéíóúñ]+/i)
-    .filter(w=>w.length>=3&&!BLOCK_SUGGEST_STOP.has(w)&&!artistWords.has(w)&&!_kwBlocked.includes(w));
-  return [...new Set(words)].slice(0,8);
+  const rawWords=(title||'').toLowerCase().split(/[^a-z0-9áéíóúñ]+/i).filter(Boolean);
+  // Combinaciones de 2 palabras consecutivas del título — mucho más específicas que una
+  // palabra sola, mismo criterio que ya usa el bloqueo por substring del lado del servidor
+  // (_kw_matches busca la frase completa dentro del título+artista).
+  const bigrams=[];
+  for(let i=0;i<rawWords.length-1;i++){
+    const a=rawWords[i],b=rawWords[i+1];
+    if(artistWords.has(a)||artistWords.has(b))continue;
+    if(BLOCK_SUGGEST_JUNK.has(a)&&BLOCK_SUGGEST_JUNK.has(b))continue;
+    const phrase=a+' '+b;
+    if(!_kwBlocked.includes(phrase))bigrams.push(phrase);
+  }
+  const singles=rawWords.filter(w=>BLOCK_SUGGEST_TRIVIAL_SINGLE.has(w)&&!_kwBlocked.includes(w));
+  return [...new Set([...bigrams,...singles])].slice(0,8);
 }
-function renderBlockSuggestions(words){
-  const box=$('blockSuggestBox');
-  if(!words.length){box.style.display='none';return;}
-  box.innerHTML='<div class="small" style="color:var(--mut);margin-bottom:6px">¿Alguna de estas palabras también debería bloquear siempre? (toca para bloquear una por una)</div>';
-  const wrap=document.createElement('div');wrap.style.cssText='display:flex;flex-wrap:wrap;gap:6px';
-  words.forEach(w=>{
-    const chip=document.createElement('button');chip.type='button';chip.className='subtab';chip.textContent=w;
-    chip.onclick=async()=>{
-      chip.disabled=true;
-      await post('/api/admin/content_block',{action:'block_keyword',keyword:w});
-      _kwBlocked.push(w);
-      chip.textContent='✓ '+w;chip.style.opacity='.5';
-    };
-    wrap.appendChild(chip);
-  });
-  box.appendChild(wrap);
-  box.style.display='';
-}
-async function blockCurrentSong(){
+// Pedido explícito: antes cada bloqueo (video/canal/palabra) se aplicaba de una, con
+// confirm() nativos encadenados uno tras otro — y la canción bloqueada se quedaba sonando
+// igual en /tv. Ahora es un solo panel: se eligen todos los bloqueos extra primero, y un
+// único botón "Confirmar" los aplica TODOS juntos y de una vez salta la canción actual.
+let _blockPendingChannel=false,_blockSelectedKw=new Set();
+function blockCurrentSong(){
   const np=_lastNP;
   if(!np||!np.yt)return;
-  if(!confirm(`¿Bloquear "${np.title}" para siempre? No volverá a sonar en este local, la pida quien la pida.`))return;
+  _blockPendingChannel=false;_blockSelectedKw=new Set();
+  renderBlockPanel(np);
+}
+function renderBlockPanel(np){
+  const box=$('blockSuggestBox');
+  const words=suggestBlockKeywords(np.title,np.artist);
+  box.innerHTML='';
+  const title=document.createElement('div');
+  title.innerHTML=`🚫 <b>Bloquear "${esc(np.title)}"</b>`;
+  box.appendChild(title);
+  const desc=document.createElement('div');desc.className='small';desc.style.cssText='color:var(--mut);margin:6px 0 10px';
+  desc.textContent='No volverá a sonar en este local, la pida quien la pida — se salta de una la que está sonando ahora. Elige también qué más bloquear antes de confirmar:';
+  box.appendChild(desc);
+  if(np.artist){
+    const lbl=document.createElement('label');lbl.style.cssText='display:flex;align-items:center;gap:8px;margin-bottom:10px;cursor:pointer';
+    const cb=document.createElement('input');cb.type='checkbox';cb.onchange=()=>{_blockPendingChannel=cb.checked;};
+    const span=document.createElement('span');span.className='small';span.textContent='También bloquear todo el canal "'+np.artist+'"';
+    lbl.appendChild(cb);lbl.appendChild(span);
+    box.appendChild(lbl);
+  }
+  if(words.length){
+    const wl=document.createElement('div');wl.className='small';wl.style.cssText='color:var(--mut);margin-bottom:6px';
+    wl.textContent='¿Alguna de estas combinaciones también debería bloquear siempre?';
+    box.appendChild(wl);
+    const wrap=document.createElement('div');wrap.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px';
+    words.forEach(w=>{
+      const chip=document.createElement('button');chip.type='button';chip.className='subtab';chip.textContent=w;
+      chip.onclick=()=>{
+        if(_blockSelectedKw.has(w)){_blockSelectedKw.delete(w);chip.classList.remove('on');}
+        else{_blockSelectedKw.add(w);chip.classList.add('on');}
+      };
+      wrap.appendChild(chip);
+    });
+    box.appendChild(wrap);
+  }
+  const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px';
+  const cancelBtn=document.createElement('button');cancelBtn.type='button';cancelBtn.className='btn ghost sm';cancelBtn.textContent='Cancelar';
+  cancelBtn.onclick=()=>{box.style.display='none';box.innerHTML='';};
+  const confirmBtn=document.createElement('button');confirmBtn.type='button';confirmBtn.className='btn red sm';confirmBtn.style.flex='1';confirmBtn.textContent='✅ Confirmar bloqueo y saltar';
+  confirmBtn.onclick=()=>confirmBlockCurrentSong(np);
+  actions.appendChild(cancelBtn);actions.appendChild(confirmBtn);
+  box.appendChild(actions);
+  box.style.display='';
+}
+async function confirmBlockCurrentSong(np){
   const r=await post('/api/admin/content_block',{action:'block_video',yt:np.yt});
   if(!r.ok){toast(r.error||'Error al bloquear','err');return;}
-  toast('🚫 Video bloqueado para siempre','ok');
-  if(np.artist&&confirm(`¿Bloquear también todo lo demás del canal "${np.artist}"? Cualquier otro video que suba ese mismo canal quedará bloqueado también — más alcance que solo esta canción.`)){
+  if(_blockPendingChannel&&np.artist){
     const kw=np.artist.trim().toLowerCase();
     await post('/api/admin/content_block',{action:'block_channel',keyword:kw});
     if(!_kwBlocked.includes(kw))_kwBlocked.push(kw);
-    toast('🚫 Canal bloqueado','ok');
   }
-  renderBlockSuggestions(suggestBlockKeywords(np.title,np.artist));
-  tick();
+  for(const w of _blockSelectedKw){
+    await post('/api/admin/content_block',{action:'block_keyword',keyword:w});
+    _kwBlocked.push(w);
+  }
+  $('blockSuggestBox').style.display='none';$('blockSuggestBox').innerHTML='';
+  toast('🚫 Bloqueado','ok');
+  await skip(np);
 }
 
 // "⭐ Favorito" sobre la canción sonando (pedido explícito) — mismo mecanismo dual que ya usa
@@ -3485,7 +3537,8 @@ function renderSocialAdmin(s){
     const actions=pending
       ?`<button class="btn sm green" onclick="moderateDedica(${dd.id},true)">✓ Aprobar</button><button class="btn sm red" onclick="moderateDedica(${dd.id},false)">✕ Rechazar</button>`
       :`<button class="btn sm red" onclick="deleteDedica(${dd.id})">✕</button>`;
-    d.innerHTML=`${pending?'<span class="pulse" style="background:#f59e0b"></span>':''}<div class="info" style="flex:1"><div class="t" style="font-size:13px">"${esc(dd.message)}"</div><div class="a">${esc(dd.from_table)} → ${esc(dd.to_table)} · ${ts}${dd.shown_tv?' · ✓ TV':''}${statusTxt}${reasonTxt}</div></div><div style="display:flex;gap:6px;flex-shrink:0">${actions}</div>`;
+    const toLabel=dd.to_table==='__all__'?'🎉 Todo el bar':esc(dd.to_table);
+    d.innerHTML=`${pending?'<span class="pulse" style="background:#f59e0b"></span>':''}<div class="info" style="flex:1"><div class="t" style="font-size:13px">"${esc(dd.message)}"</div><div class="a">${esc(dd.from_table)} → ${toLabel} · ${ts}${dd.shown_tv?' · ✓ TV':''}${statusTxt}${reasonTxt}</div></div><div style="display:flex;gap:6px;flex-shrink:0">${actions}</div>`;
     dbox.appendChild(d);
   });
 }

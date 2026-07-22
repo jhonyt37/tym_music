@@ -1706,6 +1706,10 @@ function renderDedicaCard(tables,session,presets){
   card.style.display='';
   const sel=$('dedicaTo');if(!sel)return;
   const prev=sel.value;sel.innerHTML='';
+  // Pedido explícito: además de mandarle un mensaje a una mesa puntual, poder mandarlo a
+  // TODO el bar de una — mismo campo to_table, con un valor especial que /tv reconoce para
+  // mostrar "Para todo el bar" en vez del nombre de una mesa.
+  const allOpt=document.createElement('option');allOpt.value='__all__';allOpt.textContent='🎉 A todo el bar';sel.appendChild(allOpt);
   (tables||[]).forEach(t=>{
     if(t===session.table)return; // no se dedica a uno mismo
     const o=document.createElement('option');o.value=t;o.textContent=t;sel.appendChild(o);

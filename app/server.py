@@ -1951,9 +1951,14 @@ def _auto_create_poll_bg(vid, np_id, np_yt, np_artist, history_artists, genre, p
         v = VENUES.get(vid)
         if not v:
             return
-        # Re-verificar condiciones bajo lock
-        if v.get("poll_launched_for_id") == np_id:
-            return
+        # Re-verificar bajo lock que no se haya lanzado OTRO poll mientras este hilo buscaba
+        # candidatos en YouTube (tarda, corre sin lock) — antes acá se comparaba
+        # poll_launched_for_id contra el MISMO np_id que el propio disparador ya había
+        # guardado justo antes de lanzar este hilo, así que SIEMPRE coincidía y esta función
+        # jamás llegaba a crear un poll de verdad (bug real, encontrado probando el auto-poll
+        # de modo local — afectaba también al de YouTube, estaba así desde siempre). La
+        # protección real es esta de abajo: si ya hay un poll activo (lanzado por cualquier
+        # otro camino mientras tanto), no pisarlo.
         if v.get("poll", {}) and v["poll"].get("active"):
             return
         _v_np = v.get("now_playing")
@@ -1981,6 +1986,48 @@ def _auto_create_poll_bg(vid, np_id, np_yt, np_artist, history_artists, genre, p
         opts_titles = [s["title"] for s in selected[:3]]
 
     # Enviar push fuera del lock
+    try:
+        body = "Elige entre: " + ", ".join(opts_titles)
+        _send_venue_push(vid, f"🗳️ ¡Nueva votación en {venue_name}!", body, url=f"/?v={vid}#social")
+    except Exception:
+        pass
+
+def _auto_create_local_poll_bg(vid, np_id, played_yts):
+    """Como _auto_create_poll_bg pero para modo local: selecciona candidatos del propio
+    catálogo (STATE["curated"]) en vez de buscar en YouTube — un bar en modo local
+    deliberadamente no quiere contenido externo, ni siquiera para la votación de reenganche."""
+    with LOCK:
+        v = VENUES.get(vid)
+        if not v:
+            return
+        # Ver el comentario largo en _auto_create_poll_bg — mismo bug, mismo fix: la
+        # protección real contra pisar otro poll es la de abajo (¿ya hay uno activo?), no
+        # comparar poll_launched_for_id contra el np_id que el propio disparador ya guardó.
+        if v.get("poll", {}) and v["poll"].get("active"):
+            return
+        _v_np = v.get("now_playing")
+        if not _v_np:
+            return  # la canción fallback que disparó esto ya cambió — nada a lo cual atarse
+        pool = [c for c in v.get("curated", [])
+                if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")
+                and c["yt"] not in played_yts]
+        if len(pool) < 2:
+            return
+        selected = random.sample(pool, 2)
+        duration = _poll_dynamic_duration(_v_np)
+        now = time.time()
+        v["poll"] = {
+            "options": [{"yt": s["yt"], "title": s["title"], "artist": s.get("artist", "")} for s in selected],
+            "votes": {s["yt"]: set() for s in selected},
+            "active": True,
+            "created_at": now,
+            "ends_at": now + duration,
+            "auto": True,
+            "triggered_by_np_id": np_id,
+        }
+        v["poll_launched_for_id"] = np_id
+        venue_name = v["settings"].get("venue_name", "TYM Music")
+        opts_titles = [s["title"] for s in selected]
     try:
         body = "Elige entre: " + ", ".join(opts_titles)
         _send_venue_push(vid, f"🗳️ ¡Nueva votación en {venue_name}!", body, url=f"/?v={vid}#social")
@@ -2176,6 +2223,36 @@ def public_state(token=None, admin=False, mark_dedica=None):
                       _scheduled_genre(), _played),
                 daemon=True
             ).start()
+
+    # ---- Poll: auto-lanzar por racha de "lista del local" (modo local) ----
+    # Pedido explícito: si la cola está vacía y suenan 2 canciones seguidas de la lista del
+    # local (fallback, "nadie está pidiendo nada ahora mismo"), lanzar una votación con
+    # contenido del propio catálogo para reenganchar a los clientes — el bloque de arriba
+    # EXCLUYE a propósito las canciones fallback (esa lógica busca en YouTube según el artista/
+    # género de lo que se acaba de pedir, no aplica sin un pedido real detrás). Racha contada
+    # por np["id"] (una canción fallback = un solo incremento, no uno por cada poll() de 2s
+    # mientras la misma sigue sonando); se reinicia apenas suena algo que SÍ pidió un cliente.
+    if np and np.get("fallback"):
+        if STATE.get("fallback_streak_id") != np["id"]:
+            STATE["fallback_streak_id"] = np["id"]
+            STATE["fallback_streak_count"] = STATE.get("fallback_streak_count", 0) + 1
+        if (STATE["settings"].get("content_mode") == "local"
+                and STATE.get("fallback_streak_count", 0) >= 2
+                and not (_p and _p.get("active"))
+                and STATE.get("poll_launched_for_id") != np["id"]
+                and _poll_gate_error() is None):
+            STATE["poll_launched_for_id"] = np["id"]
+            _played = ({np["yt"]} | {h["yt"] for h in STATE.get("history", [])}
+                       | {i["yt"] for i in STATE.get("items", [])})
+            _vid = CUR_VID
+            threading.Thread(
+                target=_auto_create_local_poll_bg,
+                args=(_vid, np["id"], _played),
+                daemon=True
+            ).start()
+    else:
+        STATE["fallback_streak_count"] = 0
+        STATE["fallback_streak_id"] = None
 
     # ---- Poll (estado público) ----
     _p = STATE.get("poll")
@@ -2589,8 +2666,22 @@ class H(BaseHTTPRequestHandler):
             # copia nueva por request con el bloqueo de ESTE venue.
             with LOCK:
                 self.set_venue(self.resolve_vid())
+                # Pedido explícito: una canción bloqueada por el admin (🚫 video/canal/
+                # palabra) seguía apareciendo en la búsqueda — el cliente solo se enteraba
+                # al intentar pedirla (/api/request ya lo revisaba, la búsqueda no). Se filtra
+                # directo del resultado — sin resolver género real por resultado (costaría una
+                # llamada de red por cada uno), cubre bloqueo por id/canal/palabra en
+                # título+artista, que es la gran mayoría de los casos reales.
+                _blocked_ids = set(STATE["settings"].get("blocked_yt_ids", []))
+                _blocked_kw = [kw.strip().lower() for kw in STATE["settings"].get("blocked_keywords", []) if kw.strip()]
                 out = []
                 for r in results:
+                    if r.get("yt") in _blocked_ids:
+                        continue
+                    if _blocked_kw:
+                        _haystack = ((r.get("title") or "") + " " + (r.get("artist") or "")).lower()
+                        if any(kw in _haystack for kw in _blocked_kw):
+                            continue
                     info = repeat_block_info(r.get("yt"), now)
                     item = dict(r)
                     item["blocked"] = bool(info)
@@ -4472,7 +4563,10 @@ class H(BaseHTTPRequestHandler):
                 to_table = (d.get("to_table") or "").strip()
                 message = (d.get("message") or "").strip()
                 valid_tables = [t["name"] for t in STATE["tables"]]
-                if to_table not in valid_tables:
+                # "__all__": dedicatoria a TODO el bar de una — pedido explícito, mismo campo
+                # to_table con un valor especial que /tv reconoce para mostrar "Para todo el
+                # bar" en vez del nombre de una mesa puntual.
+                if to_table != "__all__" and to_table not in valid_tables:
                     return self._send(400, {"error": "Mesa de destino inválida."})
                 if not message:
                     return self._send(400, {"error": "El mensaje no puede estar vacío."})
