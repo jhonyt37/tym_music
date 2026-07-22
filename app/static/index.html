@@ -346,6 +346,18 @@ body{padding-bottom:80px}
   <!-- ===== SOCIAL ===== -->
   <section class="tab" id="tab-social">
 
+    <!-- Pedido explícito: no había NINGÚN control visible para activar notificaciones del
+         lado del cliente — el permiso solo se pedía en silencio (sin contexto) la primera
+         vez que arrancaba una votación/duelo/anuncio, o al abrir este mismo tab. Sin
+         explicación, la mayoría simplemente no lo notaba o lo rechazaba sin saber para qué
+         era. Mismo patrón que ya usa /admin (título+texto+botón dinámico según el permiso
+         real del navegador). -->
+    <div class="card" id="clientNotifyBox">
+      <div style="font-weight:700;margin-bottom:4px" id="clientNotifyTitle">🔔 Entérate de votaciones y anuncios</div>
+      <div class="small" style="margin-bottom:10px" id="clientNotifySub">Recibe un aviso cuando haya una votación nueva, un duelo o un anuncio del bar — aunque no tengas la app abierta.</div>
+      <button class="btn ghost block sm" id="clientNotifyBtn" onclick="reverifyClientNotifications()">🔔 Activar notificaciones</button>
+    </div>
+
     <!-- Votación activa (solo si hay poll) -->
     <div class="card" id="pollCard" style="display:none;border-color:var(--pri);box-shadow:0 0 0 1px rgba(59,130,246,.2),0 6px 24px rgba(59,130,246,.1)">
       <h2>🗳️ ¿Qué suena después?</h2>
@@ -749,7 +761,40 @@ function showTab(name){
   // Reintenta el banner de títulos largos por si se armó mientras este tab estaba oculto
   // (ej. la caja de recomendadas se carga una sola vez por canción, no en cada poll).
   tickify($('tab-'+name));
-  if(name==='social'){$('badgePoll').style.display='none';_subscribePush();}
+  if(name==='social'){$('badgePoll').style.display='none';_subscribePush();renderClientNotifyStatus();}
+}
+function renderClientNotifyStatus(){
+  const box=$('clientNotifyBox'),title=$('clientNotifyTitle'),sub=$('clientNotifySub'),btn=$('clientNotifyBtn');
+  if(!box)return;
+  if(!('Notification' in window)){box.style.display='none';return;}
+  box.style.display='';
+  const p=Notification.permission;
+  if(p==='granted'){
+    title.textContent='✅ Notificaciones activadas';
+    sub.textContent='Si dejaste de recibirlas, toca reverificar.';
+    btn.textContent='🔄 Reverificar notificaciones';
+  }else if(p==='denied'){
+    title.textContent='🔕 Notificaciones bloqueadas';
+    sub.textContent='El navegador ya las bloqueó para este sitio — habilítalas a mano desde sus ajustes y vuelve a tocar este botón.';
+    btn.textContent='🔄 Reintentar';
+  }else{
+    title.textContent='🔔 Entérate de votaciones y anuncios';
+    sub.textContent='Recibe un aviso cuando haya una votación nueva, un duelo o un anuncio del bar — aunque no tengas la app abierta.';
+    btn.textContent='🔔 Activar notificaciones';
+  }
+}
+async function reverifyClientNotifications(){
+  if(!('Notification' in window))return;
+  let p=Notification.permission;
+  if(p==='default')p=await Notification.requestPermission();
+  if(p==='denied'){
+    toast('El navegador sigue bloqueando notificaciones para este sitio — habilítalas a mano en sus ajustes','err',6000);
+    renderClientNotifyStatus();
+    return;
+  }
+  const ok=await _subscribePush(true);
+  toast(ok?'🔔 Notificaciones activadas':'No se pudo activar — intenta de nuevo en un momento',ok?'ok':'err');
+  renderClientNotifyStatus();
 }
 
 async function enterPin(){
@@ -2486,12 +2531,13 @@ async function _triggerPushVote(title,body,tag){
   }
   try{new Notification(title,{body,icon:'/icon-192.png'});}catch(e){}
 }
-async function _subscribePush(){
-  if(_pushSubscribed||!_swReg)return;
+async function _subscribePush(force){
+  if((_pushSubscribed&&!force)||!_swReg)return _pushSubscribed;
   try{
     const r=await fetch('/api/push/vapid-public-key?v='+encodeURIComponent(VENUE));
-    if(!r.ok)return;
+    if(!r.ok)return false;
     const {public_key}=await r.json();
+    if(!public_key)return false;
     // Causa real de "el permiso está pero no llegan notificaciones" tras regenerar la clave
     // VAPID del servidor: si el navegador YA tenía una suscripción con la clave VIEJA,
     // pushManager.subscribe() con la clave NUEVA la rechaza (InvalidStateError) — hay que dar
@@ -2508,7 +2554,8 @@ async function _subscribePush(){
       body:JSON.stringify({venue:VENUE,token:token||'',subscription:sub.toJSON()})
     });
     _pushSubscribed=true;
-  }catch(e){console.warn('TYM: no se pudo suscribir a notificaciones push',e);}
+    return true;
+  }catch(e){console.warn('TYM: no se pudo suscribir a notificaciones push',e);return false;}
 }
 function _urlB64ToUint8Array(b64){
   const pad='='.repeat((4-b64.length%4)%4);
@@ -2516,6 +2563,7 @@ function _urlB64ToUint8Array(b64){
   return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
 }
 _initSW();
+renderClientNotifyStatus();
 boot();
 // Refresca la sesión cada 5 min: si el servidor la perdió (reinicio), vuelve a pedir PIN
 setInterval(async()=>{
