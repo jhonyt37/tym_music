@@ -1652,6 +1652,7 @@ function renderPoll(poll){
     if(vsMode){
       const div=document.createElement('div');div.className='poll-vs-team'+(on?' on':'');
       div.innerHTML=`<img class="poll-vs-img" src="${img(opt.yt)}" onerror="this.removeAttribute('src')"><div class="poll-vs-info"><div class="t">${esc(opt.title)}</div><div class="a">${esc(opt.artist||'')}</div></div>${on?'<span class="vote-check">✓</span>':''}<div class="poll-vs-votes">${count} voto${count!==1?'s':''} · ${pct}%</div><div class="poll-vs-bar"><div class="poll-vs-bar-fill" style="width:0%"></div></div>`;
+      applyClampTap(div.querySelector('.poll-vs-info .t'),opt.title,opt.artist);
       div.onclick=()=>votePoll(opt.yt);
       box.appendChild(div);
       if(idx===0){const vs=document.createElement('div');vs.className='poll-vs-divider';vs.textContent='VS';box.appendChild(vs);}
@@ -1704,6 +1705,7 @@ function renderDuelo(duelo){
     const count=votes[team.yt]||0;const pct=Math.round(100*count/total);const on=myVote===team.yt;
     const div=document.createElement('div');div.className='duelo-team'+(on?' on':'');
     div.innerHTML=`<div class="duelo-lbl">${idx===0?'⚔️ A':'⚔️ B'}</div><img class="duelo-img" src="${img(team.yt)}" onerror="this.removeAttribute('src')"><div class="duelo-info"><div class="t">${esc(team.title)}</div><div class="a">${esc(team.artist||'')}</div></div>${on?'<span class="vote-check">✓</span>':''}<div class="duelo-votes">${count} voto${count!==1?'s':''} · ${pct}%</div><div class="duelo-bar"><div class="duelo-bar-fill" style="width:0%"></div></div>`;
+    applyClampTap(div.querySelector('.duelo-info .t'),team.title,team.artist);
     div.onclick=()=>voteDuelo(team.yt);
     box.appendChild(div);
     if(idx===0){const vs=document.createElement('div');vs.className='duelo-vs';vs.textContent='VS';box.appendChild(vs);}
@@ -1890,6 +1892,23 @@ function applyTicker(el){
 function tickify(parent){
   setTimeout(()=>{
     (parent||document).querySelectorAll('.info .t:not([data-tkd])').forEach(applyTicker);
+  },120);
+}
+// Pedido explícito: "no se ven completos los nombres de las opciones" en duelo/votación cara a
+// cara — esas 2 filas usan -webkit-line-clamp:2 (recorte VERTICAL a 2 líneas), no
+// white-space:nowrap como el resto de la app, así que applyTicker()/tickify() (que miden
+// scrollWidth, overflow HORIZONTAL) nunca detectan el recorte y nunca ofrecen ver el nombre
+// completo. Acá se mide scrollHeight vs. clientHeight (el recorte vertical SÍ cambia eso) y,
+// si de verdad se cortó, un toque muestra título+artista completos en un toast.
+function applyClampTap(el,title,artist){
+  if(!el)return;
+  setTimeout(()=>{
+    if(el.scrollHeight<=el.clientHeight+1)return; // cabe completo en las 2 líneas, nada que hacer
+    el.style.cursor='pointer';
+    el.addEventListener('click',e=>{
+      e.stopPropagation();
+      toast('🎵 '+title+(artist?' — '+artist:''),'',3500);
+    });
   },120);
 }
 
