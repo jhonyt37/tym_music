@@ -91,6 +91,7 @@ header.bar{
 .btn.green{background:var(--green)}
 .btn.red{background:var(--red)}
 .btn.sm{padding:8px 12px;font-size:13px;border-radius:10px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
 
 .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:flex-end;z-index:20}
 .sheet-bg.open{display:flex}
@@ -141,8 +142,12 @@ header.bar{
 .kpi.gold{color:var(--gold)}
 .kpi.green{color:var(--green)}
 .toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 80px);transform:translateX(-50%);background:#1e2c46;
-  color:var(--txt);border:1px solid var(--line);font-weight:700;padding:12px 18px;border-radius:12px;opacity:0;transition:.3s;z-index:60;white-space:normal;max-width:calc(100vw - 32px);text-align:center;word-break:break-word}
-.toast.show{opacity:1}
+  color:var(--txt);border:1px solid var(--line);font-weight:700;padding:12px 18px;border-radius:12px;opacity:0;transition:.3s;z-index:60;white-space:normal;max-width:calc(100vw - 32px);text-align:center;word-break:break-word;
+  pointer-events:none}
+/* Bug real encontrado probando la dedicatoria: aunque invisible (opacity:0), este div fixed
+   seguía capturando clics de cualquier cosa que cayera bajo su caja — sin pointer-events:none
+   tapaba "una parte" de botones cercanos (ej. "Agregar dedicatoria") incluso sin mostrarse. */
+.toast.show{opacity:1;pointer-events:auto}
 .toast.ok{background:var(--green);color:#06210f;border-color:var(--green)}
 .toast.err{background:var(--red);color:#fff;border-color:var(--red)}
 .toast.clickable{cursor:pointer}

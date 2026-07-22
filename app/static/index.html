@@ -182,6 +182,13 @@ body{padding-bottom:80px}
 /* ---- Dedica form ---- */
 .dedica-form{display:flex;flex-direction:column;gap:10px}
 .dedica-char{font-size:11px;color:var(--mut);text-align:right;margin-top:-6px}
+/* El campo de código se veía IDÉNTICO al campo de mensaje (mismo <input class="field">,
+   sin ninguna pista visual de que son 2 cosas distintas) — reportado como confuso. Estilo
+   tipo "PIN" (centrado, espaciado, borde dorado) para que se lea como un paso aparte. */
+.field-code{text-align:center;letter-spacing:6px;font-weight:800;font-size:18px;
+  border-color:rgba(245,179,1,.5)}
+.field-error{animation:fieldShake .35s;border-color:var(--red)!important}
+@keyframes fieldShake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
 
 /* ---- Now detail sheet ---- */
 #nowDetailImg{width:200px;height:200px;border-radius:16px;object-fit:cover;margin:0 auto 14px;display:block}
@@ -502,9 +509,10 @@ body{padding-bottom:80px}
         <label style="font-size:12px;color:var(--mut);font-weight:700">Tu mensaje</label>
         <input class="field" id="sheetDedicaMsg" maxlength="80" placeholder="Elige uno de arriba, o escribe el tuyo ↓" style="margin-top:4px" readonly oninput="updateDedicaPriceHint()">
         <button type="button" class="btn ghost block sm" style="margin-top:8px" id="sheetDedicaCustomBtn" onclick="sheetDedicaSetCustom(true)">✍️ Escribir mi propio mensaje</button>
-        <div id="sheetDedicaCodeBox" style="display:none;margin-top:8px">
-          <input class="field" id="sheetDedicaCode" maxlength="6" inputmode="numeric" placeholder="Código del admin" style="margin:0">
-          <div class="small" style="color:var(--mut);margin-top:4px">Los mensajes propios necesitan un código de un solo uso — pídeselo al mesero o al admin.</div>
+        <div id="sheetDedicaCodeBox" style="display:none;margin-top:12px;padding-top:10px;border-top:1px dashed var(--line)">
+          <label style="font-size:12px;color:var(--gold);font-weight:700">🔑 Código de un solo uso (obligatorio)</label>
+          <input class="field field-code" id="sheetDedicaCode" maxlength="6" inputmode="numeric" placeholder="000000" style="margin-top:4px" oninput="this.classList.remove('field-error')">
+          <div class="small" style="color:var(--mut);margin-top:4px">Pídeselo al mesero o al admin — sin este código no se puede pedir con mensaje propio.</div>
         </div>
         <div class="small" id="sheetDedicaPriceHint" style="margin-top:4px;color:var(--gold);font-weight:700;display:none"></div>
         <button type="button" class="btn ghost block sm" style="margin-top:10px" onclick="toggleSheetDedica(false)">✕ Pedir sin dedicatoria</button>
@@ -1161,6 +1169,18 @@ function pick(m){
 function closeSheet(){$('sheet').classList.remove('open');document.body.style.overflow='';$('nav').classList.remove('modal-open');try{toggleSheetDedica(false);}catch(e){}}
 function confirmReq(){
   if(!token){toast('Ingresa el código de tu mesa','err');return;}
+  // Antes esto no se validaba acá: el pedido se mandaba igual, el sheet se cerraba
+  // optimistamente (closeSheet corre antes de la respuesta del servidor) y solo DESPUÉS
+  // aparecía un toast de error genérico pidiendo el código — el cliente ya había perdido de
+  // vista el campo. Ahora se bloquea ANTES de cerrar nada, con el campo resaltado.
+  const dedicaMsgInp=$('sheetDedicaMsg');
+  const isCustomDedica=dedicaMsgInp&&!dedicaMsgInp.readOnly&&dedicaMsgInp.value.trim().length>0;
+  if(isCustomDedica&&!($('sheetDedicaCode').value||'').trim()){
+    toast('🔑 Falta el código de un solo uso para tu mensaje','err');
+    $('sheetDedicaCode').classList.add('field-error');
+    $('sheetDedicaCode').focus();
+    return;
+  }
   const hasMsg=($('sheetDedicaMsg').value||'').trim().length>0;
   const dedicaNote=(hasMsg&&dedicaPrice>0)?'<br><span style="color:var(--gold);font-size:13px">💌 +'+cop(dedicaPrice)+' por la dedicatoria</span>':'';
   const now0=Date.now()/1000;

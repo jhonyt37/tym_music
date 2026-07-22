@@ -2457,8 +2457,16 @@ class H(BaseHTTPRequestHandler):
         return None
 
     def authed_venue(self):
-        """venue_id del dueño logueado ('*' = TYM master), o None."""
+        """venue_id del dueño de bar logueado en /admin, o None. Cookie propia (tymauth),
+        separada de la sesión de TYM master (ver authed_master) — antes compartían la MISMA
+        cookie ('tymauth', Path=/), así que loguearse en /tym en el mismo navegador donde ya
+        había una sesión de /admin (o viceversa) pisaba la otra sin avisar. Bug real reportado
+        en vivo: "el /tym es un sitio q pisa la sesión del /admin"."""
         return AUTH.get(self.get_cookie("tymauth"))
+
+    def authed_master(self):
+        """True si hay una sesión de TYM master (/tym) válida — cookie separada de authed_venue()."""
+        return AUTH.get(self.get_cookie("tymauth_master")) == "*"
 
     def set_venue(self, vid):
         global STATE, CUR_VID
@@ -2616,7 +2624,7 @@ class H(BaseHTTPRequestHandler):
             name = "TYM Master" if av == "*" else VENUES[av]["settings"]["venue_name"]
             return self._send(200, {"venue": av, "venue_name": name})
         if path == "/api/tym/analytics":
-            if self.authed_venue() != "*":
+            if not self.authed_master():
                 return self._send(401, {"error": "Solo TYM"})
             with LOCK:
                 return self._send(200, tym_analytics())
@@ -2674,7 +2682,7 @@ class H(BaseHTTPRequestHandler):
                        for e in VENUES[av].get("request_log", []) if e["ts"] >= cutoff]
                 return self._send(200, {"log": list(reversed(log))})
         if path == "/api/tym/request_log":
-            if self.authed_venue() != "*":
+            if not self.authed_master():
                 return self._send(403, {"error": "Solo TYM master"})
             with LOCK:
                 vid_filter = self._q("v")
@@ -2841,15 +2849,40 @@ class H(BaseHTTPRequestHandler):
                             # cada reinicio del proceso desloguea /admin y /tv sin avisar
             body = json.dumps({"ok": True, "venue": o["venue"]}).encode("utf-8")
             secure_flag = "; Secure" if PUBLIC_URL.startswith("https://") else ""
+            # Cookie separada para TYM master vs. dueño de bar (ver authed_master) — mismo
+            # endpoint de login para los dos (mismo formulario usuario/clave), pero antes las
+            # dos sesiones vivían en la MISMA cookie "tymauth" (Path=/): loguearse en /tym
+            # pisaba la sesión de /admin en el mismo navegador, y viceversa.
+            cookie_name = "tymauth_master" if o["venue"] == "*" else "tymauth"
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Set-Cookie", f"tymauth={tk}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400{secure_flag}")
+            self.send_header("Set-Cookie", f"{cookie_name}={tk}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400{secure_flag}")
             self.send_header("Content-Length", str(len(body)))
             self.end_headers(); self.wfile.write(body); return
         if path == "/api/logout":
-            AUTH.pop(self.get_cookie("tymauth"), None)
+            # scope indica cuál de las 2 sesiones cerrar — sin esto, cerrar sesión en /admin
+            # también cerraría una sesión de /tym abierta en el mismo navegador (y viceversa),
+            # justo lo que se quería dejar de compartir. Sin scope (clientes viejos en caché)
+            # se cierran ambas por seguridad, igual que el comportamiento de antes.
+            scope = d.get("scope")
+            secure_flag = "; Secure" if PUBLIC_URL.startswith("https://") else ""
+            cookies_to_clear = []
+            if scope == "master":
+                cookies_to_clear = ["tymauth_master"]
+            elif scope == "venue":
+                cookies_to_clear = ["tymauth"]
+            else:
+                cookies_to_clear = ["tymauth", "tymauth_master"]
+            for cname in cookies_to_clear:
+                AUTH.pop(self.get_cookie(cname), None)
             save_state()
-            return self._send(200, {"ok": True})
+            body = json.dumps({"ok": True}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            for cname in cookies_to_clear:
+                self.send_header("Set-Cookie", f"{cname}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0{secure_flag}")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers(); self.wfile.write(body); return
         if path == "/api/forgot_password":
             ip = self._client_ip()
             if not _rate_ok(ip, "forgot"):
@@ -4665,7 +4698,7 @@ class H(BaseHTTPRequestHandler):
 
         # ---- TYM Master: resetear la contraseña del dueño de un local ----
         if path == "/api/tym/reset_password":
-            if self.authed_venue() != "*":
+            if not self.authed_master():
                 return self._send(403, {"error": "Solo TYM master"})
             vid = (d.get("vid") or "").strip()
             new_pass = (d.get("new_pass") or "").strip()
@@ -4683,6 +4716,28 @@ class H(BaseHTTPRequestHandler):
                 save_state()
             return self._send(200, {"ok": True})
 
+        # ---- TYM Master: cambiar SU PROPIA contraseña ----
+        # Antes /tym solo dejaba resetear la clave de OTROS locales (reset_password arriba) —
+        # no había forma de que el propio super admin cambiara la suya a gusto, sin pasar por
+        # /api/forgot_password (correo, no siempre disponible/práctico).
+        if path == "/api/tym/change_password":
+            if not self.authed_master():
+                return self._send(403, {"error": "Solo TYM master"})
+            new_pass = (d.get("new_pass") or "").strip()
+            if len(new_pass) < 8:
+                return self._send(400, {"error": "La contraseña debe tener al menos 8 caracteres."})
+            with LOCK:
+                updated = False
+                for uname, odata in TYM["owners"].items():
+                    if odata.get("venue") == "*":
+                        odata["pass_hash"] = hash_password(new_pass)
+                        updated = True
+                        break
+                if not updated:
+                    return self._send(400, {"error": "No se encontró la cuenta de TYM master."})
+                save_state()
+            return self._send(200, {"ok": True})
+
         # ---- TYM Master: regenerar las claves VAPID de Web Push (pedido explícito, tras
         # encontrar en los logs reales de Render: "ASN.1 parsing error: invalid length" al
         # mandar un push — la clave privada guardada quedó en un formato que la versión actual
@@ -4696,7 +4751,7 @@ class H(BaseHTTPRequestHandler):
         # _subscribePush()/_subscribeAdminPush(), ya corren solas si el permiso sigue
         # concedido). ----
         if path == "/api/tym/regenerate_vapid":
-            if self.authed_venue() != "*":
+            if not self.authed_master():
                 return self._send(403, {"error": "Solo TYM master"})
             with LOCK:
                 TYM["vapid"] = {}
@@ -4708,7 +4763,7 @@ class H(BaseHTTPRequestHandler):
 
         # ---- TYM Master: bloquear/desbloquear el login de un local (ej. moroso) ----
         if path == "/api/tym/toggle_block":
-            if self.authed_venue() != "*":
+            if not self.authed_master():
                 return self._send(403, {"error": "Solo TYM master"})
             vid = (d.get("vid") or "").strip()
             with LOCK:
@@ -4722,7 +4777,7 @@ class H(BaseHTTPRequestHandler):
 
         # ---- TYM Master: gestión de locales ----
         if path == "/api/tym/create_venue":
-            if self.authed_venue() != "*":
+            if not self.authed_master():
                 return self._send(403, {"error": "Solo TYM master"})
             vid = re.sub(r"[^a-z0-9_-]", "", (d.get("vid") or "").strip().lower())[:24]
             name = str(d.get("name") or "").strip()[:60]

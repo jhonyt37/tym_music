@@ -1464,7 +1464,7 @@ $('centerPlayBtn').onclick=togglePlayPause;
 function askLogout(){if(!authok)return;$('logoutConfirm').style.display='flex';}
 function cancelLogout(){$('logoutConfirm').style.display='none';}
 async function confirmLogout(){
-  try{await fetch('/api/logout',{method:'POST'});}catch(e){}
+  try{await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:'venue'})});}catch(e){}
   location.reload();
 }
 $('logoutBtn').onclick=askLogout;

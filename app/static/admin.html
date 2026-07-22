@@ -230,6 +230,7 @@
         <div class="card">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
             <p class="sec" style="margin:0;border:none;padding:0;flex:1">Sonando ahora &amp; cola</p>
+            <span class="small" id="queueTotalTime" style="color:var(--mut)"></span>
             <button type="button" class="btn sm ghost" id="requeueLastBtn" style="display:none" onclick="requeueLast()" title="Por si se saltó una por error — no toca lo que suena ahora ni ningún cobro/reembolso ya hecho">⏮ Reponer última</button>
           </div>
           <div class="list" id="queue"><div class="empty">Nada en cola.</div></div>
@@ -2857,6 +2858,12 @@ async function tick(){
     _lastNP=np;
     const q=s.queue||[];
     _qSnapshot=q.map(x=>x.id);   // usado por el drop-to-reorder — se actualiza siempre, aunque no se redibuje
+    // Pedido explícito: cuántos minutos de música hay en cola — ya lo calculaba el servidor
+    // (queue_total_secs, incluye lo que falta de la canción sonando + toda la cola) pero solo
+    // se mostraba en el cliente, nunca en el admin. Fuera de _renderIfChanged porque es barato
+    // y cambia cada segundo con np.position, no solo cuando la lista misma cambia.
+    const qtt=$('queueTotalTime');
+    if(qtt)qtt.textContent=q.length?(q.length+' · ~'+mm(s.queue_total_secs)+' de música'):'';
     // Firma SOLO con los campos que de verdad se muestran acá — np.position avanza cada
     // segundo mientras suena (no se pinta ninguna barra de progreso en esta vista), incluirlo
     // habría invalidado la guarda en cada tick y vuelto a este fix inútil. npFavSig entra acá
@@ -3579,7 +3586,7 @@ async function forgotPassword(){
   $('lgErr').textContent=(j.message||j.error||'Si el usuario existe, en unos minutos llegará un correo.')
     +(j.email_hint?' Enviado a '+j.email_hint+'.':'');
 }
-async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
+async function logout(){await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:'venue'})});location.reload();}
 
 // ---------- Instalar app + notificaciones push (pedido explícito) ----------
 // Primera versión, a propósito acotada: solo asistencia por ahora ("hagamos primero lo de las

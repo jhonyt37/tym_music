@@ -60,6 +60,17 @@
     <div class="list" id="accts"></div>
   </div>
 
+  <!-- Pedido explícito: /tym solo dejaba RESETEAR la clave de otros locales — no había forma
+       de que el propio super admin cambiara la suya a gusto, sin pasar por el flujo de correo
+       de "olvidé mi contraseña". -->
+  <div class="card">
+    <h2>🔑 Mi contraseña (TYM master)</h2>
+    <label class="small">Nueva contraseña (mín. 8 caracteres)</label>
+    <input class="field" id="mpNew" type="password" placeholder="Nueva contraseña" autocomplete="new-password">
+    <input class="field" id="mpConfirm" type="password" placeholder="Repetir contraseña" autocomplete="new-password" style="margin-top:8px">
+    <button class="btn ghost block sm" style="margin-top:10px" onclick="changeMasterPassword()">🔑 Cambiar contraseña</button>
+  </div>
+
   <!-- Pedido explícito, tras encontrar en los logs reales de Render un error real de push
        ("ASN.1 parsing error") — la clave privada guardada quedó incompatible con la versión
        actual de la librería de cripto. Regenerarla es GLOBAL (una sola clave VAPID para toda
@@ -73,14 +84,36 @@
   </div>
 
   <div class="card">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
       <h2 style="margin:0">📋 Historial de pedidos</h2>
+      <span class="small" id="tymLogCount" style="margin-left:auto;color:var(--mut)"></span>
+    </div>
+    <!-- Pedido explícito: la lista era un solo bloque gigante sin filtrar/ordenar/paginar,
+         imposible de revisar con muchos locales activos. Todo se filtra/ordena/pagina en el
+         cliente (ya viene todo cargado de /api/tym/request_log), sin pedirle nada más al
+         servidor por cada cambio. -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">
       <select id="logVenueFilter" style="padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);color:var(--txt);font-size:13px" onchange="loadTymLog()">
         <option value="">Todos los locales</option>
       </select>
-      <span class="small" id="tymLogCount" style="margin-left:auto;color:var(--mut)"></span>
+      <select id="logModeFilter" style="padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);color:var(--txt);font-size:13px" onchange="_tymLogPage=0;renderTymLog()">
+        <option value="">Todos los tipos</option>
+        <option value="normal">🆓 Gratis</option>
+        <option value="credito">⚡ Crédito</option>
+        <option value="pase">⚡ Pase</option>
+        <option value="salto">⏫ Salto</option>
+        <option value="single">💰 Cobrado</option>
+      </select>
+      <select id="logSort" style="padding:6px 10px;border-radius:8px;border:1px solid var(--line);background:var(--bg2);color:var(--txt);font-size:13px" onchange="_tymLogPage=0;renderTymLog()">
+        <option value="ts_desc">Más reciente primero</option>
+        <option value="ts_asc">Más antiguo primero</option>
+        <option value="charge_desc">Monto: mayor a menor</option>
+        <option value="charge_asc">Monto: menor a mayor</option>
+      </select>
+      <input class="field" id="logSearch" placeholder="Buscar canción o mesa…" style="margin:0;width:200px;padding:6px 10px;font-size:13px" oninput="_tymLogPage=0;renderTymLog()">
     </div>
     <div class="list" id="tymLog"><div class="empty">Cargando…</div></div>
+    <div id="tymLogPager" style="display:flex;align-items:center;justify-content:center;gap:14px;margin-top:12px"></div>
   </div>
 
   <div class="grid2">
@@ -127,7 +160,7 @@ function initPasswordToggle(id){
   btn.onclick=()=>{const show=el.type==='password';el.type=show?'text':'password';btn.textContent=show?'🙈':'👁';btn.style.opacity=show?'1':'.6';};
   wrap.appendChild(btn);
 }
-['lgPass','nPass'].forEach(initPasswordToggle);
+['lgPass','nPass','mpNew','mpConfirm'].forEach(initPasswordToggle);
 let VENMAP={};
 async function doLogin(){
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value.trim()})});
@@ -151,7 +184,7 @@ async function forgotPassword(){
   $('lgErr').style.color='var(--green)';
   $('lgErr').textContent=j.message||j.error||'Si el usuario existe, en unos minutos llegará un correo.';
 }
-async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
+async function logout(){await fetch('/api/logout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({scope:'master'})});location.reload();}
 async function regenerateVapid(){
   if(!confirm('¿Regenerar las claves VAPID de notificaciones push? Esto borra TODAS las suscripciones existentes (clientes y dueños) — cada uno se re-suscribe solo la próxima vez que abra la app, si ya había dado el permiso antes. Úsalo solo si los logs de Render muestran un error real de la clave.'))return;
   const r=await fetch('/api/tym/regenerate_vapid',{method:'POST'});
@@ -162,30 +195,64 @@ async function regenerateVapid(){
 
 const MODE_LABEL={normal:'🆓 Gratis',credito:'⚡ Crédito',pase:'⚡ Pase',salto:'⏫ Salto',single:'💰 Cobrado'};
 const hm2=ts=>{const d=new Date(ts*1000);return d.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'});};
+let _tymLogAll=[],_tymLogPage=0;
+const TYM_LOG_PAGE_SIZE=50;
 async function loadTymLog(){
   try{
     const v=$('logVenueFilter').value;
     const url='/api/tym/request_log?days=3'+(v?'&v='+encodeURIComponent(v):'');
     const data=await(await fetch(url)).json();
-    const box=$('tymLog');box.innerHTML='';
-    // Flatten all entries sorted by ts desc
-    let all=[];
-    Object.values(data).forEach(vd=>{(vd.log||[]).forEach(e=>all.push(e));});
-    all.sort((a,b)=>b.ts-a.ts);
-    $('tymLogCount').textContent=all.length+' pedidos (3 días)';
-    if(!all.length){box.innerHTML='<div class="empty">Sin pedidos en los últimos 3 días.</div>';return;}
-    all.slice(0,300).forEach(e=>{
-      const r=document.createElement('div');r.className='row';
-      const badge=MODE_LABEL[e.mode]||e.mode;
-      const vname=e.venue_name?`<span style="color:var(--pri);font-weight:700">${esc(e.venue_name)}</span> · `:'';
-      r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${e.yt}/mqdefault.jpg" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none">
-        <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.title)}</div>
-        <div style="color:var(--mut);font-size:12px">${vname}${esc(e.table||'—')} · ${hm2(e.ts)}</div></div>
-        <span style="font-size:12px;padding:3px 8px;border-radius:999px;background:var(--bg2);border:1px solid var(--line);white-space:nowrap">${esc(badge)}</span>
-        ${e.charge>0?`<span style="font-size:12px;font-weight:800;color:var(--gold)">${cop(e.charge)}</span>`:''}`;
-      box.appendChild(r);
-    });
+    _tymLogAll=[];
+    Object.values(data).forEach(vd=>{(vd.log||[]).forEach(e=>_tymLogAll.push(e));});
+    _tymLogPage=0;
+    renderTymLog();
   }catch(err){$('tymLog').innerHTML='<div class="empty">Error cargando historial.</div>';}
+}
+function renderTymLog(){
+  const box=$('tymLog'),pager=$('tymLogPager');
+  const mode=$('logModeFilter').value;
+  const sort=$('logSort').value;
+  const q=($('logSearch').value||'').trim().toLowerCase();
+  let rows=_tymLogAll.filter(e=>{
+    if(mode&&e.mode!==mode)return false;
+    if(q&&!((e.title||'').toLowerCase().includes(q)||(e.table||'').toLowerCase().includes(q)||(e.venue_name||'').toLowerCase().includes(q)))return false;
+    return true;
+  });
+  const sorters={
+    ts_desc:(a,b)=>b.ts-a.ts, ts_asc:(a,b)=>a.ts-b.ts,
+    charge_desc:(a,b)=>(b.charge||0)-(a.charge||0), charge_asc:(a,b)=>(a.charge||0)-(b.charge||0),
+  };
+  rows=rows.slice().sort(sorters[sort]||sorters.ts_desc);
+  $('tymLogCount').textContent=rows.length+' de '+_tymLogAll.length+' pedidos (3 días)';
+  if(!rows.length){
+    box.innerHTML='<div class="empty">'+(_tymLogAll.length?'Nada coincide con el filtro.':'Sin pedidos en los últimos 3 días.')+'</div>';
+    pager.innerHTML='';return;
+  }
+  const totalPages=Math.max(1,Math.ceil(rows.length/TYM_LOG_PAGE_SIZE));
+  if(_tymLogPage>=totalPages)_tymLogPage=totalPages-1;
+  const pageRows=rows.slice(_tymLogPage*TYM_LOG_PAGE_SIZE,(_tymLogPage+1)*TYM_LOG_PAGE_SIZE);
+  box.innerHTML='';
+  pageRows.forEach(e=>{
+    const r=document.createElement('div');r.className='row';
+    const badge=MODE_LABEL[e.mode]||e.mode;
+    const vname=e.venue_name?`<span style="color:var(--pri);font-weight:700">${esc(e.venue_name)}</span> · `:'';
+    r.innerHTML=`<img class="mini" src="https://i.ytimg.com/vi/${e.yt}/mqdefault.jpg" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none">
+      <div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.title)}</div>
+      <div style="color:var(--mut);font-size:12px">${vname}${esc(e.table||'—')} · ${hm2(e.ts)}</div></div>
+      <span style="font-size:12px;padding:3px 8px;border-radius:999px;background:var(--bg2);border:1px solid var(--line);white-space:nowrap">${esc(badge)}</span>
+      ${e.charge>0?`<span style="font-size:12px;font-weight:800;color:var(--gold)">${cop(e.charge)}</span>`:''}`;
+    box.appendChild(r);
+  });
+  pager.innerHTML='';
+  if(totalPages>1){
+    const prev=document.createElement('button');prev.className='btn ghost sm';prev.textContent='‹ Anterior';
+    prev.disabled=_tymLogPage===0;prev.onclick=()=>{_tymLogPage--;renderTymLog();};
+    const lbl=document.createElement('span');lbl.className='small';lbl.style.color='var(--mut)';
+    lbl.textContent='Página '+(_tymLogPage+1)+' de '+totalPages;
+    const next=document.createElement('button');next.className='btn ghost sm';next.textContent='Siguiente ›';
+    next.disabled=_tymLogPage>=totalPages-1;next.onclick=()=>{_tymLogPage++;renderTymLog();};
+    pager.appendChild(prev);pager.appendChild(lbl);pager.appendChild(next);
+  }
 }
 
 async function load(){
@@ -239,6 +306,16 @@ async function load(){
   while(sel.options.length>1)sel.remove(1);
   venues.forEach(([vid,info])=>{const o=document.createElement('option');o.value=vid;o.textContent=info.name||vid;sel.appendChild(o);});
   loadTymLog();
+}
+async function changeMasterPassword(){
+  const np=($('mpNew').value||'').trim(),nc=($('mpConfirm').value||'').trim();
+  if(np.length<8){alert('La contraseña debe tener al menos 8 caracteres.');return;}
+  if(np!==nc){alert('Las contraseñas no coinciden.');return;}
+  const r=await fetch('/api/tym/change_password',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({new_pass:np})});
+  const j=await r.json();
+  if(j.ok){alert('Contraseña actualizada ✓');$('mpNew').value='';$('mpConfirm').value='';}
+  else alert(j.error||'Error al cambiar contraseña');
 }
 async function resetOwnerPassword(vid,venueName,username){
   const np=prompt('Nueva contraseña para "'+venueName+'"'+(username?' (usuario: '+username+')':'')+' — mínimo 8 caracteres:');
