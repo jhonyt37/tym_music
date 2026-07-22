@@ -3799,8 +3799,20 @@ async function reverifyNotifications(){
 async function sendTestPush(){
   _pushDebug('Enviando notificación de prueba…');
   const r=await post('/api/admin/push/test',{});
-  if(r&&r.ok){_pushDebug('✅ Enviada — revisa tu celular en unos segundos (puede tardar un poco).');toast('Notificación de prueba enviada','ok');}
-  else{_pushDebug('❌ '+((r&&r.error)||'No se pudo enviar'));toast((r&&r.error)||'No se pudo enviar','err');}
+  if(r&&r.ok){
+    _pushDebug('✅ El servidor confirma que la envió ('+r.sent+'/'+r.attempted+') — revisa tu celular en unos segundos.');
+    toast('Notificación de prueba enviada','ok');
+  }else if(r&&r.attempted!=null){
+    // Antes "ok" solo confirmaba que el servidor RECIBIÓ el pedido de mandarla, no que
+    // realmente la haya podido entregar al servicio de push — con esto, si el envío real
+    // falla (ej. la clave VAPID sigue rota), el error EXACTO queda acá, sin depender de logs
+    // de Render que el admin no siempre tiene a mano.
+    _pushDebug('❌ El servidor intentó enviarla pero falló ('+r.sent+'/'+r.attempted+'): '+((r.errors&&r.errors.join(' | '))||'sin detalle'));
+    toast('El servidor no pudo entregarla — revisa el detalle técnico','err');
+  }else{
+    _pushDebug('❌ '+((r&&r.error)||'No se pudo enviar'));
+    toast((r&&r.error)||'No se pudo enviar','err');
+  }
 }
 
 (async()=>{

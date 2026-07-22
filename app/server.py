@@ -362,19 +362,28 @@ def _ensure_owner_passwords():
 def _ensure_vapid_keys():
     if not _WEBPUSH_OK:
         return
-    if TYM.get("vapid", {}).get("private_key_pem"):
+    if TYM.get("vapid", {}).get("private_key_raw_b64"):
         return
     try:
         v = Vapid()
         v.generate_keys()
         import base64
-        from cryptography.hazmat.primitives.serialization import (
-            Encoding, PublicFormat, PrivateFormat, NoEncryption)
-        priv_pem = v.private_key.private_bytes(Encoding.PEM, PrivateFormat.TraditionalOpenSSL, NoEncryption()).decode()
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+        # CAUSA RAÍZ REAL del "ASN.1 parsing error" (encontrada recién, no era una clave vieja
+        # corrupta — CUALQUIER clave generada por esta función fallaba, incluso una nueva recién
+        # regenerada): guardábamos la clave como PEM completo (con "-----BEGIN EC PRIVATE
+        # KEY-----"), pero pywebpush.webpush(vapid_private_key=...) cuando recibe un STRING (no
+        # una ruta de archivo) lo pasa a py_vapid.Vapid.from_string(), que espera el valor RAW
+        # de 32 bytes (o DER) en base64 url-safe SIN encabezado PEM — intenta decodificar el
+        # texto completo (incluyendo "-----BEGIN...-----") como si fuera base64, produciendo
+        # bytes corruptos y ese mismo error de longitud inválida. Guardar el valor crudo en el
+        # formato que from_string() realmente espera lo arregla de raíz.
+        priv_raw = v.private_key.private_numbers().private_value.to_bytes(32, "big")
+        priv_b64 = base64.urlsafe_b64encode(priv_raw).rstrip(b"=").decode()
         pub_b64 = base64.urlsafe_b64encode(
             v.public_key.public_bytes(Encoding.X962, PublicFormat.UncompressedPoint)
         ).rstrip(b"=").decode()
-        TYM["vapid"] = {"private_key_pem": priv_pem, "public_key_b64": pub_b64}
+        TYM["vapid"] = {"private_key_raw_b64": priv_b64, "public_key_b64": pub_b64}
         save_state()
         print("🔔 VAPID keys generadas para Web Push")
     except Exception as exc:
@@ -383,14 +392,22 @@ def _ensure_vapid_keys():
 def _send_push_to(sub_key, vid, title, body, url, tag):
     """Manda un push real (Web Push/VAPID) a cada suscripción guardada bajo TYM[sub_key][vid] —
     compartida entre clientes (push_subs) y dueño/staff (owner_push_subs, canal separado a
-    propósito). Limpia solas las suscripciones muertas (404/410 = el navegador ya no existe)."""
+    propósito). Limpia solas las suscripciones muertas (404/410 = el navegador ya no existe).
+    Devuelve un resumen (attempted/sent/errors) — antes esto no devolvía nada, así que un fallo
+    real de envío (ej. la clave VAPID sigue corrupta) quedaba invisible salvo revisando logs de
+    Render, que el dueño reportó no tener a mano. Ahora el resultado real puede mostrarse en la
+    propia app, sin depender de los logs del servidor."""
+    result = {"attempted": 0, "sent": 0, "errors": []}
     if not _WEBPUSH_OK:
-        return
+        result["errors"].append("pywebpush no está instalado en el servidor.")
+        return result
     vapid = TYM.get("vapid", {})
-    priv_pem = vapid.get("private_key_pem")
-    if not priv_pem:
-        return
+    priv_key = vapid.get("private_key_raw_b64")
+    if not priv_key:
+        result["errors"].append("No hay clave VAPID configurada en el servidor.")
+        return result
     subs = TYM.get(sub_key, {}).get(vid, [])
+    result["attempted"] = len(subs)
     dead = []
     for sub in subs:
         try:
@@ -398,29 +415,34 @@ def _send_push_to(sub_key, vid, title, body, url, tag):
                 subscription_info=sub,
                 data=json.dumps({"title": title, "body": body, "url": url,
                                  "icon": "/icon-192.png", "tag": tag}),
-                vapid_private_key=priv_pem,
+                vapid_private_key=priv_key,
                 vapid_claims={"sub": "mailto:tym@example.com"},
             )
+            result["sent"] += 1
         except WebPushException as ex:
             code = ex.response.status_code if ex.response else None
             if code in (404, 410):
                 dead.append(sub)
             # Reportado "las notificaciones no llegan" sin más detalle — sin este log, un
             # rechazo real del servicio de push (ej. VAPID audience inválida, payload muy
-            # grande, credenciales mal formadas) queda invisible por completo del lado del
+            # grande, credenciales mal formadas) quedaba invisible por completo del lado del
             # servidor. No relanza — un push fallido nunca debe tumbar la request que lo
             # disparó (un pedido de asistencia, un anuncio, etc.).
+            msg = f"HTTP {code}: {ex}" if code else str(ex)
+            result["errors"].append(msg)
             print(f"⚠️  Web Push rechazado ({sub_key}, status={code}): {ex}", flush=True)
         except Exception as exc:
+            result["errors"].append(f"{type(exc).__name__}: {exc}")
             print(f"⚠️  Web Push falló ({sub_key}): {exc}", flush=True)
     if dead:
         TYM[sub_key][vid] = [s for s in subs if s not in dead]
+    return result
 
 def _send_venue_push(vid, title, body, url="/"):
-    _send_push_to("push_subs", vid, title, body, url, "tym-poll")
+    return _send_push_to("push_subs", vid, title, body, url, "tym-poll")
 
 def _send_owner_push(vid, title, body, url="/admin"):
-    _send_push_to("owner_push_subs", vid, title, body, url, "tym-owner")
+    return _send_push_to("owner_push_subs", vid, title, body, url, "tym-owner")
 
 # ---- Rate limiting (por IP) ----
 _RATE = {}
@@ -606,7 +628,7 @@ TYM = {
     },
     "events": [],              # analítica: {venue, table, account, ts, ev, ...}
     "accounts": {},            # token -> {id,venue,table,opened_at,closed_at,total,orders_free,orders_premium}
-    "vapid": {},               # {private_key_pem, public_key_b64}
+    "vapid": {},               # {private_key_raw_b64, public_key_b64} — raw, NO PEM (ver _ensure_vapid_keys)
     "push_subs": {},           # venue_id -> [{endpoint, keys:{p256dh,auth}}] — clientes
     "owner_push_subs": {},     # venue_id -> [{endpoint, keys:{p256dh,auth}}] — dueño/staff en
                                 # /admin, canal separado a propósito: el dueño no debe recibir
@@ -3518,9 +3540,14 @@ class H(BaseHTTPRequestHandler):
                 if not subs_count:
                     return self._send(400, {"error": "Todavía no hay ninguna suscripción activa en este "
                                              "dispositivo — activa las notificaciones primero.", "subs": 0})
-                _send_owner_push(vid, "🔔 Notificación de prueba",
-                                  "Si ves esto, las notificaciones están funcionando ✅", "/admin")
-                return self._send(200, {"ok": True, "subs": subs_count})
+                result = _send_owner_push(vid, "🔔 Notificación de prueba",
+                                           "Si ves esto, las notificaciones están funcionando ✅", "/admin")
+                # El resultado real del envío (cuántas llegaron al servicio de push, y el error
+                # exacto de las que no) viaja en la respuesta — antes esto solo devolvía "ok"
+                # aunque el envío real hubiera fallado del todo, y la única forma de enterarse
+                # era revisar los logs de Render.
+                ok = result["sent"] > 0
+                return self._send(200 if ok else 502, {"ok": ok, "subs": subs_count, **result})
 
             # ---- Solicitud de asistencia en mesa ----
             if path == "/api/assist":
