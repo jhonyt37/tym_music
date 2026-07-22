@@ -492,8 +492,8 @@
       <div class="small" style="color:var(--mut);margin-bottom:14px">Si activas las 2, se turnan en orden fijo — votación, duelo, votación... — nunca las 2 a la vez.</div>
 
       <label class="small" style="display:block;margin-bottom:4px">🎚️ Canciones entre un auto-lanzamiento y el siguiente</label>
-      <div class="small" style="color:var(--mut);margin-bottom:6px">Cuenta cualquier canción que suene (incluida la ganadora del lanzamiento anterior) — evita lanzamientos seguidos sin parar. Default: 2.</div>
-      <input class="field" id="pollAutoCooldownSongs" type="number" min="1" max="20" placeholder="2" style="max-width:140px;margin-bottom:14px">
+      <div class="small" style="color:var(--mut);margin-bottom:6px">La canción ganadora de la votación/duelo NO cuenta — a partir de que arranca hacen falta N canciones frescas del catálogo local antes del próximo lanzamiento. Mínimo 2 (con 1 se siente como un loop). Default: 2.</div>
+      <input class="field" id="pollAutoCooldownSongs" type="number" min="2" max="20" placeholder="2" style="max-width:140px;margin-bottom:14px">
 
       <label class="small" style="display:block;margin-bottom:4px">🌟 De dónde salen las opciones</label>
       <div class="small" style="color:var(--mut);margin-bottom:6px">"Solo destacadas" nunca sale del catálogo que el bar marcó como Recomendadas del local — "cualquier canción" es una sugerencia más amplia, al azar sobre todo el catálogo.</div>

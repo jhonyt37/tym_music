@@ -2363,14 +2363,26 @@ def public_state(token=None, admin=False, mark_dedica=None):
     if np:
         if STATE.get("last_song_id_seen") != np["id"]:
             STATE["last_song_id_seen"] = np["id"]
-            STATE["songs_since_local_poll"] = STATE.get("songs_since_local_poll", 0) + 1
+            # Pedido explícito, confirmado con el usuario: la canción GANADORA de una votación/
+            # duelo no debe contar como una de las N canciones del catálogo local — es su propio
+            # evento (la "N+1"), y a partir de que arranca hacen falta N canciones FRESCAS del
+            # catálogo antes de poder auto-lanzar de nuevo. Antes contaba como +1 (el reset solo
+            # pasaba al CREAR el poll/duelo, no al arrancar la ganadora), lo que dejaba el ciclo
+            # real en N-1 canciones locales tras la ganadora — más apretado de lo esperado.
+            _is_winner_song = (np.get("table") or "").startswith("Votación") or "Duelo" in (np.get("table") or "")
+            if _is_winner_song:
+                STATE["songs_since_local_poll"] = 0
+            else:
+                STATE["songs_since_local_poll"] = STATE.get("songs_since_local_poll", 0) + 1
         _s = STATE["settings"]
         _poll_auto_on = bool(_s.get("poll_auto_enabled", True))
         _duelo_auto_on = bool(_s.get("duelo_auto_enabled", False))
         if (np.get("fallback") and _s.get("content_mode") == "local"
                 and (_poll_auto_on or _duelo_auto_on)):
             started_ago = time.time() - (np.get("played_at") or np.get("ts") or 0)
-            cooldown = max(1, int(_s.get("poll_local_cooldown_songs", 2)))
+            # Mínimo 2, no 1 (pedido explícito): con N=1 el ciclo se siente como un loop — vota
+            # de nuevo apenas suena UNA canción tras la ganadora, muy poco respiro real.
+            cooldown = max(2, int(_s.get("poll_local_cooldown_songs", 2)))
             _delay_unit = _s.get("poll_auto_delay_unit", "secs")
             _delay_value = _s.get("poll_auto_delay_value", 20)
             if _delay_unit == "pct":
@@ -4020,7 +4032,7 @@ class H(BaseHTTPRequestHandler):
                     try: s["poll_min_remaining_pct"] = max(0, min(100, int(d["poll_min_remaining_pct"])))
                     except Exception: pass
                 if "poll_local_cooldown_songs" in d:
-                    try: s["poll_local_cooldown_songs"] = max(1, min(20, int(d["poll_local_cooldown_songs"])))
+                    try: s["poll_local_cooldown_songs"] = max(2, min(20, int(d["poll_local_cooldown_songs"])))
                     except Exception: pass
                 if "poll_auto_enabled" in d:
                     s["poll_auto_enabled"] = bool(d["poll_auto_enabled"])
