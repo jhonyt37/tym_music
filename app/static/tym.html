@@ -60,6 +60,18 @@
     <div class="list" id="accts"></div>
   </div>
 
+  <!-- Pedido explícito, tras encontrar en los logs reales de Render un error real de push
+       ("ASN.1 parsing error") — la clave privada guardada quedó incompatible con la versión
+       actual de la librería de cripto. Regenerarla es GLOBAL (una sola clave VAPID para toda
+       la plataforma, no por local) y borra TODAS las suscripciones existentes (quedan
+       inválidas contra la clave nueva de todas formas) — por eso vive acá, en el dashboard de
+       TYM master, no en el panel de un bar en particular. -->
+  <div class="card">
+    <h2>🔔 Notificaciones push (sistema)</h2>
+    <div class="small" style="color:var(--mut);margin-bottom:10px">Si los logs de Render muestran "Web Push falló" con un error de la clave (ej. "ASN.1 parsing error"), la clave VAPID guardada quedó incompatible — regenerarla la arregla, pero TODOS los clientes y dueños con notificaciones activadas tendrán que volver a abrir la app una vez para re-suscribirse solos (ya lo hacen automático si el permiso sigue concedido).</div>
+    <button class="btn ghost block sm" onclick="regenerateVapid()">🔄 Regenerar claves VAPID</button>
+  </div>
+
   <div class="card">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <h2 style="margin:0">📋 Historial de pedidos</h2>
@@ -140,6 +152,13 @@ async function forgotPassword(){
   $('lgErr').textContent=j.message||j.error||'Si el usuario existe, en unos minutos llegará un correo.';
 }
 async function logout(){await fetch('/api/logout',{method:'POST'});location.reload();}
+async function regenerateVapid(){
+  if(!confirm('¿Regenerar las claves VAPID de notificaciones push? Esto borra TODAS las suscripciones existentes (clientes y dueños) — cada uno se re-suscribe solo la próxima vez que abra la app, si ya había dado el permiso antes. Úsalo solo si los logs de Render muestran un error real de la clave.'))return;
+  const r=await fetch('/api/tym/regenerate_vapid',{method:'POST'});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok)alert('✅ Claves regeneradas. Nueva clave pública:\n'+(j.public_key||'').slice(0,24)+'…');
+  else alert('❌ '+(j.error||'Error'));
+}
 
 const MODE_LABEL={normal:'🆓 Gratis',credito:'⚡ Crédito',pase:'⚡ Pase',salto:'⏫ Salto',single:'💰 Cobrado'};
 const hm2=ts=>{const d=new Date(ts*1000);return d.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'});};

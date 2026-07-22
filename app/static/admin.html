@@ -133,9 +133,14 @@
       <div style="font-weight:700;margin-bottom:6px">📲 Instala el panel en iPhone</div>
       <div class="small">Toca <b>Compartir</b> (⬆) en Safari y luego <b>"Añadir a pantalla de inicio"</b>.</div>
     </div>
+    <!-- Pedido explícito: no solo "activar" la primera vez, también poder RE-verificar después
+         (ej. si se regeneraron las claves VAPID del servidor, o el permiso quedó en un estado
+         raro) — por eso el botón de reverificar queda siempre visible, no solo mientras el
+         permiso está sin pedir. Contenido armado por JS (renderNotifyStatus), según el estado
+         real de Notification.permission en cada momento. -->
     <div id="adminNotifyBox" style="display:none;margin-bottom:14px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:14px;padding:14px">
-      <div style="font-weight:700;margin-bottom:4px">🔔 Recibe avisos de asistencia en tu celular</div>
-      <div class="small" style="margin-bottom:10px">Te llega una notificación cuando una mesa pide ayuda, aunque tengas el panel cerrado o la pantalla apagada.</div>
+      <div style="font-weight:700;margin-bottom:4px" id="adminNotifyTitle">🔔 Recibe avisos de asistencia en tu celular</div>
+      <div class="small" style="margin-bottom:10px" id="adminNotifySub">Te llega una notificación cuando una mesa pide ayuda, aunque tengas el panel cerrado o la pantalla apagada.</div>
       <button class="btn block" id="adminNotifyBtn">🔔 Activar notificaciones</button>
     </div>
 
@@ -3647,30 +3652,57 @@ function setupAdminPwa(){
     const{outcome}=await _adminPwaPrompt.userChoice;
     if(outcome==='accepted'){_adminPwaPrompt=null;$('adminPwaInstallBox').style.display='none';}
   };
-  if(!('Notification' in window))return;
+  if(!('Notification' in window)){const b=$('adminNotifyBox');if(b)b.style.display='none';return;}
   // Bug real encontrado en vivo: "ya están habilitados los permisos en Android pero las
   // notificaciones no llegan". El permiso del navegador (Notification.permission) es por
   // ORIGEN, no por suscripción — si ya estaba en 'granted' de ANTES (ej. otra vez que se probó,
-  // o porque el mismo origen ya lo pidió desde el cliente /), este código nunca corría
+  // o porque el mismo origen ya lo pidió desde el cliente /), antes este código nunca corría
   // _subscribeAdminPush() porque solo vivía DENTRO del botón "Activar notificaciones", que ni
-  // siquiera se mostraba con el permiso ya concedido — nunca llegaba a crear/confirmar la
-  // PushSubscription real en el servidor (owner_push_subs), aunque el permiso SÍ estuviera.
-  // Ahora, si ya está concedido, se confirma/renueva la suscripción sola en cada carga, sin
-  // esperar a que alguien toque un botón que ni siquiera aparece.
-  if(Notification.permission==='granted'){
-    _subscribeAdminPush();
+  // siquiera se mostraba con el permiso ya concedido. Ahora, si ya está concedido, se confirma/
+  // renueva la suscripción sola en cada carga, sin esperar a que alguien toque un botón.
+  if(Notification.permission==='granted')_subscribeAdminPush();
+  // Pedido explícito: no solo "activar" la primera vez — el botón queda SIEMPRE disponible
+  // para reverificar (ej. si el servidor regeneró las claves VAPID, como pasó en vivo por una
+  // clave vieja incompatible — ver /tym → "Regenerar claves VAPID" — todas las suscripciones
+  // viejas quedan inválidas y hay que crear una nueva).
+  renderNotifyStatus();
+  const nbtn=$('adminNotifyBtn');
+  if(nbtn)nbtn.onclick=reverifyNotifications;
+}
+function renderNotifyStatus(){
+  const box=$('adminNotifyBox'),title=$('adminNotifyTitle'),sub=$('adminNotifySub'),btn=$('adminNotifyBtn');
+  if(!box||!('Notification' in window)){if(box)box.style.display='none';return;}
+  box.style.display='';
+  const p=Notification.permission;
+  if(p==='granted'){
+    title.textContent='✅ Notificaciones activadas';
+    sub.textContent='Si dejaron de llegar (ej. tras un cambio del servidor), tocá reverificar.';
+    btn.textContent='🔄 Reverificar notificaciones';
+  }else if(p==='denied'){
+    title.textContent='🔕 Notificaciones bloqueadas';
+    // El navegador NO deja volver a pedir el permiso por código una vez que quedó en
+    // 'denied' — solo el usuario puede revertirlo a mano desde la config del sitio en su
+    // navegador/sistema. Sin esta explicación, el botón de abajo parecería no hacer nada.
+    sub.textContent='El navegador ya las bloqueó para este sitio — hay que habilitarlas a mano desde sus ajustes (busca "Notificaciones" en la configuración de este sitio/app) y volver a tocar este botón.';
+    btn.textContent='🔄 Reintentar';
+  }else{
+    title.textContent='🔔 Recibe avisos de asistencia en tu celular';
+    sub.textContent='Te llega una notificación cuando una mesa pide ayuda, aunque tengas el panel cerrado o la pantalla apagada.';
+    btn.textContent='🔔 Activar notificaciones';
+  }
+}
+async function reverifyNotifications(){
+  if(!('Notification' in window))return;
+  let p=Notification.permission;
+  if(p==='default')p=await Notification.requestPermission();
+  if(p==='denied'){
+    toast('El navegador sigue bloqueando notificaciones para este sitio — habilítalas a mano en sus ajustes','err',6000);
+    renderNotifyStatus();
     return;
   }
-  if(Notification.permission==='denied')return; // nada que ofrecer, el navegador ya lo bloqueó
-  const nbox=$('adminNotifyBox');if(nbox)nbox.style.display='';
-  const nbtn=$('adminNotifyBtn');
-  if(nbtn)nbtn.onclick=async()=>{
-    const p=await Notification.requestPermission();
-    if(p!=='granted'){toast('No se activaron las notificaciones — puedes intentarlo de nuevo cuando quieras','err');return;}
-    const ok=await _subscribeAdminPush();
-    if(ok){$('adminNotifyBox').style.display='none';toast('🔔 Notificaciones activadas','ok');}
-    else toast('No se pudo activar — intenta de nuevo en un momento','err');
-  };
+  const ok=await _subscribeAdminPush();
+  toast(ok?'🔔 Notificaciones activadas':'No se pudo activar — intenta de nuevo en un momento',ok?'ok':'err');
+  renderNotifyStatus();
 }
 
 (async()=>{

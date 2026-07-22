@@ -4683,6 +4683,29 @@ class H(BaseHTTPRequestHandler):
                 save_state()
             return self._send(200, {"ok": True})
 
+        # ---- TYM Master: regenerar las claves VAPID de Web Push (pedido explícito, tras
+        # encontrar en los logs reales de Render: "ASN.1 parsing error: invalid length" al
+        # mandar un push — la clave privada guardada quedó en un formato que la versión actual
+        # de `cryptography` ya no puede leer, típico de una clave generada hace tiempo con una
+        # versión vieja de esa librería. _ensure_vapid_keys() NUNCA regenera sola si ya hay algo
+        # guardado (aunque esté roto), así que sin este botón el problema no se arregla solo con
+        # un redeploy. Genera un par nuevo, consistente con la versión de `cryptography`
+        # instalada AHORA MISMO. Las suscripciones viejas quedan inválidas contra la clave
+        # pública nueva (el navegador las firmó contra la vieja) — se limpian de una, cada
+        # cliente/dueño se re-suscribe solo la próxima vez que abra la app (ver
+        # _subscribePush()/_subscribeAdminPush(), ya corren solas si el permiso sigue
+        # concedido). ----
+        if path == "/api/tym/regenerate_vapid":
+            if self.authed_venue() != "*":
+                return self._send(403, {"error": "Solo TYM master"})
+            with LOCK:
+                TYM["vapid"] = {}
+                TYM["push_subs"] = {}
+                TYM["owner_push_subs"] = {}
+                _ensure_vapid_keys()
+                save_state()
+            return self._send(200, {"ok": True, "public_key": TYM.get("vapid", {}).get("public_key_b64", "")})
+
         # ---- TYM Master: bloquear/desbloquear el login de un local (ej. moroso) ----
         if path == "/api/tym/toggle_block":
             if self.authed_venue() != "*":
