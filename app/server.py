@@ -2923,7 +2923,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/remove", "/api/admin/settings", "/api/admin/tables", "/api/admin/stations",
                        "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset",
                        "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/content_block",
-                       "/api/admin/push/subscribe",
+                       "/api/admin/push/subscribe", "/api/admin/push/test",
                        "/api/admin/move", "/api/admin/reorder",
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
                        "/api/admin/reset_loved",
@@ -3509,6 +3509,18 @@ class H(BaseHTTPRequestHandler):
                 if not any(s.get("endpoint") == endpoint for s in subs):
                     subs.append(sub)
                 return self._send(200, {"ok": True})
+
+            # Pedido explícito: probar que las notificaciones realmente llegan a un celular real
+            # antes solo se podía simular pidiendo asistencia como si fuera un cliente (2do
+            # dispositivo + PIN de mesa) — ahora hay un botón directo en Ajustes.
+            if path == "/api/admin/push/test":
+                subs_count = len(TYM.get("owner_push_subs", {}).get(vid, []))
+                if not subs_count:
+                    return self._send(400, {"error": "Todavía no hay ninguna suscripción activa en este "
+                                             "dispositivo — activa las notificaciones primero.", "subs": 0})
+                _send_owner_push(vid, "🔔 Notificación de prueba",
+                                  "Si ves esto, las notificaciones están funcionando ✅", "/admin")
+                return self._send(200, {"ok": True, "subs": subs_count})
 
             # ---- Solicitud de asistencia en mesa ----
             if path == "/api/assist":

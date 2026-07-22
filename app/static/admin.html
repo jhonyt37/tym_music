@@ -146,6 +146,7 @@
         <div style="font-weight:700;margin-bottom:4px" id="adminNotifyTitle">🔔 Recibe avisos de asistencia en tu celular</div>
         <div class="small" style="margin-bottom:10px" id="adminNotifySub">Te llega una notificación cuando una mesa pide ayuda, aunque tengas el panel cerrado o la pantalla apagada.</div>
         <button class="btn block" id="adminNotifyBtn">🔔 Activar notificaciones</button>
+        <button type="button" class="btn ghost block sm" style="margin-top:8px" onclick="sendTestPush()">📨 Enviar notificación de prueba</button>
         <!-- Sin devtools a mano en un celular real, esto es lo único que permite ver POR QUÉ
              falló — pensado para sacarle screenshot y mandarlo. -->
         <div class="small" style="margin-top:10px;color:var(--mut)">Detalle técnico (por si algo falla — puedes sacarle captura):</div>
@@ -3791,6 +3792,15 @@ async function reverifyNotifications(){
   _notifyLastFailed=!ok;
   toast(ok?'🔔 Notificaciones activadas':'No se pudo activar — revisa el detalle técnico',ok?'ok':'err');
   renderNotifyStatus();
+}
+// Pedido explícito: antes la única forma de probar que de verdad llega algo era simular un
+// cliente pidiendo asistencia (2do celular + PIN de mesa) — esto manda un push real de prueba
+// directo a este dispositivo con un clic.
+async function sendTestPush(){
+  _pushDebug('Enviando notificación de prueba…');
+  const r=await post('/api/admin/push/test',{});
+  if(r&&r.ok){_pushDebug('✅ Enviada — revisa tu celular en unos segundos (puede tardar un poco).');toast('Notificación de prueba enviada','ok');}
+  else{_pushDebug('❌ '+((r&&r.error)||'No se pudo enviar'));toast((r&&r.error)||'No se pudo enviar','err');}
 }
 
 (async()=>{
