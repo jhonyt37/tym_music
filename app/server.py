@@ -2030,6 +2030,70 @@ def _auto_create_poll_bg(vid, np_id, np_yt, np_artist, history_artists, genre, p
     except Exception:
         pass
 
+def _auto_create_duelo_bg(vid, np_id, np_yt, np_artist, history_artists, genre, played_yts):
+    """Como _auto_create_poll_bg pero arma un DUELO (2 equipos) en vez de una votación de N
+    opciones — pedido explícito: "el duelo también debe ser en ambos modos", mismo criterio de
+    búsqueda en YouTube que ya usa la votación automática de ese modo."""
+    candidates = []
+    seen = set(played_yts)
+    artists = [a for a in ([np_artist] + history_artists) if a]
+    artists = list(dict.fromkeys(artists))[:4]
+    for artist in artists:
+        try:
+            results = yt_search(artist, 6)
+            for r in results:
+                if r["yt"] not in seen:
+                    candidates.append(r)
+                    seen.add(r["yt"])
+                if len(candidates) >= 9:
+                    break
+        except Exception:
+            pass
+        if len(candidates) >= 9:
+            break
+    if len(candidates) < 2:
+        try:
+            for r in yt_search(f"mejores {genre}", 9):
+                if r["yt"] not in seen:
+                    candidates.append(r)
+                    seen.add(r["yt"])
+        except Exception:
+            pass
+    if len(candidates) < 2:
+        return
+    selected = random.sample(candidates[:9], 2)
+    with LOCK:
+        v = VENUES.get(vid)
+        if not v:
+            return
+        if v.get("poll", {}) and v["poll"].get("active"):
+            return
+        if v.get("duelo", {}) and v["duelo"].get("active"):
+            return
+        _v_np = v.get("now_playing")
+        if not _v_np:
+            return
+        duration = _poll_dynamic_duration(_v_np)
+        now = time.time()
+        v["duelo"] = {
+            "teams": [{"yt": s["yt"], "title": s["title"], "artist": s.get("artist", ""),
+                       "label": f"Equipo {i + 1}"} for i, s in enumerate(selected)],
+            "votes": {s["yt"]: set() for s in selected},
+            "active": True,
+            "created_at": now,
+            "ends_at": now + duration,
+            "auto": True,
+            "triggered_by_np_id": np_id,
+        }
+        v["poll_launched_for_id"] = np_id
+        venue_name = v["settings"].get("venue_name", "TYM Music")
+        titles = [s["title"] for s in selected]
+    try:
+        body = f"{titles[0]} 🆚 {titles[1]}"
+        _send_venue_push(vid, f"⚔️ ¡Nuevo duelo en {venue_name}!", body, url=f"/?v={vid}#social")
+    except Exception:
+        pass
+
 def _local_auto_candidate_pool(v, source):
     """Pool de candidatos para votación/duelo automáticos en modo local, según el ajuste
     poll_auto_source (configurable en Ajustes, pedido explícito): "featured" = ÚNICAMENTE
@@ -2327,8 +2391,9 @@ def public_state(token=None, admin=False, mark_dedica=None):
     # todos los ajustes de Ajustes → Auto-lanzamiento). Unificadas en un solo bloque — mismo
     # gate, mismo cooldown, mismo delay, mismo interruptor — solo cambia DE DÓNDE salen las
     # opciones al momento de lanzar (catálogo propio vs. búsqueda en YouTube por artista/género
-    # reciente). poll_auto_source (destacadas/catálogo completo) y el duelo automático siguen
-    # siendo exclusivos de modo local — no existe un "duelo por YouTube".
+    # reciente). Único que sigue siendo exclusivo de modo local: poll_auto_source (destacadas/
+    # catálogo completo) — en modo YouTube no aplica, ahí siempre busca por artista/género
+    # reciente, sea para votación o para duelo.
     # Reglas ya afinadas en rondas anteriores (ver detalle en memoria del proyecto):
     # - "songs_since_local_poll" cuenta cualquier canción de fondo (fallback) desde el último
     #   auto-lanzamiento; la ganadora de una votación/duelo NO cuenta (resetea el contador a 0,
@@ -2349,7 +2414,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         _s = STATE["settings"]
         _is_local_mode = _s.get("content_mode") == "local"
         _poll_auto_on = bool(_s.get("poll_auto_enabled", True))
-        _duelo_auto_on = bool(_s.get("duelo_auto_enabled", False)) and _is_local_mode  # sin duelo por YouTube
+        _duelo_auto_on = bool(_s.get("duelo_auto_enabled", False))
         if np.get("fallback") and (_poll_auto_on or _duelo_auto_on):
             started_ago = time.time() - (np.get("played_at") or np.get("ts") or 0)
             cooldown = max(2, int(_s.get("poll_local_cooldown_songs", 2)))
@@ -2386,12 +2451,12 @@ def public_state(token=None, admin=False, mark_dedica=None):
                         daemon=True
                     ).start()
                 else:
-                    # _launch siempre es "poll" acá (duelo_auto_on se fuerza a False fuera de
-                    # modo local) — busca en YouTube por artista/género reciente, igual que
-                    # antes, solo que ahora respeta el mismo cooldown/delay que el modo local.
+                    # Pedido explícito: "el duelo también debe ser en ambos modos" — busca en
+                    # YouTube por artista/género reciente, igual que la votación de este modo
+                    # (_auto_create_poll_bg), solo que arma 2 equipos en vez de N opciones.
                     _hist_artists = [h.get("artist", "") for h in STATE.get("history", [])[:5]]
                     threading.Thread(
-                        target=_auto_create_poll_bg,
+                        target=_auto_create_poll_bg if _launch == "poll" else _auto_create_duelo_bg,
                         args=(_vid, np["id"], np["yt"], np.get("artist", ""), _hist_artists,
                               _scheduled_genre(), _played),
                         daemon=True
