@@ -219,16 +219,6 @@
       <div id="tableChart"><div class="empty">Sin pedidos registrados hoy.</div></div>
     </div>
 
-    <!-- Código de un solo uso para que una mesa mande una dedicatoria personalizada (no uno
-         de los predeterminados). Se genera aquí para tenerlo a la mano rápido. -->
-    <div class="card" style="margin-bottom:14px">
-      <p class="sec">🔑 Código para dedicatoria personalizada</p>
-      <div class="small" style="color:var(--mut);margin-bottom:10px">Si una mesa quiere mandar un mensaje que no es uno de los predeterminados, genera un código y dáselo — es de un solo uso.</div>
-      <button class="btn block" onclick="genDedicaCode()">Generar código</button>
-      <div id="dedicaCodeResult" style="margin-top:12px"></div>
-      <div id="dedicaCodesRecent" style="margin-top:10px"></div>
-    </div>
-
     <!-- Atenúa (no oculta) la cola/pendientes de las demás mesas para revisar rápido si una
          está pidiendo de más. El dinero (cobros, cuánto debe) vive en Caja/Mesas, no aquí. -->
     <div class="card" style="margin-bottom:14px">
@@ -341,8 +331,20 @@
 
         <div class="card">
           <p class="sec">📢 Anuncios para el TV</p>
-          <div class="small" style="color:var(--mut);margin-bottom:10px">Aparecen como banner en la pantalla del bar. Actívalos/desactívalos en tiempo real.</div>
+          <div class="small" style="color:var(--mut);margin-bottom:10px">Aparecen como banner en la pantalla del bar. Solo puede haber uno activo a la vez — uno nuevo reemplaza al anterior.</div>
           <div id="announcementList" style="margin-bottom:10px"></div>
+
+          <!-- Pedido explícito: mensajes predefinidos para no escribir lo mismo cada vez (ej.
+               "2x1 en mojitos") — un click + una confirmación lo manda directo, con el color/
+               duración que estén elegidos abajo en ese momento. -->
+          <label class="small" style="display:block;margin-bottom:4px">Mensajes predefinidos</label>
+          <div style="display:flex;gap:6px;margin-bottom:6px">
+            <input class="field" id="annPresetInput" maxlength="200" placeholder="Ej: 2x1 en mojitos hasta las 10pm" style="margin:0;flex:1" onkeydown="if(event.key==='Enter'){addAnnouncementPreset();event.preventDefault()}">
+            <button class="btn sm" onclick="addAnnouncementPreset()">+ Agregar</button>
+          </div>
+          <div id="annPresetsAdminList" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px;margin-bottom:14px"></div>
+
+          <label class="small" style="display:block;margin-bottom:4px">O escribe uno nuevo</label>
           <div style="display:flex;gap:6px;flex-wrap:wrap">
             <input class="field" id="annText" placeholder="Ej: 2x1 en mojitos hasta las 10pm" style="margin:0;flex:1;min-width:160px">
             <select class="field" id="annColor" style="margin:0;width:90px;padding:6px 8px">
@@ -361,8 +363,8 @@
             <button class="btn sm" onclick="createAnnouncement()">+ Agregar</button>
           </div>
           <label class="opt" style="margin-top:8px">
-            <div><b>📱 Avisar también a los clientes</b><div class="small">Además del TV, les llega como notificación push (si ya la aceptaron antes) y queda fijo en su tab "Ahora" mientras dure — apagado por defecto, para no molestar en cada anuncio.</div></div>
-            <input type="checkbox" id="annNotifyClients" style="width:22px;height:22px">
+            <div><b>📱 Avisar también a los clientes</b><div class="small">Además del TV, les llega como notificación push (si ya la aceptaron antes) y queda fijo en su tab "Ahora" mientras dure.</div></div>
+            <input type="checkbox" id="annNotifyClients" checked style="width:22px;height:22px">
           </label>
 
           <details class="settingsSection" style="margin-top:14px">
@@ -467,6 +469,48 @@
         <div><b>Modo catálogo local</b><div class="small">En vez de buscar en YouTube, los clientes piden solo del catálogo propio del local (archivos que el bar ya tiene) — evita el bloqueo de embed de YouTube y no depende de un tercero. Al activarlo aparece un tab nuevo "🗂️ Modo local" arriba, donde se conecta la carpeta de música y se administra el catálogo.</div></div>
         <input type="checkbox" id="contentModeLocal" style="width:22px;height:22px">
       </label>
+        </div>
+      </details>
+
+      <!-- Pedido explícito: "no hay en Ajustes una sección para configurar lanzamiento
+           automático de votaciones y duelos" — antes solo existía el cooldown de votación,
+           escondido dentro de la tarjeta de Votación en Social, sin ningún interruptor para
+           prender/apagar cada una por separado. Solo aplica en Modo catálogo local. -->
+      <details class="settingsSection">
+        <summary><span class="sec">🎲 Auto-lanzamiento de votación y duelo</span><span class="chev">▸</span></summary>
+        <div class="secBody">
+      <div class="small" style="color:var(--mut);margin-bottom:14px">Solo aplica en Modo catálogo local: con la cola vacía y sonando la lista del bar, lanza una votación o un duelo cada cierto número de canciones, para reenganchar a los clientes.</div>
+
+      <label class="opt" style="margin-bottom:10px">
+        <div><b>🗳️ Auto-lanzar votación</b><div class="small">Cada N canciones (ver abajo), arma una votación con opciones de la lista del bar.</div></div>
+        <input type="checkbox" id="pollAutoEnabled" style="width:22px;height:22px">
+      </label>
+      <label class="opt" style="margin-bottom:10px">
+        <div><b>⚔️ Auto-lanzar duelo</b><div class="small">Cada N canciones, enfrenta 2 canciones en vez de una votación de varias opciones.</div></div>
+        <input type="checkbox" id="dueloAutoEnabled" style="width:22px;height:22px">
+      </label>
+      <div class="small" style="color:var(--mut);margin-bottom:14px">Si activas las 2, se turnan en orden fijo — votación, duelo, votación... — nunca las 2 a la vez.</div>
+
+      <label class="small" style="display:block;margin-bottom:4px">🎚️ Canciones entre un auto-lanzamiento y el siguiente</label>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">Cuenta cualquier canción que suene (incluida la ganadora del lanzamiento anterior) — evita lanzamientos seguidos sin parar. Default: 2.</div>
+      <input class="field" id="pollAutoCooldownSongs" type="number" min="1" max="20" placeholder="2" style="max-width:140px;margin-bottom:14px">
+
+      <label class="small" style="display:block;margin-bottom:4px">🌟 De dónde salen las opciones</label>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">"Solo destacadas" nunca sale del catálogo que el bar marcó como Recomendadas del local — "cualquier canción" es una sugerencia más amplia, al azar sobre todo el catálogo.</div>
+      <select class="field" id="pollAutoSource" style="max-width:320px;margin-bottom:14px">
+        <option value="featured">Solo destacadas (Recomendadas del local)</option>
+        <option value="catalog">Cualquier canción del catálogo, al azar</option>
+      </select>
+
+      <label class="small" style="display:block;margin-bottom:4px">⏱️ Espera tras arrancar la canción antes de poder lanzar</label>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">Para no competir visualmente con el aviso de "nueva canción" en el TV.</div>
+      <div style="display:flex;gap:6px">
+        <input class="field" id="pollAutoDelayValue" type="number" min="0" style="max-width:100px">
+        <select class="field" id="pollAutoDelayUnit" style="max-width:170px">
+          <option value="secs">segundos</option>
+          <option value="pct">% de la canción</option>
+        </select>
+      </div>
         </div>
       </details>
 
@@ -841,13 +885,11 @@
       <div class="small" style="color:var(--mut);margin-bottom:6px">Si a la canción que suena ahora le queda menos de este % de su duración, no se puede lanzar — ni a mano ni automática. Evita votaciones tan cortas que casi nadie alcanza a votar. Siempre dura hasta que termine la canción actual. Default: 50%.</div>
       <input class="field" id="pollMinRemainingPct" type="number" min="0" max="100" step="5" placeholder="50" style="max-width:140px" onchange="post('/api/admin/settings',{poll_min_remaining_pct:parseInt($('pollMinRemainingPct').value||50)}).then(()=>toast('Guardado','ok'))">
 
-      <!-- Solo aplica en modo local: si la cola queda vacía y suena la lista del bar, se
-           lanza una votación sola para reenganchar a los clientes — este número controla
-           cada cuántas canciones puede repetirse, para que no caiga en un loop de votación
-           tras votación (ej. justo después de que gana una votación). -->
-      <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">🎚️ Modo local: canciones entre una auto-votación y la siguiente</label>
-      <div class="small" style="color:var(--mut);margin-bottom:6px">Con la cola vacía, cuenta cualquier canción que suene (incluida la que ganó la votación anterior) — evita votaciones seguidas sin parar. Default: 2.</div>
-      <input class="field" id="pollLocalCooldownSongs" type="number" min="1" max="20" placeholder="2" style="max-width:140px" onchange="post('/api/admin/settings',{poll_local_cooldown_songs:parseInt($('pollLocalCooldownSongs').value||2)}).then(()=>toast('Guardado','ok'))">
+      <!-- El auto-lanzamiento en modo local (cada cuántas canciones, votación o duelo, destacadas
+           o catálogo completo, delay) se mudó a Ajustes → "🎲 Auto-lanzamiento de votación y
+           duelo" — antes vivía escondido acá adentro, sin ningún interruptor para prender/apagar
+           cada una por separado (pedido explícito). -->
+      <div class="small" style="color:var(--mut);margin-top:14px">🎲 El auto-lanzamiento de votación/duelo en modo local (cada cuántas canciones, de dónde salen las opciones, cuánto esperar) se configura en <b>Ajustes → Auto-lanzamiento de votación y duelo</b>.</div>
     </div>
 
     <!-- Duelo de canciones -->
@@ -920,7 +962,7 @@
     <!-- Dedicatorias -->
     <div class="card">
       <p class="sec">💌 Dedicatorias</p>
-      <div class="small" style="color:var(--mut);margin-bottom:14px">Mensajes enviados entre mesas, o como dedicatoria al pedir una canción. En ambos casos, los predeterminados de abajo pasan siempre directo a TV; cualquier otro mensaje necesita un código de un solo uso — generarlo está en 🎚️ En vivo.</div>
+      <div class="small" style="color:var(--mut);margin-bottom:14px">Mensajes enviados entre mesas, o como dedicatoria al pedir una canción. En ambos casos, los predeterminados de abajo pasan siempre directo a TV; cualquier otro mensaje necesita un código de un solo uso (ver abajo).</div>
 
       <label class="small" style="display:block;margin-bottom:4px">Duración en TV (segundos) — aplica a ambos tipos de dedicatoria</label>
       <input class="field" id="dedicaDisplaySecs" type="number" min="2" max="30" style="max-width:120px;margin-bottom:14px" onchange="post('/api/admin/settings',{dedica_display_secs:parseInt($('dedicaDisplaySecs').value||5)}).then(()=>toast('Guardado','ok'))">
@@ -933,6 +975,20 @@
       <div id="dedicaPresetsAdminList" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px;margin-bottom:14px"></div>
 
       <div id="dedicaAdminList"><div class="empty">Sin dedicatorias aún.</div></div>
+
+      <!-- Pedido explícito: esto vivía como su propia tarjeta grande al TOPE del tab En vivo
+           (el más usado) — algo que se usa rara vez (solo cuando alguien quiere mandar un
+           mensaje que no es uno de los predeterminados) no necesita tanta visibilidad. Se
+           mueve acá, colapsado, junto al resto de la configuración de dedicatorias. -->
+      <details class="settingsSection" style="margin-top:14px">
+        <summary><span class="sec">🔑 Código para dedicatoria personalizada</span><span class="chev">▸</span></summary>
+        <div class="secBody">
+          <div class="small" style="color:var(--mut);margin-bottom:10px">Si una mesa quiere mandar un mensaje que no es uno de los predeterminados, genera un código y dáselo — es de un solo uso.</div>
+          <button class="btn block" onclick="genDedicaCode()">Generar código</button>
+          <div id="dedicaCodeResult" style="margin-top:12px"></div>
+          <div id="dedicaCodesRecent" style="margin-top:10px"></div>
+        </div>
+      </details>
     </div>
 
     <!-- Asistencia: motivos rápidos — pedido explícito: que el aviso de asistencia le llegue
@@ -1414,6 +1470,12 @@ async function save(){
     time_pass:{minutes:parseInt($('passMin').value||30),price:parseInt($('passPrice').value||0)},
     allow_skip_vote:$('allowSkipVote').checked,
     music_only:$('musicOnly').checked,
+    poll_auto_enabled:$('pollAutoEnabled').checked,
+    duelo_auto_enabled:$('dueloAutoEnabled').checked,
+    poll_local_cooldown_songs:parseInt($('pollAutoCooldownSongs').value||2),
+    poll_auto_source:$('pollAutoSource').value,
+    poll_auto_delay_unit:$('pollAutoDelayUnit').value,
+    poll_auto_delay_value:parseInt($('pollAutoDelayValue').value||20),
     schedule:_schedule};
   if(tymLogoData)payload.tym_logo=tymLogoData;
   if(venueLogoData)payload.venue_logo=venueLogoData;
@@ -2974,8 +3036,15 @@ async function tick(){
       renderDedicaPresetsAdmin();
       _assistPresetsCache=Array.isArray(s.settings.assist_presets)?[...s.settings.assist_presets]:[];
       renderAssistPresetsAdmin();
+      _announcementPresetsCache=Array.isArray(s.settings.announcement_presets)?[...s.settings.announcement_presets]:[];
+      renderAnnouncementPresetsAdmin();
       if($('pollMinRemainingPct'))$('pollMinRemainingPct').value=s.settings.poll_min_remaining_pct!=null?s.settings.poll_min_remaining_pct:50;
-      if($('pollLocalCooldownSongs'))$('pollLocalCooldownSongs').value=s.settings.poll_local_cooldown_songs!=null?s.settings.poll_local_cooldown_songs:2;
+      if($('pollAutoEnabled'))$('pollAutoEnabled').checked=s.settings.poll_auto_enabled!==false;
+      if($('dueloAutoEnabled'))$('dueloAutoEnabled').checked=!!s.settings.duelo_auto_enabled;
+      if($('pollAutoCooldownSongs'))$('pollAutoCooldownSongs').value=s.settings.poll_local_cooldown_songs!=null?s.settings.poll_local_cooldown_songs:2;
+      if($('pollAutoSource'))$('pollAutoSource').value=s.settings.poll_auto_source||'featured';
+      if($('pollAutoDelayUnit'))$('pollAutoDelayUnit').value=s.settings.poll_auto_delay_unit||'secs';
+      if($('pollAutoDelayValue'))$('pollAutoDelayValue').value=s.settings.poll_auto_delay_value!=null?s.settings.poll_auto_delay_value:20;
       if($('lovedResetHour'))$('lovedResetHour').value=s.settings.loved_reset_hour!=null?s.settings.loved_reset_hour:9;
       if($('lovedResetInterval'))$('lovedResetInterval').value=s.settings.loved_reset_interval_hours||24;
       _schedule=Array.isArray(s.settings.schedule)?JSON.parse(JSON.stringify(s.settings.schedule)):[];
@@ -3828,7 +3897,47 @@ async function createAnnouncement(){
   const notify_clients=!!($('annNotifyClients')&&$('annNotifyClients').checked);
   if(!text){toast('Escribe el texto del anuncio','err');return;}
   const j=await post('/api/admin/announcement',{action:'create',text,color,duration_secs,notify_clients});
-  if(j.ok){$('annText').value='';if($('annNotifyClients'))$('annNotifyClients').checked=false;renderAnnouncements(j.announcements);toast('Anuncio creado ✓','ok');}
+  if(j.ok){$('annText').value='';renderAnnouncements(j.announcements);toast('Anuncio creado ✓','ok');}
+  else toast(j.error||'Error','err');
+}
+// Mensajes predefinidos de anuncios — a diferencia de los presets de dedicatoria/asistencia
+// (que solo agregan un chip para elegir después en otra parte), acá el click en el chip manda
+// el anuncio DE UNA, con una confirmación de por medio (pedido explícito: "un click y una
+// confirmación") — usa el color/duración que estén elegidos en ese momento en el formulario.
+let _announcementPresetsCache=[];
+function renderAnnouncementPresetsAdmin(){
+  const box=$('annPresetsAdminList');if(!box)return;
+  box.innerHTML='';
+  if(!_announcementPresetsCache.length){box.innerHTML='<div class="empty" style="font-size:12px">Sin mensajes predefinidos todavía.</div>';return;}
+  _announcementPresetsCache.forEach(p=>{
+    const t=document.createElement('span');t.className='kwtag allowed';t.style.cursor='pointer';
+    t.title='Click para enviar este anuncio';
+    t.innerHTML=`${esc(p)}<button title="Eliminar">×</button>`;
+    t.querySelector('button').onclick=e=>{e.stopPropagation();removeAnnouncementPreset(p);};
+    t.addEventListener('click',e=>{if(e.target.tagName!=='BUTTON')sendAnnouncementPreset(p);});
+    box.appendChild(t);
+  });
+}
+async function addAnnouncementPreset(){
+  const inp=$('annPresetInput');
+  const text=(inp.value||'').trim();
+  if(!text)return;
+  const j=await post('/api/admin/announcement_presets',{action:'add',text});
+  _announcementPresetsCache=j.announcement_presets||_announcementPresetsCache;
+  inp.value='';renderAnnouncementPresetsAdmin();
+}
+async function removeAnnouncementPreset(text){
+  const j=await post('/api/admin/announcement_presets',{action:'remove',text});
+  _announcementPresetsCache=j.announcement_presets||_announcementPresetsCache;
+  renderAnnouncementPresetsAdmin();
+}
+async function sendAnnouncementPreset(text){
+  if(!confirm('¿Enviar este anuncio a la pantalla del bar?\n\n"'+text+'"'))return;
+  const color=$('annColor')&&$('annColor').value||'#f59e0b';
+  const duration_secs=Number(($('annDuration')&&$('annDuration').value)||120);
+  const notify_clients=!!($('annNotifyClients')&&$('annNotifyClients').checked);
+  const j=await post('/api/admin/announcement',{action:'create',text,color,duration_secs,notify_clients});
+  if(j.ok){renderAnnouncements(j.announcements);toast('Anuncio enviado ✓','ok');}
   else toast(j.error||'Error','err');
 }
 async function toggleAnnouncement(id){

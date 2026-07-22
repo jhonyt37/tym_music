@@ -540,6 +540,8 @@ def make_venue(name):
                 "🗣️ Acércate para hablar",
                 "🧾 Dame la cuenta",
             ],
+            "announcement_presets": [],    # mensajes predefinidos de anuncios TV — un click +
+                                            # confirmación en vez de escribir el mismo texto siempre
             "fallback_shuffle": True,       # lista del local en orden aleatorio
             "theme": "azul",               # tema de color: azul | purpura | verde | rojo | dorado | rosa
             "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
@@ -560,9 +562,21 @@ def make_venue(name):
                                             # que poll_duration_secs arriba (nunca se usaba para
                                             # la duración real, ya era dinámica).
             "poll_local_cooldown_songs": 2,  # modo local: canciones que deben sonar (de
-                                              # cualquier tipo) entre una auto-votación y la
-                                              # siguiente — evita un loop de votación tras
-                                              # votación sin parar.
+                                              # cualquier tipo) entre un auto-lanzamiento y el
+                                              # siguiente (votación O duelo, ajuste compartido) —
+                                              # evita un loop de lanzamientos sin parar.
+            "poll_auto_enabled": True,      # modo local: auto-lanzar VOTACIÓN cada N canciones
+            "duelo_auto_enabled": False,    # modo local: auto-lanzar DUELO cada N canciones —
+                                              # apagado por defecto (feature nueva, no debe
+                                              # sorprender a un bar que ya estaba en producción)
+            "poll_auto_source": "featured", # de dónde salen las opciones automáticas: "featured"
+                                              # (solo destacadas — nunca fuera de esa lista) o
+                                              # "catalog" (cualquier canción del catálogo local,
+                                              # al azar, como sugerencia más amplia)
+            "poll_auto_delay_unit": "secs", # unidad del respiro tras arrancar la canción antes
+                                              # de poder auto-lanzar: "secs" o "pct" (% de la
+                                              # duración de la canción actual)
+            "poll_auto_delay_value": 20,    # valor numérico en la unidad elegida arriba
             "schedule": [],                # [{from:"HH:MM", to:"HH:MM", genre:str, label:str}]
             "timezone": DEFAULT_TZ,         # zona horaria IANA del local (ej: "America/Bogota")
             "loved_reset_hour": 9,          # hora local (0-23) del reinicio automático diario
@@ -1701,7 +1715,6 @@ def priority_abuse_preview(table, now, kind):
 # pagado (nadie puede colarse antes de quien pagó por sonar de primera).
 POLL_CLOSE_BUFFER_SECS = 8
 POLL_MIN_DURATION_SECS = 20
-POLL_LOCAL_DELAY_SECS = 20  # espera tras arrancar la canción antes de poder auto-lanzar votación
 
 def _poll_gate_error():
     np = STATE.get("now_playing")
@@ -2017,7 +2030,20 @@ def _auto_create_poll_bg(vid, np_id, np_yt, np_artist, history_artists, genre, p
     except Exception:
         pass
 
-def _auto_create_local_poll_bg(vid, np_id, played_yts):
+def _local_auto_candidate_pool(v, source):
+    """Pool de candidatos para votación/duelo automáticos en modo local, según el ajuste
+    poll_auto_source (configurable en Ajustes, pedido explícito): "featured" = ÚNICAMENTE
+    destacadas/"Recomendadas del local" (nunca fuera de esa lista — antes era el único
+    comportamiento, tras el bug reportado "salen recomendaciones fuera del catálogo destacado")
+    o "catalog" = cualquier canción del catálogo local, al azar, como sugerencia más amplia
+    (opt-in explícito del admin, ya no es el default)."""
+    local_pool = [c for c in v.get("curated", [])
+                  if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")]
+    if source == "catalog":
+        return local_pool
+    return [c for c in local_pool if c.get("featured")]
+
+def _auto_create_local_poll_bg(vid, np_id, played_yts, source="featured"):
     """Como _auto_create_poll_bg pero para modo local: selecciona candidatos del propio
     catálogo (STATE["curated"]) en vez de buscar en YouTube — un bar en modo local
     deliberadamente no quiere contenido externo, ni siquiera para la votación de reenganche."""
@@ -2030,20 +2056,12 @@ def _auto_create_local_poll_bg(vid, np_id, played_yts):
         # comparar poll_launched_for_id contra el np_id que el propio disparador ya guardó.
         if v.get("poll", {}) and v["poll"].get("active"):
             return
+        if v.get("duelo", {}) and v["duelo"].get("active"):
+            return
         _v_np = v.get("now_playing")
         if not _v_np:
             return  # la canción fallback que disparó esto ya cambió — nada a lo cual atarse
-        # Pedido explícito: las opciones deben salir ÚNICAMENTE de las canciones PREFERIDAS del
-        # bar (destacadas/"Recomendadas del local", mismo flag "featured" que ya usa el fallback
-        # de fondo) — nunca de cualquier cosa del catálogo entero. Antes, si el bar no había
-        # destacado (casi) nada, esto caía al catálogo completo para "nunca dejar de ofrecer una
-        # votación" — pero eso es justo lo que se reportó como bug ("salen recomendaciones fuera
-        # del catálogo destacado"): mejor no lanzar votación automática que lanzarla con
-        # canciones fuera de esa lista. El admin sigue pudiendo lanzar una votación manual con
-        # cualquier canción cuando quiera, esto solo afecta la automática.
-        local_pool = [c for c in v.get("curated", [])
-                      if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")]
-        base = [c for c in local_pool if c.get("featured")]
+        base = _local_auto_candidate_pool(v, source)
         if len(base) < 2:
             return
         pool = [c for c in base if c["yt"] not in played_yts]
@@ -2070,6 +2088,49 @@ def _auto_create_local_poll_bg(vid, np_id, played_yts):
     try:
         body = "Elige entre: " + ", ".join(opts_titles)
         _send_venue_push(vid, f"🗳️ ¡Nueva votación en {venue_name}!", body, url=f"/?v={vid}#social")
+    except Exception:
+        pass
+
+def _auto_create_local_duelo_bg(vid, np_id, played_yts, source="featured"):
+    """Como _auto_create_local_poll_bg pero arma un DUELO (2 equipos, 1 canción cada uno) en vez
+    de una votación de N opciones — pedido explícito: la misma auto-alternancia por N canciones
+    debería poder lanzar duelo, no solo votación, con el mismo criterio de selección."""
+    with LOCK:
+        v = VENUES.get(vid)
+        if not v:
+            return
+        if v.get("poll", {}) and v["poll"].get("active"):
+            return
+        if v.get("duelo", {}) and v["duelo"].get("active"):
+            return
+        _v_np = v.get("now_playing")
+        if not _v_np:
+            return
+        base = _local_auto_candidate_pool(v, source)
+        if len(base) < 2:
+            return
+        pool = [c for c in base if c["yt"] not in played_yts]
+        if len(pool) < 2:
+            pool = base
+        selected = random.sample(pool, 2)
+        duration = _poll_dynamic_duration(_v_np)
+        now = time.time()
+        v["duelo"] = {
+            "teams": [{"yt": s["yt"], "title": s["title"], "artist": s.get("artist", ""),
+                       "label": f"Equipo {i + 1}"} for i, s in enumerate(selected)],
+            "votes": {s["yt"]: set() for s in selected},
+            "active": True,
+            "created_at": now,
+            "ends_at": now + duration,
+            "auto": True,
+            "triggered_by_np_id": np_id,
+        }
+        v["poll_launched_for_id"] = np_id
+        venue_name = v["settings"].get("venue_name", "TYM Music")
+        titles = [s["title"] for s in selected]
+    try:
+        body = f"{titles[0]} 🆚 {titles[1]}"
+        _send_venue_push(vid, f"⚔️ ¡Nuevo duelo en {venue_name}!", body, url=f"/?v={vid}#social")
     except Exception:
         pass
 
@@ -2282,46 +2343,63 @@ def public_state(token=None, admin=False, mark_dedica=None):
                 daemon=True
             ).start()
 
-    # ---- Poll: auto-lanzar cuando "la lista del local" lleva sonando sola (modo local) ----
-    # Pedido explícito, con 2 rondas de ajuste tras probarlo en vivo:
+    # ---- Poll/Duelo: auto-lanzar cuando "la lista del local" lleva sonando sola (modo local) ----
+    # Pedido explícito, con varias rondas de ajuste tras probarlo en vivo (ver historial en
+    # memoria del proyecto para el detalle de cada bug encontrado en el camino):
     # 1) el disparador original de arriba EXCLUYE canciones fallback a propósito (busca en
     #    YouTube, no aplica sin un pedido real detrás) — esta rama es la versión "modo local"
     #    de esa misma idea, con su propio candidato (el catálogo del bar, no YouTube).
-    # 2) "songs_since_local_poll" cuenta CUALQUIER canción que suene (fallback o no) desde la
-    #    última auto-votación local — no solo canciones fallback consecutivas. Esto es lo que
-    #    evita el loop reportado en vivo: la canción ganadora de una votación NO es fallback
-    #    (table="Votación 🗳️"), así que si solo se contaran fallbacks, el contador se hubiera
-    #    reiniciado a 0 apenas esa ganadora empezara a sonar, y la siguiente canción fallback
-    #    (la primera después de la votación) ya hubiera vuelto a disparar otra — votación tras
-    #    votación sin parar. Contando TODAS las canciones, la ganadora también cuenta para el
-    #    cooldown antes de poder lanzar la próxima.
-    # 3) "started_ago >= POLL_LOCAL_DELAY_SECS": lanzar la votación en el mismo instante en que
-    #    arranca la canción competía visualmente con la animación/aviso de "nueva canción". Un
-    #    delay de 8s se reportó como "sigue sintiéndose instantáneo" — 8s es casi imperceptible
-    #    para alguien mirando el TV de reojo; se sube a 20s para que el respiro sea inconfundible.
+    # 2) "songs_since_local_poll" cuenta CUALQUIER canción que suene (fallback o no) desde el
+    #    último auto-lanzamiento (votación O duelo, cooldown compartido) — no solo canciones
+    #    fallback consecutivas, para no caer en un loop de lanzamientos sin parar cuando el
+    #    ganador (no fallback) empieza a sonar.
+    # 3) El delay tras arrancar la canción (settings.poll_auto_delay_unit/_value, antes fijo en
+    #    8s y luego 20s) ahora es configurable por el admin en Ajustes — en segundos o en % de
+    #    la duración de la canción actual.
+    # 4) poll_auto_enabled/duelo_auto_enabled: cada una con su propio interruptor (pedido
+    #    explícito, "En vivo cada una debería tener un check"). Si ambas están activas, se
+    #    alternan en orden fijo (votación, duelo, votación...) — auto_alt_turn guarda a cuál le
+    #    toca la próxima vez. Si solo una está activa, siempre es esa.
     if np:
         if STATE.get("last_song_id_seen") != np["id"]:
             STATE["last_song_id_seen"] = np["id"]
             STATE["songs_since_local_poll"] = STATE.get("songs_since_local_poll", 0) + 1
-        started_ago = time.time() - (np.get("played_at") or np.get("ts") or 0)
-        cooldown = max(1, int(STATE["settings"].get("poll_local_cooldown_songs", 2)))
-        if (np.get("fallback")
-                and STATE["settings"].get("content_mode") == "local"
-                and STATE.get("songs_since_local_poll", 0) >= cooldown
-                and started_ago >= POLL_LOCAL_DELAY_SECS
-                and not (_p and _p.get("active"))
-                and STATE.get("poll_launched_for_id") != np["id"]
-                and _poll_gate_error() is None):
-            STATE["poll_launched_for_id"] = np["id"]
-            STATE["songs_since_local_poll"] = 0
-            _played = ({np["yt"]} | {h["yt"] for h in STATE.get("history", [])}
-                       | {i["yt"] for i in STATE.get("items", [])})
-            _vid = CUR_VID
-            threading.Thread(
-                target=_auto_create_local_poll_bg,
-                args=(_vid, np["id"], _played),
-                daemon=True
-            ).start()
+        _s = STATE["settings"]
+        _poll_auto_on = bool(_s.get("poll_auto_enabled", True))
+        _duelo_auto_on = bool(_s.get("duelo_auto_enabled", False))
+        if (np.get("fallback") and _s.get("content_mode") == "local"
+                and (_poll_auto_on or _duelo_auto_on)):
+            started_ago = time.time() - (np.get("played_at") or np.get("ts") or 0)
+            cooldown = max(1, int(_s.get("poll_local_cooldown_songs", 2)))
+            _delay_unit = _s.get("poll_auto_delay_unit", "secs")
+            _delay_value = _s.get("poll_auto_delay_value", 20)
+            if _delay_unit == "pct":
+                _np_dur = np.get("duration") or DEFAULT_DUR
+                _delay_secs = _np_dur * max(0, min(100, _delay_value)) / 100
+            else:
+                _delay_secs = max(0, _delay_value)
+            if (STATE.get("songs_since_local_poll", 0) >= cooldown
+                    and started_ago >= _delay_secs
+                    and not (_p and _p.get("active"))
+                    and not (_d and _d.get("active"))
+                    and STATE.get("poll_launched_for_id") != np["id"]
+                    and _poll_gate_error() is None):
+                if _poll_auto_on and _duelo_auto_on:
+                    _launch = STATE.get("auto_alt_turn", "poll")
+                    STATE["auto_alt_turn"] = "duelo" if _launch == "poll" else "poll"
+                else:
+                    _launch = "poll" if _poll_auto_on else "duelo"
+                STATE["poll_launched_for_id"] = np["id"]
+                STATE["songs_since_local_poll"] = 0
+                _played = ({np["yt"]} | {h["yt"] for h in STATE.get("history", [])}
+                           | {i["yt"] for i in STATE.get("items", [])})
+                _vid = CUR_VID
+                _source = _s.get("poll_auto_source", "featured")
+                threading.Thread(
+                    target=_auto_create_local_poll_bg if _launch == "poll" else _auto_create_local_duelo_bg,
+                    args=(_vid, np["id"], _played, _source),
+                    daemon=True
+                ).start()
 
     # ---- Poll (estado público) ----
     _p = STATE.get("poll")
@@ -2404,12 +2482,14 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "venue_logo", "max_priority_queue_min", "max_song_duration_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_min_remaining_pct", "poll_local_cooldown_songs",
+                                       "poll_auto_enabled", "duelo_auto_enabled", "poll_auto_source",
+                                       "poll_auto_delay_unit", "poll_auto_delay_value",
                                        "loved_reset_hour", "loved_reset_interval_hours",
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
                                        "show_tym_brand", "music_only", "content_mode",
                                        "song_message_moderation", "dedica_price", "dedica_display_secs",
                                        "dedica_presets", "allow_self_react", "dedica_code_expiry_min",
-                                       "assist_presets")},
+                                       "assist_presets", "announcement_presets")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
@@ -3134,7 +3214,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
                        "/api/admin/reset_loved",
                        "/api/admin/duelo", "/api/admin/duelo/close",
-                       "/api/admin/announcement", "/api/admin/show_qr",
+                       "/api/admin/announcement", "/api/admin/announcement_presets", "/api/admin/show_qr",
                        "/api/admin/dedica/delete", "/api/admin/dedica/approve", "/api/admin/dedica/reject",
                        "/api/admin/dedica_presets", "/api/admin/dedica_codes", "/api/admin/assist_presets",
                        "/api/admin/song_message/approve", "/api/admin/song_message/reject",
@@ -3942,6 +4022,17 @@ class H(BaseHTTPRequestHandler):
                 if "poll_local_cooldown_songs" in d:
                     try: s["poll_local_cooldown_songs"] = max(1, min(20, int(d["poll_local_cooldown_songs"])))
                     except Exception: pass
+                if "poll_auto_enabled" in d:
+                    s["poll_auto_enabled"] = bool(d["poll_auto_enabled"])
+                if "duelo_auto_enabled" in d:
+                    s["duelo_auto_enabled"] = bool(d["duelo_auto_enabled"])
+                if "poll_auto_source" in d and d["poll_auto_source"] in ("featured", "catalog"):
+                    s["poll_auto_source"] = d["poll_auto_source"]
+                if "poll_auto_delay_unit" in d and d["poll_auto_delay_unit"] in ("secs", "pct"):
+                    s["poll_auto_delay_unit"] = d["poll_auto_delay_unit"]
+                if "poll_auto_delay_value" in d:
+                    try: s["poll_auto_delay_value"] = max(0, min(600, int(d["poll_auto_delay_value"])))
+                    except Exception: pass
                 if "loved_reset_hour" in d:
                     try: s["loved_reset_hour"] = max(0, min(23, int(d["loved_reset_hour"])))
                     except Exception: pass
@@ -4041,19 +4132,34 @@ class H(BaseHTTPRequestHandler):
                            "color": str(d.get("color", "#f59e0b"))[:20],
                            "created_at": now, "active": True, "notify_clients": notify,
                            "duration_secs": duration_secs, "expires_at": now + duration_secs}
+                    # Pedido explícito: "solo debe permitir enviar de a un mensaje" — antes
+                    # varios anuncios podían quedar activos a la vez y el TV los rotaba entre sí
+                    # (renderAnnouncementsTV, cada 8s) — confuso para algo pensado como "esto es
+                    # lo que está pasando AHORA". Un anuncio nuevo desactiva cualquier otro que
+                    # siguiera activo; el historial de los viejos se conserva igual.
+                    for _a in STATE.get("announcements", []):
+                        _a["active"] = False
                     STATE.setdefault("announcements", []).append(ann)
                     if notify:
                         venue_name = STATE["settings"].get("venue_name", "TYM Music")
                         _send_venue_push(vid, f"📢 {venue_name}", text, url=f"/?v={vid}#ahora")
                 elif act == "toggle":
                     aid = d.get("id")
+                    turning_on = None
                     for a in STATE.get("announcements", []):
                         if a["id"] == aid:
                             a["active"] = not a.get("active", True)
+                            turning_on = a["active"]
                             if a["active"]:
                                 # Reactivar (ej. tras expirar) refresca el tiempo restante en
                                 # vez de mostrarlo ya vencido de nuevo.
                                 a["expires_at"] = time.time() + a.get("duration_secs", 120)
+                    # Mismo criterio que "create": si esto se está reactivando, apaga cualquier
+                    # otro que siguiera activo — nunca 2 a la vez.
+                    if turning_on:
+                        for a in STATE.get("announcements", []):
+                            if a["id"] != aid:
+                                a["active"] = False
                 elif act == "delete":
                     aid = d.get("id")
                     STATE["announcements"] = [a for a in STATE.get("announcements", [])
@@ -4464,6 +4570,20 @@ class H(BaseHTTPRequestHandler):
                 elif act == "remove":
                     STATE["settings"]["assist_presets"] = [p for p in presets if p != d.get("text")]
                 return self._send(200, {"ok": True, "assist_presets": STATE["settings"]["assist_presets"]})
+
+            # Pedido explícito: mensajes predefinidos para anuncios del TV, mismo patrón que
+            # dedica_presets/assist_presets — un click + una confirmación en vez de escribir el
+            # mismo texto de siempre (ej. "2x1 en mojitos") cada vez.
+            if path == "/api/admin/announcement_presets":
+                act = d.get("action")
+                presets = STATE["settings"].setdefault("announcement_presets", [])
+                if act == "add":
+                    text = str(d.get("text") or "").strip()[:200]
+                    if text and text not in presets and len(presets) < 20:
+                        presets.append(text)
+                elif act == "remove":
+                    STATE["settings"]["announcement_presets"] = [p for p in presets if p != d.get("text")]
+                return self._send(200, {"ok": True, "announcement_presets": STATE["settings"]["announcement_presets"]})
 
             if path == "/api/admin/dedica_codes":
                 if d.get("action") == "generate":
