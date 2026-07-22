@@ -2414,7 +2414,7 @@ async function poll(){
       toast('🗳️ ¡Nueva votación! Toca para ir a votar','ok',4000,()=>showTab('social'));
       _triggerPushVote('🗳️ ¡Nueva votación TYM!',
         (s.poll.options||[]).length?'Elige entre: '+s.poll.options.slice(0,3).map(o=>o.title).join(', '):'¡Vota por la próxima canción!',
-        'tym-poll');
+        'tym-poll','social');
       if(!onSocialTab)$('badgePoll').style.display='';
     }
     _lastPollActive=_pollNowActive;
@@ -2424,7 +2424,7 @@ async function poll(){
       const teams=s.duelo.teams||[];
       _triggerPushVote('⚔️ ¡Nuevo duelo TYM!',
         teams.length===2?teams[0].title+' vs '+teams[1].title:'¡Vota por tu favorita!',
-        'tym-duelo');
+        'tym-duelo','social');
       if(!onSocialTab)$('badgePoll').style.display='';
     }
     _lastDueloActive=_dueloNowActive;
@@ -2440,7 +2440,7 @@ async function poll(){
       // Pedido explícito: el toast del anuncio no era clickeable — mismo patrón que ya usan
       // votación/duelo (4to parámetro onClick), lleva directo al tab "Ahora" donde queda fijo.
       toast('📢 '+a.text,'ok',5000,()=>showTab('ahora'));
-      _triggerPushVote('📢 '+(s.settings.venue_name||'TYM Music'),a.text,'tym-ann-'+a.id);
+      _triggerPushVote('📢 '+(s.settings.venue_name||'TYM Music'),a.text,'tym-ann-'+a.id,'ahora');
     });
     const annCard=$('clientAnnCard');
     if(clientAnns.length){
@@ -2493,6 +2493,16 @@ async function voteSkip(){
 }
 // ---------- Web Push / Notificaciones ----------
 let _swReg=null,_pushSubscribed=false;
+// Adónde debe caer un clic en la notificación según su ancla (#social / #ahora) — pedido
+// explícito: un anuncio del bar debe caer en "Ahora", una votación/duelo en "Social", no
+// siempre el mismo tab. Se usa tanto para el mensaje del service worker (pestaña ya abierta)
+// como para una pestaña NUEVA que arranca directo desde el link de la notificación.
+function _navigateFromNotificationUrl(url){
+  try{
+    const hash=new URL(url,location.origin).hash.replace('#','');
+    if(hash==='ahora'||hash==='social')showTab(hash);
+  }catch(e){}
+}
 async function _initSW(){
   if(!('serviceWorker' in navigator))return;
   try{
@@ -2506,15 +2516,27 @@ async function _initSW(){
     // permiso SÍ estuviera concedido — "el permiso está pero no llega nada". Ahora se confirma/
     // renueva sola apenas el service worker está listo, sin depender de ningún evento.
     if('Notification' in window&&Notification.permission==='granted')_subscribePush();
+    // El service worker manda esto cuando el cliente toca una notificación y esta misma
+    // pestaña ya estaba abierta — antes nada escuchaba este mensaje (index.html no tenía
+    // NINGÚN listener, a diferencia de admin.html que sí), así que el clic no llevaba a
+    // ningún lado aunque la pestaña se enfocara.
+    navigator.serviceWorker.addEventListener('message',e=>{
+      if(e.data&&e.data.type==='tym-notification-click')_navigateFromNotificationUrl(e.data.url);
+    });
   }catch(e){}
 }
 // Compartida entre poll y duelo — antes solo existía para poll (_triggerPushPoll), el duelo
 // nunca avisaba fuera de la app aunque es el mismo tipo de "ven a votar".
-async function _triggerPushVote(title,body,tag){
+// tab: a qué tab debe caer el cliente al tocar la notificación — pedido explícito: un anuncio
+// del bar cae en "Ahora" (donde vive el banner fijo), una votación/duelo cae en "Social" (donde
+// se vota). Antes esto quedaba SIEMPRE en #social sin importar el tipo — un anuncio con push
+// llevaba al lugar equivocado.
+async function _triggerPushVote(title,body,tag,tab){
+  tab=tab||'social';
   if(!('Notification' in window))return;
   // Pedir permiso si no se ha dado
   if(Notification.permission==='default'){
-    Notification.requestPermission().then(p=>{if(p==='granted'){_subscribePush();_triggerPushVote(title,body,tag);}});
+    Notification.requestPermission().then(p=>{if(p==='granted'){_subscribePush();_triggerPushVote(title,body,tag,tab);}});
     return;
   }
   if(Notification.permission!=='granted')return;
@@ -2524,7 +2546,7 @@ async function _triggerPushVote(title,body,tag){
       await _swReg.showNotification(title,{
         body,icon:'/icon-192.png',badge:'/icon-192.png',
         tag,renotify:true,
-        data:{url:location.href.replace(/#.*/,'')+'#social'}
+        data:{url:location.href.replace(/#.*/,'')+'#'+tab}
       });
       return;
     }catch(e){}
@@ -2564,6 +2586,11 @@ function _urlB64ToUint8Array(b64){
 }
 _initSW();
 renderClientNotifyStatus();
+// Si esta pestaña arrancó directo desde el link de una notificación (el service worker abre
+// una pestaña nueva con clients.openWindow() cuando no encuentra ninguna ya abierta), el hash
+// ya viene en la URL desde el primer momento — sin esto, una pestaña nueva se quedaba siempre
+// en el tab "Pedir" (el de por defecto) sin importar de qué notificación venía.
+if(location.hash)_navigateFromNotificationUrl(location.href);
 boot();
 // Refresca la sesión cada 5 min: si el servidor la perdió (reinicio), vuelve a pedir PIN
 setInterval(async()=>{

@@ -1983,7 +1983,7 @@ def _auto_create_poll_bg(vid, np_id, np_yt, np_artist, history_artists, genre, p
     # Enviar push fuera del lock
     try:
         body = "Elige entre: " + ", ".join(opts_titles)
-        _send_venue_push(vid, f"🗳️ ¡Nueva votación en {venue_name}!", body)
+        _send_venue_push(vid, f"🗳️ ¡Nueva votación en {venue_name}!", body, url=f"/?v={vid}#social")
     except Exception:
         pass
 
@@ -3854,7 +3854,7 @@ class H(BaseHTTPRequestHandler):
                     STATE.setdefault("announcements", []).append(ann)
                     if notify:
                         venue_name = STATE["settings"].get("venue_name", "TYM Music")
-                        _send_venue_push(vid, f"📢 {venue_name}", text)
+                        _send_venue_push(vid, f"📢 {venue_name}", text, url=f"/?v={vid}#ahora")
                 elif act == "toggle":
                     aid = d.get("id")
                     for a in STATE.get("announcements", []):
