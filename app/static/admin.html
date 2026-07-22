@@ -1015,6 +1015,17 @@ function showTab(id){
   document.getElementById('tbtn-'+id).classList.add('active');
   try{sessionStorage.setItem('adminTab',id);}catch(e){}
   if(id==='caja')loadHistory(3);
+  // Pedido explícito: entrar a "En vivo" (clic directo en el tab, no solo por notificación) con
+  // asistencias pendientes debe llevar derecho a esa tarjeta, no solo a la parte de arriba del
+  // tab — antes solo pasaba viniendo de una notificación de asistencia (focusAssist()).
+  if(id==='live'&&_lastAssists.length)highlightAssistCard();
+}
+function highlightAssistCard(){
+  const card=$('assistCard');
+  if(!card)return;
+  card.scrollIntoView({behavior:'smooth',block:'center'});
+  card.style.transition='box-shadow .3s';card.style.boxShadow='0 0 0 3px var(--pri)';
+  setTimeout(()=>{card.style.boxShadow='';},2200);
 }
 
 const THEMES={
@@ -2720,7 +2731,7 @@ async function tick(){
     renderCustomers(s.customers||[]);
 
     // Asistencia
-    const assists=s.assists||[];$('acount').textContent=assists.length;
+    const assists=s.assists||[];_lastAssists=assists;$('acount').textContent=assists.length;
     const ac=$('assistCard'),al=$('assistList');
     if(assists.length){
       ac.style.display='';al.innerHTML='';
@@ -3025,7 +3036,7 @@ async function tick(){
 // _seenAlertIds arranca en null: en el primer tick (recién cargada la página) no se avisa de
 // nada, solo se toma como línea base — si no, al abrir el panel con pedidos ya pendientes se
 // dispararían toasts de golpe por cosas que el admin ya sabía que estaban ahí.
-let _seenAlertIds=null,_seenPollClosing=false,_seenDueloClosing=false;
+let _seenAlertIds=null,_seenPollClosing=false,_seenDueloClosing=false,_lastAssists=[];
 function _checkNewAlerts(pend,assists,dedsPending,songMsgsPending,pollClosing,dueloClosing){
   const ids=new Set([
     ...pend.map(p=>'req:'+p.id),
@@ -3597,7 +3608,14 @@ async function _subscribeAdminPush(){
     const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_urlB64ToUint8Array(public_key)});
     await post('/api/admin/push/subscribe',{subscription:sub.toJSON()});
     return true;
-  }catch(e){return false;}
+  }catch(e){
+    // Reportado "no llega la notificación push" sin más detalle — sin este log, un fallo acá
+    // (ej. el navegador rechaza el subscribe, o el fetch del VAPID key falla) queda invisible
+    // por completo. No molesta al admin con un toast (esto puede correr solo, sin que haya
+    // tocado nada), pero queda en la consola para poder diagnosticar la próxima vez.
+    console.warn('TYM: no se pudo suscribir a notificaciones push', e);
+    return false;
+  }
 }
 // Deep link a la sección de asistencias — pedido explícito: "al dar clic sobre la
 // notificación debe dirigir a las asistencias", no solo abrir /admin en general. Se dispara
@@ -3606,12 +3624,11 @@ async function _subscribeAdminPush(){
 // y solo hizo focus() — ver notificationclick en sw.js, que ahora manda la URL destino en vez
 // de asumir que enfocar alcanza).
 function focusAssist(){
+  // Explícito e incondicional (no depende de _lastAssists, que puede seguir vacío si esto se
+  // dispara justo al abrir la app recién, antes de que corra el primer tick()) — a diferencia
+  // del highlight automático de showTab('live') al hacer clic en el tab a mano.
   showTab('live');
-  const card=$('assistCard');
-  if(!card)return;
-  card.scrollIntoView({behavior:'smooth',block:'center'});
-  card.style.transition='box-shadow .3s';card.style.boxShadow='0 0 0 3px var(--pri)';
-  setTimeout(()=>{card.style.boxShadow='';},2200);
+  highlightAssistCard();
 }
 if('serviceWorker' in navigator){
   navigator.serviceWorker.addEventListener('message',e=>{
@@ -3630,19 +3647,30 @@ function setupAdminPwa(){
     const{outcome}=await _adminPwaPrompt.userChoice;
     if(outcome==='accepted'){_adminPwaPrompt=null;$('adminPwaInstallBox').style.display='none';}
   };
-  // El botón de activar notificaciones solo se muestra si de verdad hace falta — ya concedido
-  // (o el navegador no soporta Notification) no tiene nada que ofrecer.
-  if('Notification' in window && Notification.permission!=='granted'){
-    const nbox=$('adminNotifyBox');if(nbox)nbox.style.display='';
-    const nbtn=$('adminNotifyBtn');
-    if(nbtn)nbtn.onclick=async()=>{
-      const p=await Notification.requestPermission();
-      if(p!=='granted'){toast('No se activaron las notificaciones — puedes intentarlo de nuevo cuando quieras','err');return;}
-      const ok=await _subscribeAdminPush();
-      if(ok){$('adminNotifyBox').style.display='none';toast('🔔 Notificaciones activadas','ok');}
-      else toast('No se pudo activar — intenta de nuevo en un momento','err');
-    };
+  if(!('Notification' in window))return;
+  // Bug real encontrado en vivo: "ya están habilitados los permisos en Android pero las
+  // notificaciones no llegan". El permiso del navegador (Notification.permission) es por
+  // ORIGEN, no por suscripción — si ya estaba en 'granted' de ANTES (ej. otra vez que se probó,
+  // o porque el mismo origen ya lo pidió desde el cliente /), este código nunca corría
+  // _subscribeAdminPush() porque solo vivía DENTRO del botón "Activar notificaciones", que ni
+  // siquiera se mostraba con el permiso ya concedido — nunca llegaba a crear/confirmar la
+  // PushSubscription real en el servidor (owner_push_subs), aunque el permiso SÍ estuviera.
+  // Ahora, si ya está concedido, se confirma/renueva la suscripción sola en cada carga, sin
+  // esperar a que alguien toque un botón que ni siquiera aparece.
+  if(Notification.permission==='granted'){
+    _subscribeAdminPush();
+    return;
   }
+  if(Notification.permission==='denied')return; // nada que ofrecer, el navegador ya lo bloqueó
+  const nbox=$('adminNotifyBox');if(nbox)nbox.style.display='';
+  const nbtn=$('adminNotifyBtn');
+  if(nbtn)nbtn.onclick=async()=>{
+    const p=await Notification.requestPermission();
+    if(p!=='granted'){toast('No se activaron las notificaciones — puedes intentarlo de nuevo cuando quieras','err');return;}
+    const ok=await _subscribeAdminPush();
+    if(ok){$('adminNotifyBox').style.display='none';toast('🔔 Notificaciones activadas','ok');}
+    else toast('No se pudo activar — intenta de nuevo en un momento','err');
+  };
 }
 
 (async()=>{

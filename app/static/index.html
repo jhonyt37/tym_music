@@ -2350,7 +2350,9 @@ async function poll(){
     clientAnns.forEach(a=>{
       if(_seenAnnIds.has(a.id))return;
       _seenAnnIds.add(a.id);
-      toast('📢 '+a.text,'ok',5000);
+      // Pedido explícito: el toast del anuncio no era clickeable — mismo patrón que ya usan
+      // votación/duelo (4to parámetro onClick), lleva directo al tab "Ahora" donde queda fijo.
+      toast('📢 '+a.text,'ok',5000,()=>showTab('ahora'));
       _triggerPushVote('📢 '+(s.settings.venue_name||'TYM Music'),a.text,'tym-ann-'+a.id);
     });
     const annCard=$('clientAnnCard');
@@ -2409,6 +2411,14 @@ async function _initSW(){
   try{
     _swReg=await navigator.serviceWorker.register('/sw.js');
     await _swReg.update();
+    // Bug real encontrado en vivo: antes _subscribePush() solo se llamaba reaccionando a un
+    // permiso RECIÉN concedido (dentro de _triggerPushVote) o al visitar el tab Social — si el
+    // permiso ya estaba en 'granted' de antes (muy común: el mismo origen ya lo había pedido
+    // en otra visita) y nunca se disparaba una votación/duelo ni se visitaba Social, la
+    // suscripción real (PushSubscription) nunca llegaba a crearse en el servidor aunque el
+    // permiso SÍ estuviera concedido — "el permiso está pero no llega nada". Ahora se confirma/
+    // renueva sola apenas el service worker está listo, sin depender de ningún evento.
+    if('Notification' in window&&Notification.permission==='granted')_subscribePush();
   }catch(e){}
 }
 // Compartida entre poll y duelo — antes solo existía para poll (_triggerPushPoll), el duelo
@@ -2449,7 +2459,7 @@ async function _subscribePush(){
       body:JSON.stringify({venue:VENUE,token:token||'',subscription:sub.toJSON()})
     });
     _pushSubscribed=true;
-  }catch(e){}
+  }catch(e){console.warn('TYM: no se pudo suscribir a notificaciones push',e);}
 }
 function _urlB64ToUint8Array(b64){
   const pad='='.repeat((4-b64.length%4)%4);

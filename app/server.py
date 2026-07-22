@@ -391,10 +391,17 @@ def _send_push_to(sub_key, vid, title, body, url, tag):
                 vapid_claims={"sub": "mailto:tym@example.com"},
             )
         except WebPushException as ex:
-            if ex.response and ex.response.status_code in (404, 410):
+            code = ex.response.status_code if ex.response else None
+            if code in (404, 410):
                 dead.append(sub)
-        except Exception:
-            pass
+            # Reportado "las notificaciones no llegan" sin más detalle — sin este log, un
+            # rechazo real del servicio de push (ej. VAPID audience inválida, payload muy
+            # grande, credenciales mal formadas) queda invisible por completo del lado del
+            # servidor. No relanza — un push fallido nunca debe tumbar la request que lo
+            # disparó (un pedido de asistencia, un anuncio, etc.).
+            print(f"⚠️  Web Push rechazado ({sub_key}, status={code}): {ex}", flush=True)
+        except Exception as exc:
+            print(f"⚠️  Web Push falló ({sub_key}): {exc}", flush=True)
     if dead:
         TYM[sub_key][vid] = [s for s in subs if s not in dead]
 
