@@ -133,15 +133,24 @@
       <div style="font-weight:700;margin-bottom:6px">📲 Instala el panel en iPhone</div>
       <div class="small">Toca <b>Compartir</b> (⬆) en Safari y luego <b>"Añadir a pantalla de inicio"</b>.</div>
     </div>
-    <!-- Pedido explícito: no solo "activar" la primera vez, también poder RE-verificar después
-         (ej. si se regeneraron las claves VAPID del servidor, o el permiso quedó en un estado
-         raro) — por eso el botón de reverificar queda siempre visible, no solo mientras el
-         permiso está sin pedir. Contenido armado por JS (renderNotifyStatus), según el estado
-         real de Notification.permission en cada momento. -->
-    <div id="adminNotifyBox" style="display:none;margin-bottom:14px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:14px;padding:14px">
-      <div style="font-weight:700;margin-bottom:4px" id="adminNotifyTitle">🔔 Recibe avisos de asistencia en tu celular</div>
-      <div class="small" style="margin-bottom:10px" id="adminNotifySub">Te llega una notificación cuando una mesa pide ayuda, aunque tengas el panel cerrado o la pantalla apagada.</div>
-      <button class="btn block" id="adminNotifyBtn">🔔 Activar notificaciones</button>
+    <!-- Pedido explícito: la versión anterior (tarjeta grande, siempre abierta) "estorbaba" al
+         tope de la pestaña más usada. Ahora es una píldora chica — se expande sola solo cuando
+         hay algo que requiere acción (bloqueado / no activado / falló la última suscripción),
+         y el admin puede expandirla a mano en cualquier momento para reverificar. Contenido
+         armado por JS (renderNotifyStatus) según el estado real de Notification.permission. -->
+    <div id="adminNotifyBox" style="margin-bottom:14px">
+      <div id="adminNotifyChip" onclick="toggleNotifyDetail()" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:999px;background:var(--bg2);border:1px solid var(--line);cursor:pointer;font-size:12px;font-weight:700">
+        <span id="adminNotifyChipText">🔔 Notificaciones</span><span style="opacity:.5" id="adminNotifyChevron">▾</span>
+      </div>
+      <div id="adminNotifyDetail" style="display:none;margin-top:8px;background:rgba(34,197,94,.1);border:1px solid rgba(34,197,94,.3);border-radius:14px;padding:14px">
+        <div style="font-weight:700;margin-bottom:4px" id="adminNotifyTitle">🔔 Recibe avisos de asistencia en tu celular</div>
+        <div class="small" style="margin-bottom:10px" id="adminNotifySub">Te llega una notificación cuando una mesa pide ayuda, aunque tengas el panel cerrado o la pantalla apagada.</div>
+        <button class="btn block" id="adminNotifyBtn">🔔 Activar notificaciones</button>
+        <!-- Sin devtools a mano en un celular real, esto es lo único que permite ver POR QUÉ
+             falló — pensado para sacarle screenshot y mandarlo. -->
+        <div class="small" style="margin-top:10px;color:var(--mut)">Detalle técnico (por si algo falla — puedes sacarle captura):</div>
+        <pre id="adminNotifyDebug" style="margin-top:4px;font-size:11px;white-space:pre-wrap;word-break:break-word;background:rgba(0,0,0,.25);border-radius:8px;padding:8px;max-height:180px;overflow:auto;min-height:20px"></pre>
+      </div>
     </div>
 
     <!-- Strip resumen de hoy -->
@@ -366,6 +375,7 @@
       <div class="pkgrow"><span class="small" style="flex:1">⚡ Prioridad: ventana anti-abuso (min)</span><input class="field" id="prioAbuseMin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">⏫ Al frente: ventana anti-abuso (min)</span><input class="field" id="jumpAbuseMin" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">💌 Cargo extra por dedicatoria al pedir (COP, 0=gratis)</span><input class="field" id="dedicaPrice" type="number" step="100"></div>
+      <div class="pkgrow"><span class="small" style="flex:1">🔑 Código de dedicatoria personalizada: vence a los (min, 0=nunca)</span><input class="field" id="dedicaCodeExpiry" type="number"></div>
       <div class="pkgrow"><span class="small" style="flex:1">Monto mínimo para "pagar directo" (COP)</span><input class="field" id="minDirectPay" type="number" step="100"></div>
 
       <p class="sec" style="margin-top:16px">Paquetes de prioridades</p>
@@ -1238,18 +1248,35 @@ async function removeDedicaPreset(text){
 async function genDedicaCode(){
   const j=await post('/api/admin/dedica_codes',{action:'generate'});
   if(j.code){
-    $('dedicaCodeResult').innerHTML=`<div class="pinrow"><span class="name">Código nuevo — dáselo a la mesa</span><span class="pin">${esc(j.code)}</span></div>`;
+    const exp=$('dedicaCodeExpiry')?parseInt($('dedicaCodeExpiry').value||0):20;
+    const expNote=exp?` · vence en ${exp} min`:' · sin vencimiento';
+    $('dedicaCodeResult').innerHTML=`<div class="pinrow"><span class="name">Código nuevo — dáselo a la mesa${esc(expNote)}</span><span class="pin">${esc(j.code)}</span></div>`;
     toast('Código generado','ok');
   }
 }
-function renderDedicaCodesRecent(codes){
+async function deleteDedicaCode(code){
+  if(!confirm('¿Borrar el código '+code+'? Deja de servir de inmediato.'))return;
+  const j=await post('/api/admin/dedica_codes',{action:'delete',code});
+  if(j.ok)toast('Código borrado','ok');else toast(j.error||'Error','err');
+}
+function renderDedicaCodesRecent(codes,expiryMin){
   const box=$('dedicaCodesRecent');if(!box)return;
   if(!codes.length){box.innerHTML='';return;}
   box.innerHTML='<div class="small" style="color:var(--mut);margin-bottom:6px">Últimos códigos</div>';
+  const now=Date.now()/1000;
   codes.slice(0,5).forEach(c=>{
     const r=document.createElement('div');r.className='row';
-    const status=c.used?'<span class="chip">✓ usado'+(c.used_by_table?' · '+esc(c.used_by_table):'')+'</span>':'<span class="chip pri">● sin usar</span>';
+    const expired=!c.used&&expiryMin&&(now-c.created_at)>expiryMin*60;
+    let status;
+    if(c.used)status='<span class="chip">✓ usado'+(c.used_by_table?' · '+esc(c.used_by_table):'')+'</span>';
+    else if(expired)status='<span class="chip fb">⏱ vencido</span>';
+    else status='<span class="chip pri">● sin usar</span>';
     r.innerHTML=`<div class="info"><div class="t">${esc(c.code)}</div><div class="a small">${hm3(c.created_at)}</div></div>${status}`;
+    if(!c.used){
+      const del=document.createElement('button');del.className='btn red sm';del.textContent='✕';del.title='Borrar código';
+      del.onclick=()=>deleteDedicaCode(c.code);
+      r.appendChild(del);
+    }
     box.appendChild(r);
   });
 }
@@ -1266,6 +1293,7 @@ async function save(){
     max_priority_queue_min:parseInt($('maxPrioMin').value||0),
     max_song_duration_min:parseInt($('maxSongDurationMin').value||0),
     dedica_price:parseInt($('dedicaPrice').value||0),
+    dedica_code_expiry_min:parseInt($('dedicaCodeExpiry').value||0),
     song_message_moderation:$('songMessageModeration').checked,
     fallback_shuffle:$('fbShuffle').checked,
     prepaid_mode:$('prepaid').checked, min_direct_pay:parseInt($('minDirectPay').value||0),
@@ -1329,8 +1357,8 @@ async function reset(){
   }
 }
 async function closeTable(t,v){
-  if(confirm('¿Cerrar la cuenta de '+t+' por '+cop(v)+'? Se cobra al cliente y se libera la mesa.')){
-    await post('/api/admin/close_table',{table:t});toast('Cuenta de '+t+' cerrada ('+cop(v)+')');tick();
+  if(confirm('¿Cerrar la cuenta de '+t+' por '+cop(v)+'? Se cobra al cliente, se libera la mesa y su código (y los códigos extra de esa mesa) cambian por seguridad.')){
+    await post('/api/admin/close_table',{table:t});toast('Cuenta de '+t+' cerrada ('+cop(v)+') — código de la mesa renovado');tick();
   }
 }
 
@@ -2679,6 +2707,7 @@ async function tick(){
       $('maxPrioMin').value=s.settings.max_priority_queue_min||0;
       $('maxSongDurationMin').value=s.settings.max_song_duration_min||0;
       $('dedicaPrice').value=s.settings.dedica_price||0;
+      if($('dedicaCodeExpiry'))$('dedicaCodeExpiry').value=s.settings.dedica_code_expiry_min!=null?s.settings.dedica_code_expiry_min:20;
       if($('songMessageModeration'))$('songMessageModeration').checked=!!s.settings.song_message_moderation;
       $('fbShuffle').checked=s.settings.fallback_shuffle!==false;
       $('prepaid').checked=s.settings.prepaid_mode||false;
@@ -2781,7 +2810,7 @@ async function tick(){
     if(atEl)atEl.textContent=s.active_sessions||0;
     if(ttEl)ttEl.textContent=(s.tables||[]).length;
 
-    renderDedicaCodesRecent(s.dedica_codes||[]);
+    renderDedicaCodesRecent(s.dedica_codes||[],s.settings.dedica_code_expiry_min);
 
     // Enfocar mesa (Caja): repuebla el select con las mesas del local, preservando la
     // selección, y filtra cobros del turno + movimientos + cuentas recientes a esa mesa.
@@ -3609,22 +3638,48 @@ function _urlB64ToUint8Array(b64){
   const raw=atob((b64+pad).replace(/-/g,'+').replace(/_/g,'/'));
   return Uint8Array.from([...raw].map(c=>c.charCodeAt(0)));
 }
+// Pedido explícito: en un celular real no hay consola de devtools a mano — sin esto, un fallo
+// de suscripción era invisible salvo por un console.warn que nadie podía leer. Ahora queda un
+// registro visible en pantalla (colapsado, se expande solo o a mano) para poder mandar screenshot.
+let _pushDebugLines=[];
+function _pushDebug(msg){
+  const line='['+new Date().toLocaleTimeString()+'] '+msg;
+  _pushDebugLines.push(line);
+  if(_pushDebugLines.length>25)_pushDebugLines.shift();
+  const pre=$('adminNotifyDebug');
+  if(pre)pre.textContent=_pushDebugLines.join('\n');
+}
 async function _subscribeAdminPush(){
   try{
-    if(!('serviceWorker' in navigator)||!('PushManager' in window))return false;
+    _pushDebug('Iniciando suscripción…');
+    if(!('serviceWorker' in navigator)||!('PushManager' in window)){
+      _pushDebug('❌ Este navegador no soporta notificaciones push.');
+      return false;
+    }
     const reg=await navigator.serviceWorker.ready;
+    _pushDebug('Service worker listo.');
     const r=await fetch('/api/push/vapid-public-key');
-    if(!r.ok)return false;
+    if(!r.ok){_pushDebug('❌ No se pudo obtener la clave del servidor (HTTP '+r.status+').');return false;}
     const {public_key}=await r.json();
-    if(!public_key)return false;
+    if(!public_key){_pushDebug('❌ El servidor no tiene una clave configurada.');return false;}
+    // Causa real encontrada tras regenerar la clave VAPID en /tym: si el navegador YA tenía una
+    // suscripción activa (con la clave VIEJA), pushManager.subscribe() con la clave NUEVA la
+    // rechaza (InvalidStateError) — el navegador no deja tener 2 claves distintas a la vez. Esto
+    // es justo lo que "arreglaba" desinstalar y reinstalar la app (borra el service worker y con
+    // él, la suscripción vieja) — ahora se da de baja la vieja acá mismo, sin reinstalar nada.
+    const existing=await reg.pushManager.getSubscription();
+    if(existing){
+      _pushDebug('Había una suscripción anterior — renovándola…');
+      await existing.unsubscribe();
+    }
     const sub=await reg.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:_urlB64ToUint8Array(public_key)});
-    await post('/api/admin/push/subscribe',{subscription:sub.toJSON()});
+    _pushDebug('Suscripción creada en el navegador, confirmando con el servidor…');
+    const r2=await post('/api/admin/push/subscribe',{subscription:sub.toJSON()});
+    if(!r2||!r2.ok){_pushDebug('❌ El servidor no aceptó la suscripción: '+((r2&&r2.error)||'sin detalle'));return false;}
+    _pushDebug('✅ Notificaciones activas y confirmadas.');
     return true;
   }catch(e){
-    // Reportado "no llega la notificación push" sin más detalle — sin este log, un fallo acá
-    // (ej. el navegador rechaza el subscribe, o el fetch del VAPID key falla) queda invisible
-    // por completo. No molesta al admin con un toast (esto puede correr solo, sin que haya
-    // tocado nada), pero queda en la consola para poder diagnosticar la próxima vez.
+    _pushDebug('❌ '+(e&&e.name||'Error')+': '+(e&&e.message||e));
     console.warn('TYM: no se pudo suscribir a notificaciones push', e);
     return false;
   }
@@ -3676,39 +3731,65 @@ function setupAdminPwa(){
   const nbtn=$('adminNotifyBtn');
   if(nbtn)nbtn.onclick=reverifyNotifications;
 }
+let _notifyDetailOpen=false,_notifyLastFailed=false;
+function toggleNotifyDetail(force){
+  _notifyDetailOpen=force!=null?force:!_notifyDetailOpen;
+  const d=$('adminNotifyDetail'),chev=$('adminNotifyChevron');
+  if(d)d.style.display=_notifyDetailOpen?'':'none';
+  if(chev)chev.textContent=_notifyDetailOpen?'▴':'▾';
+}
 function renderNotifyStatus(){
-  const box=$('adminNotifyBox'),title=$('adminNotifyTitle'),sub=$('adminNotifySub'),btn=$('adminNotifyBtn');
-  if(!box||!('Notification' in window)){if(box)box.style.display='none';return;}
-  box.style.display='';
+  const chip=$('adminNotifyChipText'),title=$('adminNotifyTitle'),sub=$('adminNotifySub'),btn=$('adminNotifyBtn');
+  if(!chip||!('Notification' in window)){const b=$('adminNotifyBox');if(b)b.style.display='none';return;}
   const p=Notification.permission;
-  if(p==='granted'){
+  // Pedido explícito: la versión anterior era una tarjeta grande SIEMPRE abierta — "estorbaba"
+  // arriba del tab más usado incluso cuando todo funcionaba bien. Ahora es una píldora chica
+  // (adminNotifyChip) que solo se auto-expande cuando hay algo que de verdad requiere que el
+  // admin mire (todavía no activó, el navegador las bloqueó, o la última suscripción falló) —
+  // si ya está todo bien, queda colapsada y el admin puede abrirla a mano si quiere reverificar.
+  let needsAttention=false;
+  if(p==='granted'&&!_notifyLastFailed){
+    chip.textContent='🔔 Notificaciones ✅';
     title.textContent='✅ Notificaciones activadas';
     sub.textContent='Si dejaron de llegar (ej. tras un cambio del servidor), tocá reverificar.';
     btn.textContent='🔄 Reverificar notificaciones';
+  }else if(p==='granted'){
+    chip.textContent='🔔 Notificaciones ⚠️';
+    title.textContent='⚠️ El permiso está dado pero algo falló';
+    sub.textContent='Revisa el detalle técnico abajo (puedes sacarle captura) y toca reintentar.';
+    btn.textContent='🔄 Reintentar';
+    needsAttention=true;
   }else if(p==='denied'){
+    chip.textContent='🔔 Notificaciones 🔕';
     title.textContent='🔕 Notificaciones bloqueadas';
     // El navegador NO deja volver a pedir el permiso por código una vez que quedó en
     // 'denied' — solo el usuario puede revertirlo a mano desde la config del sitio en su
     // navegador/sistema. Sin esta explicación, el botón de abajo parecería no hacer nada.
     sub.textContent='El navegador ya las bloqueó para este sitio — hay que habilitarlas a mano desde sus ajustes (busca "Notificaciones" en la configuración de este sitio/app) y volver a tocar este botón.';
     btn.textContent='🔄 Reintentar';
+    needsAttention=true;
   }else{
+    chip.textContent='🔔 Notificaciones';
     title.textContent='🔔 Recibe avisos de asistencia en tu celular';
     sub.textContent='Te llega una notificación cuando una mesa pide ayuda, aunque tengas el panel cerrado o la pantalla apagada.';
     btn.textContent='🔔 Activar notificaciones';
+    needsAttention=true;
   }
+  if(needsAttention&&!_notifyDetailOpen)toggleNotifyDetail(true);
 }
 async function reverifyNotifications(){
   if(!('Notification' in window))return;
   let p=Notification.permission;
   if(p==='default')p=await Notification.requestPermission();
   if(p==='denied'){
+    _pushDebug('❌ El navegador tiene el permiso en "denied" — hay que habilitarlo a mano en sus ajustes.');
     toast('El navegador sigue bloqueando notificaciones para este sitio — habilítalas a mano en sus ajustes','err',6000);
-    renderNotifyStatus();
+    _notifyLastFailed=true;renderNotifyStatus();
     return;
   }
   const ok=await _subscribeAdminPush();
-  toast(ok?'🔔 Notificaciones activadas':'No se pudo activar — intenta de nuevo en un momento',ok?'ok':'err');
+  _notifyLastFailed=!ok;
+  toast(ok?'🔔 Notificaciones activadas':'No se pudo activar — revisa el detalle técnico',ok?'ok':'err');
   renderNotifyStatus();
 }
 

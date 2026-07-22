@@ -125,6 +125,17 @@ def gen_unique_pin():
         p = gen_pin()
         if p not in used:
             return p
+
+def _dedica_code_active(entry):
+    """Un código de dedicatoria es válido si no se usó Y no venció — pedido explícito: antes
+    quedaban buenos para siempre hasta usarse, sin límite de tiempo (dedica_code_expiry_min,
+    default 20 min, 0=sin vencimiento)."""
+    if entry.get("used"):
+        return False
+    expiry_min = STATE["settings"].get("dedica_code_expiry_min", 20)
+    if expiry_min and time.time() - entry.get("created_at", 0) > expiry_min * 60:
+        return False
+    return True
     return gen_pin()  # fallback extremo, prácticamente imposible de alcanzar
 
 def gen_token():
@@ -492,6 +503,7 @@ def make_venue(name):
             "song_message_moderation": False,  # moderar el mensaje al pedir canción (separado de dedicatorias)
             "dedica_price": 0,             # cargo extra si el pedido incluye mensaje (0=gratis, se suma al precio de la canción)
             "dedica_display_secs": 5,      # cuánto dura el overlay de dedicatoria mesa a mesa en /tv
+            "dedica_code_expiry_min": 20,  # minutos que un código de dedicatoria sigue siendo válido tras generarse (0=sin vencimiento)
             "dedica_presets": [             # mensajes predeterminados: pasan SIEMPRE sin código ni moderación
                 "🎉 ¡Qué buen ambiente!",
                 "🎂 ¡Feliz cumpleaños!",
@@ -2228,7 +2240,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
                                        "show_tym_brand", "music_only", "content_mode",
                                        "song_message_moderation", "dedica_price", "dedica_display_secs",
-                                       "dedica_presets", "allow_self_react")},
+                                       "dedica_presets", "allow_self_react", "dedica_code_expiry_min")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
@@ -3149,7 +3161,7 @@ class H(BaseHTTPRequestHandler):
                 if req_msg and req_msg not in STATE["settings"].get("dedica_presets", []):
                     _code = str(d.get("dedica_code") or "").strip()
                     dedica_code_entry = next((c for c in STATE.get("dedica_codes", [])
-                                              if c["code"] == _code and not c["used"]), None)
+                                              if c["code"] == _code and _dedica_code_active(c)), None)
                     if not dedica_code_entry:
                         return self._send(400, {"error": "Ese mensaje no es uno de los predeterminados del bar. "
                                                  "Pídele al mesero o al admin un código para enviarlo.",
@@ -3667,7 +3679,8 @@ class H(BaseHTTPRequestHandler):
                 for k in ("repeat_block_min", "repeat_block_songs", "trim_end_secs",
                           "free_per_window", "free_window_min", "jump_multiplier",
                           "priority_abuse_window_min", "jump_abuse_window_min",
-                          "max_priority_queue_min", "max_song_duration_min", "dedica_price"):
+                          "max_priority_queue_min", "max_song_duration_min", "dedica_price",
+                          "dedica_code_expiry_min"):
                     if k in d:
                         try: s[k] = max(0, int(d[k]))
                         except Exception: pass
@@ -4189,7 +4202,7 @@ class H(BaseHTTPRequestHandler):
 
             if path == "/api/admin/dedica_codes":
                 if d.get("action") == "generate":
-                    used = {c["code"] for c in STATE.get("dedica_codes", []) if not c["used"]}
+                    used = {c["code"] for c in STATE.get("dedica_codes", []) if _dedica_code_active(c)}
                     code = gen_pin()
                     for _ in range(200):
                         if code not in used:
@@ -4203,6 +4216,16 @@ class H(BaseHTTPRequestHandler):
                     if len(STATE["dedica_codes"]) > 100:
                         STATE["dedica_codes"] = STATE["dedica_codes"][-100:]
                     return self._send(200, {"ok": True, "code": code})
+                # Pedido explícito: el admin no tenía forma de invalidar un código ya entregado
+                # (ej. se lo dio a la mesa equivocada, o se arrepintió) antes de que se usara o
+                # venciera solo.
+                if d.get("action") == "delete":
+                    codes = STATE.get("dedica_codes", [])
+                    before = len(codes)
+                    STATE["dedica_codes"] = [c for c in codes if c["code"] != d.get("code")]
+                    if len(STATE["dedica_codes"]) == before:
+                        return self._send(400, {"error": "No se encontró ese código."})
+                    return self._send(200, {"ok": True})
                 return self._send(400, {"error": "Acción inválida"})
 
             if path == "/api/admin/add":
@@ -4335,6 +4358,16 @@ class H(BaseHTTPRequestHandler):
                 for t, se in list(STATE["sessions"].items()):
                     if se["table"] == tbl:
                         STATE["sessions"].pop(t, None); TOKENS.pop(t, None)
+                # Por seguridad (pedido explícito): al cerrar la cuenta, el PIN de esa mesa
+                # rota a uno nuevo y sus códigos secundarios (uno por persona extra del grupo)
+                # desaparecen — el código que el grupo que se fue tenía en la mano (compartido,
+                # anotado, en un ticket) no debe seguir sirviendo para el próximo grupo que se
+                # siente en esa mesa.
+                for t in STATE["tables"]:
+                    if t["name"] == tbl:
+                        t["pin"] = gen_unique_pin()
+                        t["extra_pins"] = []
+                        break
                 return self._send(200, {"ok": True, "closed": tbl, "total": total})
 
             if path == "/api/admin/reset":
@@ -4391,7 +4424,7 @@ class H(BaseHTTPRequestHandler):
                 else:
                     code = str(d.get("code") or "").strip()
                     entry = next((c for c in STATE.get("dedica_codes", [])
-                                 if c["code"] == code and not c["used"]), None)
+                                 if c["code"] == code and _dedica_code_active(c)), None)
                     if not entry:
                         return self._send(400, {"error": "Ese mensaje no es uno de los predeterminados. "
                                                  "Pídele al mesero o al admin un código para enviarlo.",

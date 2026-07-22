@@ -197,6 +197,10 @@ body{padding-bottom:80px}
 #guideBtn{background:none;border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;flex-none;touch-action:manipulation}
 #refreshBtn{background:none;border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:4px 10px;font-size:13px;font-weight:700;cursor:pointer;flex-none;touch-action:manipulation;margin-right:6px}
 #refreshBtn:active{transform:rotate(180deg);transition:transform .3s}
+/* Instalar app: antes solo vivía enterrado al final del tab Social (card "Síguenos") — casi
+   nadie lo encontraba. Ícono fijo en el header, visible en cualquier tab, mismo criterio de
+   cuándo mostrarlo que la tarjeta original (beforeinstallprompt / iOS no-standalone). */
+#pwaInstallHeaderBtn{background:none;border:1px solid var(--line);color:var(--mut);border-radius:999px;padding:4px 10px;font-size:13px;font-weight:700;cursor:pointer;flex-none;touch-action:manipulation;margin-right:6px}
 /* Deslizar hacia abajo para actualizar — indicador fijo arriba de todo, empujado por JS
    (transform translateY) mientras el dedo arrastra; solo se activa si la página ya está
    arriba del todo (scrollY 0), para no interferir con el scroll normal del resto de la app. */
@@ -226,6 +230,7 @@ body{padding-bottom:80px}
   <div class="tick-wrap" id="tickWrap" style="display:none">
     <div class="tick" id="headerTick"></div>
   </div>
+  <button id="pwaInstallHeaderBtn" onclick="triggerPwaInstall()" title="Instalar app" style="display:none">📲</button>
   <button id="refreshBtn" onclick="location.reload()" title="Actualizar">🔄</button>
   <button id="guideBtn" onclick="openGuide()" title="¿Cómo usar la app?">?</button>
 </header>
@@ -1420,11 +1425,15 @@ window.addEventListener('beforeinstallprompt', e => {
   _pwaPrompt = e;
   const box = $('pwaInstallBox');
   if (box) box.style.display = '';
+  const hbtn = $('pwaInstallHeaderBtn');
+  if (hbtn) hbtn.style.display = '';
 });
 window.addEventListener('appinstalled', () => {
   _pwaPrompt = null;
   const box = $('pwaInstallBox');
   if (box) box.style.display = 'none';
+  const hbtn = $('pwaInstallHeaderBtn');
+  if (hbtn) hbtn.style.display = 'none';
   toast('¡App instalada! 🎉', 'ok');
 });
 const _isIos = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
@@ -1432,6 +1441,8 @@ const _isStandalone = window.matchMedia('(display-mode: standalone)').matches ||
 if (_isIos && !_isStandalone) {
   const box = $('pwaIosBox');
   if (box) box.style.display = '';
+  const hbtn = $('pwaInstallHeaderBtn');
+  if (hbtn) hbtn.style.display = '';
 }
 const _pwaBtn = $('pwaInstallBtn');
 if (_pwaBtn) _pwaBtn.onclick = async () => {
@@ -1440,6 +1451,17 @@ if (_pwaBtn) _pwaBtn.onclick = async () => {
   const { outcome } = await _pwaPrompt.userChoice;
   if (outcome === 'accepted') { _pwaPrompt = null; $('pwaInstallBox').style.display = 'none'; }
 };
+// Botón del header — mismo prompt nativo si está disponible (Android/desktop); en iPhone no
+// existe beforeinstallprompt, así que se explica el paso manual (Compartir → Añadir a inicio).
+async function triggerPwaInstall(){
+  if (_pwaPrompt) {
+    _pwaPrompt.prompt();
+    const { outcome } = await _pwaPrompt.userChoice;
+    if (outcome === 'accepted') { _pwaPrompt = null; $('pwaInstallBox').style.display = 'none'; $('pwaInstallHeaderBtn').style.display = 'none'; }
+  } else if (_isIos) {
+    toast('📲 Toca Compartir (⬆) en Safari y luego "Añadir a pantalla de inicio"', 'ok', 6000);
+  }
+}
 
 // ---------- Social tabs ----------
 function showSocialTab(name){
@@ -2470,6 +2492,13 @@ async function _subscribePush(){
     const r=await fetch('/api/push/vapid-public-key?v='+encodeURIComponent(VENUE));
     if(!r.ok)return;
     const {public_key}=await r.json();
+    // Causa real de "el permiso está pero no llegan notificaciones" tras regenerar la clave
+    // VAPID del servidor: si el navegador YA tenía una suscripción con la clave VIEJA,
+    // pushManager.subscribe() con la clave NUEVA la rechaza (InvalidStateError) — hay que dar
+    // de baja la vieja primero. Esto es justo lo que "arreglaba" desinstalar y reinstalar la
+    // app (borra el service worker y con él, la suscripción vieja).
+    const existing=await _swReg.pushManager.getSubscription();
+    if(existing)await existing.unsubscribe();
     const sub=await _swReg.pushManager.subscribe({
       userVisibleOnly:true,
       applicationServerKey:_urlB64ToUint8Array(public_key)
