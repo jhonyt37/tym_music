@@ -6,7 +6,7 @@ Vistas: /  (cliente)  ·  /player (pantalla del local)  ·  /admin (dueno)
 Novedades: sesion de mesa por PIN, paquetes (creditos + pase), progreso de
 reproduccion, recomendadas (mas pedido / del local / populares / genero).
 """
-import json, os, re, socket, threading, time, random, datetime, struct, zlib
+import json, os, re, socket, threading, time, random, datetime, struct, zlib, gzip
 import unicodedata, difflib
 import hashlib, hmac, secrets, smtplib
 from email.mime.text import MIMEText
@@ -2430,15 +2430,34 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
-    def _send(self, code, body, ctype="application/json; charset=utf-8"):
+    def _send(self, code, body, ctype="application/json; charset=utf-8", cache=None):
         if isinstance(body, (dict, list)):
             body = json.dumps(body, ensure_ascii=False).encode("utf-8")
         elif isinstance(body, str):
             body = body.encode("utf-8")
+        # Ancho de banda: el plan gratis de Render tiene un tope mensual bajo (5GB) que ya se
+        # gastó una vez sin haber un solo cliente pagando — el proyecto todavía está en pruebas
+        # con un bar aliado, sin ingresos. El polling de estado (cada 2-2.5s, todo el turno) es
+        # el mayor consumidor. gzip achica un JSON de estado típico ~53% y una página HTML
+        # completa ~70% (medido con datos reales de este mismo proyecto) — sin cambiar UNA
+        # sola respuesta, solo cómo viajan los bytes. gzip.compress no es gratis en CPU, pero
+        # este servidor es I/O-bound (espera de red/disco), sobra margen.
+        encoding = self.headers.get("Accept-Encoding", "")
+        # image/png ya viene comprimido (los íconos) — gzip encima no ahorra nada, solo gasta
+        # CPU y le suma el overhead del propio contenedor gzip.
+        if "gzip" in encoding and len(body) > 300 and not ctype.startswith("image/"):
+            body = gzip.compress(body, compresslevel=6)
+            gzipped = True
+        else:
+            gzipped = False
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if gzipped:
+            self.send_header("Content-Encoding", "gzip")
+        # Los HTML/CSS/JS estáticos (ver _file) pasan un cache corto explícito — todo lo demás
+        # (JSON de la API, siempre con datos que cambian) sigue sin cachear nunca, por defecto.
+        self.send_header("Cache-Control", cache or "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("X-Frame-Options", "SAMEORIGIN")
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
@@ -2450,7 +2469,11 @@ class H(BaseHTTPRequestHandler):
         if not os.path.exists(p):
             return self._send(404, {"error": "not found"})
         with open(p, "rb") as f:
-            self._send(200, f.read(), ctype)
+            # 60s: corto a propósito — este proyecto despliega código nuevo varias veces por
+            # sesión, un cache largo dejaría clientes viejos corriendo JS desactualizado un
+            # buen rato. Igual absorbe ráfagas de recargas cortas (PWA relanzándose, el
+            # watchdog de /tv, una pestaña que Chrome descargó de memoria y recarga sola).
+            self._send(200, f.read(), ctype, cache="public, max-age=60")
 
     def _q(self, name, default=""):
         return parse_qs(urlparse(self.path).query).get(name, [default])[0]
