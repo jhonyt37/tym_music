@@ -559,6 +559,10 @@ def make_venue(name):
                                             # duelo_duration_secs se quitó por el mismo motivo
                                             # que poll_duration_secs arriba (nunca se usaba para
                                             # la duración real, ya era dinámica).
+            "poll_local_cooldown_songs": 2,  # modo local: canciones que deben sonar (de
+                                              # cualquier tipo) entre una auto-votación y la
+                                              # siguiente — evita un loop de votación tras
+                                              # votación sin parar.
             "schedule": [],                # [{from:"HH:MM", to:"HH:MM", genre:str, label:str}]
             "timezone": DEFAULT_TZ,         # zona horaria IANA del local (ej: "America/Bogota")
             "loved_reset_hour": 9,          # hora local (0-23) del reinicio automático diario
@@ -2028,12 +2032,23 @@ def _auto_create_local_poll_bg(vid, np_id, played_yts):
         _v_np = v.get("now_playing")
         if not _v_np:
             return  # la canción fallback que disparó esto ya cambió — nada a lo cual atarse
-        pool = [c for c in v.get("curated", [])
-                if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")
-                and c["yt"] not in played_yts]
+        # Pedido explícito: las opciones deben salir de las canciones PREFERIDAS del bar
+        # (destacadas/"Recomendadas del local", mismo flag "featured" que ya usa el fallback
+        # de fondo) — no de cualquier cosa del catálogo entero. Si el bar no ha destacado nada
+        # todavía, cae al catálogo completo (nunca deja de ofrecer una votación por eso).
+        local_pool = [c for c in v.get("curated", [])
+                      if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")]
+        featured_pool = [c for c in local_pool if c.get("featured")]
+        base = featured_pool or local_pool
+        pool = [c for c in base if c["yt"] not in played_yts]
+        if len(pool) < 2:
+            pool = base  # el filtro de "no repetir recientes" dejó muy pocas — mejor repetir que no votar
         if len(pool) < 2:
             return
-        selected = random.sample(pool, 2)
+        # A veces 2 opciones, a veces 3 — pedido explícito ("que sea parejo"): 50/50 cuando el
+        # pool alcanza para 3, nunca menos de 2.
+        n_opts = 3 if len(pool) >= 3 and random.random() < 0.5 else 2
+        selected = random.sample(pool, min(n_opts, len(pool)))
         duration = _poll_dynamic_duration(_v_np)
         now = time.time()
         v["poll"] = {
@@ -2223,9 +2238,13 @@ def public_state(token=None, admin=False, mark_dedica=None):
     if _p and _p.get("active") and _p.get("ends_at") and time.time() >= _p["ends_at"]:
         _close_poll_winner(_p)
 
-    # ---- Poll: auto-lanzar si condiciones se cumplen ----
+    # ---- Poll: auto-lanzar si condiciones se cumplen (modo YouTube) ----
+    # content_mode!="local" a propósito: esta rama busca candidatos en YouTube según el
+    # artista/género de lo que se acaba de pedir — nunca debe correr en un bar que
+    # deliberadamente eligió modo local, aunque la canción que suena no sea fallback (ej. el
+    # ganador de una votación anterior, que SÍ cuenta como "no fallback").
     _p = STATE.get("poll")
-    if np and not np.get("fallback"):
+    if np and not np.get("fallback") and STATE["settings"].get("content_mode") != "local":
         _queue_len = len(q)
         _no_active_poll = not (_p and _p.get("active"))
         _not_launched = STATE.get("poll_launched_for_id") != np["id"]
@@ -2244,24 +2263,37 @@ def public_state(token=None, admin=False, mark_dedica=None):
                 daemon=True
             ).start()
 
-    # ---- Poll: auto-lanzar por racha de "lista del local" (modo local) ----
-    # Pedido explícito: si la cola está vacía y suenan 2 canciones seguidas de la lista del
-    # local (fallback, "nadie está pidiendo nada ahora mismo"), lanzar una votación con
-    # contenido del propio catálogo para reenganchar a los clientes — el bloque de arriba
-    # EXCLUYE a propósito las canciones fallback (esa lógica busca en YouTube según el artista/
-    # género de lo que se acaba de pedir, no aplica sin un pedido real detrás). Racha contada
-    # por np["id"] (una canción fallback = un solo incremento, no uno por cada poll() de 2s
-    # mientras la misma sigue sonando); se reinicia apenas suena algo que SÍ pidió un cliente.
-    if np and np.get("fallback"):
-        if STATE.get("fallback_streak_id") != np["id"]:
-            STATE["fallback_streak_id"] = np["id"]
-            STATE["fallback_streak_count"] = STATE.get("fallback_streak_count", 0) + 1
-        if (STATE["settings"].get("content_mode") == "local"
-                and STATE.get("fallback_streak_count", 0) >= 2
+    # ---- Poll: auto-lanzar cuando "la lista del local" lleva sonando sola (modo local) ----
+    # Pedido explícito, con 2 rondas de ajuste tras probarlo en vivo:
+    # 1) el disparador original de arriba EXCLUYE canciones fallback a propósito (busca en
+    #    YouTube, no aplica sin un pedido real detrás) — esta rama es la versión "modo local"
+    #    de esa misma idea, con su propio candidato (el catálogo del bar, no YouTube).
+    # 2) "songs_since_local_poll" cuenta CUALQUIER canción que suene (fallback o no) desde la
+    #    última auto-votación local — no solo canciones fallback consecutivas. Esto es lo que
+    #    evita el loop reportado en vivo: la canción ganadora de una votación NO es fallback
+    #    (table="Votación 🗳️"), así que si solo se contaran fallbacks, el contador se hubiera
+    #    reiniciado a 0 apenas esa ganadora empezara a sonar, y la siguiente canción fallback
+    #    (la primera después de la votación) ya hubiera vuelto a disparar otra — votación tras
+    #    votación sin parar. Contando TODAS las canciones, la ganadora también cuenta para el
+    #    cooldown antes de poder lanzar la próxima.
+    # 3) "started_ago >= 8": lanzar la votación en el mismo instante en que arranca la canción
+    #    competía visualmente con la animación/aviso de "nueva canción" — un respiro corto
+    #    antes de mostrar la votación se siente menos atropellado.
+    if np:
+        if STATE.get("last_song_id_seen") != np["id"]:
+            STATE["last_song_id_seen"] = np["id"]
+            STATE["songs_since_local_poll"] = STATE.get("songs_since_local_poll", 0) + 1
+        started_ago = time.time() - (np.get("played_at") or np.get("ts") or 0)
+        cooldown = max(1, int(STATE["settings"].get("poll_local_cooldown_songs", 2)))
+        if (np.get("fallback")
+                and STATE["settings"].get("content_mode") == "local"
+                and STATE.get("songs_since_local_poll", 0) >= cooldown
+                and started_ago >= 8
                 and not (_p and _p.get("active"))
                 and STATE.get("poll_launched_for_id") != np["id"]
                 and _poll_gate_error() is None):
             STATE["poll_launched_for_id"] = np["id"]
+            STATE["songs_since_local_poll"] = 0
             _played = ({np["yt"]} | {h["yt"] for h in STATE.get("history", [])}
                        | {i["yt"] for i in STATE.get("items", [])})
             _vid = CUR_VID
@@ -2270,9 +2302,6 @@ def public_state(token=None, admin=False, mark_dedica=None):
                 args=(_vid, np["id"], _played),
                 daemon=True
             ).start()
-    else:
-        STATE["fallback_streak_count"] = 0
-        STATE["fallback_streak_id"] = None
 
     # ---- Poll (estado público) ----
     _p = STATE.get("poll")
@@ -2354,7 +2383,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "priority_abuse_window_min", "jump_abuse_window_min",
                                        "venue_logo", "max_priority_queue_min", "max_song_duration_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
-                                       "allow_skip_vote", "poll_min_remaining_pct",
+                                       "allow_skip_vote", "poll_min_remaining_pct", "poll_local_cooldown_songs",
                                        "loved_reset_hour", "loved_reset_interval_hours",
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
                                        "show_tym_brand", "music_only", "content_mode",
@@ -3869,6 +3898,9 @@ class H(BaseHTTPRequestHandler):
                     except Exception: pass
                 if "poll_min_remaining_pct" in d:
                     try: s["poll_min_remaining_pct"] = max(0, min(100, int(d["poll_min_remaining_pct"])))
+                    except Exception: pass
+                if "poll_local_cooldown_songs" in d:
+                    try: s["poll_local_cooldown_songs"] = max(1, min(20, int(d["poll_local_cooldown_songs"])))
                     except Exception: pass
                 if "loved_reset_hour" in d:
                     try: s["loved_reset_hour"] = max(0, min(23, int(d["loved_reset_hour"])))

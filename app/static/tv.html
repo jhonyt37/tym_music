@@ -1380,7 +1380,15 @@ async function load(np){
   if(!np){$('titleText').textContent='Esperando canciones…';$('artist').textContent='';$('who').textContent='';curYt=null;curId=null;setLocalAudioView(false);return;}
   $('titleText').textContent=np.title;
   $('artist').textContent=np.artist||'';
-  $('who').innerHTML=np.fallback?'🎚️ Lista del local':((np.priority?'⚡ ':'')+esc(np.table||''));
+  // Pedido explícito: que se vea marcado cuando la canción que suena ganó una votación o un
+  // duelo, no solo el texto plano de "who" — mismo dato que ya viaja en np.table
+  // (_close_poll_winner/_close_duelo_winner ya lo taggean así), pero con una insignia propia
+  // en vez de mezclarse con el nombre de una mesa cualquiera.
+  const isPollWin=(np.table||'').startsWith('Votación'),isDueloWin=(np.table||'').includes('Duelo');
+  if(np.fallback)$('who').innerHTML='🎚️ Lista del local';
+  else if(isPollWin)$('who').innerHTML='<span style="background:rgba(59,130,246,.18);border:1px solid rgba(59,130,246,.5);border-radius:999px;padding:3px 12px">🗳️ Ganó la votación</span>';
+  else if(isDueloWin)$('who').innerHTML='<span style="background:rgba(245,158,11,.18);border:1px solid rgba(245,158,11,.5);border-radius:999px;padding:3px 12px">⚔️ '+esc(np.table)+'</span>';
+  else $('who').innerHTML=(np.priority?'⚡ ':'')+esc(np.table||'');
   curId=np.id; // siempre actualizar el ID del servidor
   if(np.yt!==curYt){
     // Un archivo local no depende del SDK de YouTube (ready) para cargar — solo YouTube

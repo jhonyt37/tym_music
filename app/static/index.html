@@ -2243,9 +2243,30 @@ function _annCardTimerTick(){
   $('clientAnnTimer').textContent=rem>0?mm(rem)+' restante':'';
   if(rem>0)_annCardTimerT=setTimeout(_annCardTimerTick,1000);
 }
+let _lastBootId=null,_pendingBootId=null;
 async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
+    // Redeploy detectado (mismo patrón que ya usan /tv y /admin, aplicado acá): sin esto, un
+    // cliente que dejó la pestaña abierta desde antes de un deploy se queda corriendo el JS
+    // VIEJO indefinidamente — cualquier fix nuevo (ej. a dónde navega el clic de una
+    // notificación) nunca llega hasta que alguien cierre y reabra la app a mano. Se pide ver
+    // el mismo boot_id 2 veces seguidas antes de recargar (evita dispararse por una sola
+    // respuesta rara durante el propio redeploy de Render), y NO recarga si hay un sheet
+    // abierto (pedir canción, dedicatoria…) para no perder algo a medio escribir — se
+    // reintenta solo en el próximo poll.
+    if(s.boot_id){
+      if(_lastBootId===null)_lastBootId=s.boot_id;
+      else if(s.boot_id!==_lastBootId){
+        if(s.boot_id===_pendingBootId){
+          if(!document.querySelector('.sheet-bg.open')){location.reload();return;}
+        }else{
+          _pendingBootId=s.boot_id;
+        }
+      }else{
+        _pendingBootId=null;
+      }
+    }
     price=(s.priority_price_now!=null?s.priority_price_now:s.settings.price_priority);packages=s.settings.credit_packages||[];pass_obj=s.settings.time_pass||pass_obj;
     dedicaPrice=s.settings.dedica_price||0;
     jumpAvail=!!s.jump_available;jumpPrice=(s.jump_price_now!=null?s.jump_price_now:(s.jump_price||0));price_queue_min=s.priority_queue_min||0;jumpReason=s.jump_unavailable_reason||'';

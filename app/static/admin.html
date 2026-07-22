@@ -266,6 +266,16 @@
             <span class="small" id="queueTotalTime" style="color:var(--mut)"></span>
             <button type="button" class="btn sm ghost" id="requeueLastBtn" style="display:none" onclick="requeueLast()" title="Por si se saltó una por error — no toca lo que suena ahora ni ningún cobro/reembolso ya hecho">⏮ Reponer última</button>
           </div>
+          <!-- Pedido explícito: "no sale el tiempo de reproducción como sí sale en el lado
+               cliente" — misma barra/interpolación cliente-side que ya usa index.html, pero
+               con su propio intervalo (no depende del rebuild de #queue, que solo corre
+               cuando algo relevante cambió — la posición avanza cada segundo mientras suena). -->
+          <div id="npProgWrap" style="display:none;margin-bottom:12px">
+            <div class="prog"><div class="prog-fill" id="npProgFill"></div></div>
+            <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--mut);margin-top:2px">
+              <span id="npProgPos">0:00</span><span id="npProgRem"></span>
+            </div>
+          </div>
           <div class="list" id="queue"><div class="empty">Nada en cola.</div></div>
           <div id="blockSuggestBox" style="display:none;margin-top:12px;padding-top:12px;border-top:1px solid var(--line)"></div>
         </div>
@@ -811,6 +821,14 @@
       <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">🗳️ % mínimo restante para poder lanzar una votación (o duelo)</label>
       <div class="small" style="color:var(--mut);margin-bottom:6px">Si a la canción que suena ahora le queda menos de este % de su duración, no se puede lanzar — ni a mano ni automática. Evita votaciones tan cortas que casi nadie alcanza a votar. Siempre dura hasta que termine la canción actual. Default: 50%.</div>
       <input class="field" id="pollMinRemainingPct" type="number" min="0" max="100" step="5" placeholder="50" style="max-width:140px" onchange="post('/api/admin/settings',{poll_min_remaining_pct:parseInt($('pollMinRemainingPct').value||50)}).then(()=>toast('Guardado','ok'))">
+
+      <!-- Solo aplica en modo local: si la cola queda vacía y suena la lista del bar, se
+           lanza una votación sola para reenganchar a los clientes — este número controla
+           cada cuántas canciones puede repetirse, para que no caiga en un loop de votación
+           tras votación (ej. justo después de que gana una votación). -->
+      <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">🎚️ Modo local: canciones entre una auto-votación y la siguiente</label>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">Con la cola vacía, cuenta cualquier canción que suene (incluida la que ganó la votación anterior) — evita votaciones seguidas sin parar. Default: 2.</div>
+      <input class="field" id="pollLocalCooldownSongs" type="number" min="1" max="20" placeholder="2" style="max-width:140px" onchange="post('/api/admin/settings',{poll_local_cooldown_songs:parseInt($('pollLocalCooldownSongs').value||2)}).then(()=>toast('Guardado','ok'))">
     </div>
 
     <!-- Duelo de canciones -->
@@ -976,6 +994,16 @@ function _renderIfChanged(box,sig){
 }
 const cop=n=>'$'+(n||0).toLocaleString('es-CO');
 const mm=s=>{s=Math.max(0,Math.round(s||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');};
+// Interpolación de progreso de "Sonando ahora" (mismo patrón que index.html) — actualiza cada
+// 500ms sin esperar al próximo poll, para que la barra se vea corriendo, no a saltos.
+let _npAdminState=null;
+setInterval(()=>{
+  if(!_npAdminState)return;
+  const pos=Math.min(_npAdminState.pos0+(Date.now()/1000-_npAdminState.t0),_npAdminState.dur);
+  const fill=$('npProgFill');if(fill)fill.style.width=(100*pos/_npAdminState.dur)+'%';
+  const posEl=$('npProgPos');if(posEl)posEl.textContent=mm(pos);
+  const remEl=$('npProgRem');if(remEl)remEl.textContent='faltan '+mm(_npAdminState.dur-pos);
+},500);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // minúsculas + sin tildes — pedido explícito: las búsquedas deben tolerar tildes/mayúsculas.
 const fold=s=>String(s??'').toLowerCase().normalize('NFKD').replace(/[\u0300-\u036f]/g,'');
@@ -2858,6 +2886,7 @@ async function tick(){
       _assistPresetsCache=Array.isArray(s.settings.assist_presets)?[...s.settings.assist_presets]:[];
       renderAssistPresetsAdmin();
       if($('pollMinRemainingPct'))$('pollMinRemainingPct').value=s.settings.poll_min_remaining_pct!=null?s.settings.poll_min_remaining_pct:50;
+      if($('pollLocalCooldownSongs'))$('pollLocalCooldownSongs').value=s.settings.poll_local_cooldown_songs!=null?s.settings.poll_local_cooldown_songs:2;
       if($('lovedResetHour'))$('lovedResetHour').value=s.settings.loved_reset_hour!=null?s.settings.loved_reset_hour:9;
       if($('lovedResetInterval'))$('lovedResetInterval').value=s.settings.loved_reset_interval_hours||24;
       _schedule=Array.isArray(s.settings.schedule)?JSON.parse(JSON.stringify(s.settings.schedule)):[];
@@ -3022,6 +3051,15 @@ async function tick(){
     };
     const np=s.now_playing;
     _lastNP=np;
+    // Barra de progreso de "Sonando ahora" (pedido explícito) — mismo patrón de interpolación
+    // que ya usa index.html: la posición real solo llega cada poll (2.5s), pero se interpola
+    // client-side cada 500ms para que se vea corriendo, no a saltos.
+    if(np){
+      $('npProgWrap').style.display='';
+      _npAdminState={pos0:np.position||0,t0:Date.now()/1000,dur:np.duration||1};
+    }else{
+      $('npProgWrap').style.display='none';_npAdminState=null;
+    }
     const q=s.queue||[];
     _qSnapshot=q.map(x=>x.id);   // usado por el drop-to-reorder — se actualiza siempre, aunque no se redibuje
     // Pedido explícito: cuántos minutos de música hay en cola — ya lo calculaba el servidor
@@ -3127,15 +3165,28 @@ async function tick(){
         // Botón "Cerrar ya" aquí mismo (no solo en el tab Social): el dueño mira el progreso
         // de la canción actual en este tab "En vivo" — para anticiparse al final y concluir
         // la votación/duelo justo a tiempo, antes tenía que cambiar de tab a medio del apuro.
+        // Pedido explícito: antes solo se veía el TOTAL de votos acá ("no puede ver cómo van
+        // los votos en vivo") — quién va ganando vivía solo en el tab Social. Ahora el
+        // desglose por opción (con barra) también sale acá, sin tener que cambiar de tab.
         if(s.poll&&s.poll.active){
-          const d=document.createElement('div');d.className='grp';
-          d.innerHTML=`<span>🗳️ Votación activa</span><span class="small" style="color:var(--pri)">${Object.values(s.poll.votes||{}).reduce((a,n)=>a+n,0)} votos</span>`;
+          const d=document.createElement('div');d.className='grp';d.style.flexWrap='wrap';
+          const totalPV=Object.values(s.poll.votes||{}).reduce((a,n)=>a+n,0)||0;
+          const optsHtml=(s.poll.options||[]).map(opt=>{
+            const c=(s.poll.votes&&s.poll.votes[opt.yt])||0;const pct=totalPV>0?Math.round(100*c/totalPV):0;
+            return `<div style="flex-basis:100%;display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11px"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(opt.title)}</span><span style="color:var(--mut)">${c} (${pct}%)</span></div><div style="flex-basis:100%;height:4px;background:var(--line);border-radius:2px;overflow:hidden"><div style="height:100%;width:${pct}%;background:var(--pri);transition:width .4s"></div></div>`;
+          }).join('');
+          d.innerHTML=`<span style="flex:1">🗳️ Votación activa</span><span class="small" style="color:var(--pri)">${totalPV} voto${totalPV!==1?'s':''}</span>`+optsHtml;
           const cb=document.createElement('button');cb.className='btn ghost sm';cb.textContent='Cerrar ya';cb.style.marginLeft='8px';cb.onclick=closePoll;
           d.appendChild(cb);anList.appendChild(d);
         }
         if(s.duelo&&s.duelo.active){
-          const d=document.createElement('div');d.className='grp';
-          d.innerHTML=`<span>⚔️ Duelo activo</span><span class="small" style="color:#f59e0b">${Object.values(s.duelo.votes||{}).reduce((a,n)=>a+n,0)} votos</span>`;
+          const d=document.createElement('div');d.className='grp';d.style.flexWrap='wrap';
+          const totalDV=Object.values(s.duelo.votes||{}).reduce((a,n)=>a+n,0)||0;
+          const teamsHtml=(s.duelo.teams||[]).map((team,idx)=>{
+            const c=(s.duelo.votes&&s.duelo.votes[team.yt])||0;const pct=totalDV>0?Math.round(100*c/totalDV):0;
+            return `<div style="flex-basis:100%;display:flex;align-items:center;gap:6px;margin-top:4px;font-size:11px"><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${['🔴','🔵'][idx]||''} ${esc(team.title)}</span><span style="color:var(--mut)">${c} (${pct}%)</span></div><div style="flex-basis:100%;height:4px;background:var(--line);border-radius:2px;overflow:hidden"><div style="height:100%;width:${pct}%;background:#f59e0b;transition:width .4s"></div></div>`;
+          }).join('');
+          d.innerHTML=`<span style="flex:1">⚔️ Duelo activo</span><span class="small" style="color:#f59e0b">${totalDV} voto${totalDV!==1?'s':''}</span>`+teamsHtml;
           const cb=document.createElement('button');cb.className='btn ghost sm';cb.textContent='Cerrar ya';cb.style.marginLeft='8px';cb.onclick=closeDuelo;
           d.appendChild(cb);anList.appendChild(d);
         }
