@@ -83,6 +83,18 @@
     <button class="btn ghost block sm" onclick="regenerateVapid()">🔄 Regenerar claves VAPID</button>
   </div>
 
+  <!-- Pedido explícito tras el problema de banda ancha (2026-07-22): el respaldo automático
+       a Redis mandaba el catálogo local COMPLETO (con carátulas propias embebidas) en cada
+       cambio, y eso fue el mayor consumidor que hizo que Render suspendiera el sitio. Ahora el
+       automático solo manda una muestra chica del catálogo — este botón es la única forma de
+       subir el catálogo COMPLETO a Redis, a propósito, justo antes de un deploy manual
+       importante. -->
+  <div class="card">
+    <h2>💾 Respaldo del catálogo (Redis)</h2>
+    <div class="small" style="color:var(--mut);margin-bottom:10px">El respaldo automático solo guarda una muestra chica del catálogo local (para no gastar banda ancha) — úsalo justo antes de un deploy manual si quieres asegurarte de que el catálogo COMPLETO sobreviva.</div>
+    <button class="btn ghost block sm" onclick="syncRedisNow()">💾 Sincronizar catálogo completo ahora</button>
+  </div>
+
   <div class="card">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
       <h2 style="margin:0">📋 Historial de pedidos</h2>
@@ -191,6 +203,12 @@ async function regenerateVapid(){
   const j=await r.json().catch(()=>({}));
   if(r.ok)alert('✅ Claves regeneradas. Nueva clave pública:\n'+(j.public_key||'').slice(0,24)+'…');
   else alert('❌ '+(j.error||'Error'));
+}
+async function syncRedisNow(){
+  const r=await fetch('/api/tym/sync_redis',{method:'POST'});
+  const j=await r.json().catch(()=>({}));
+  if(r.ok)alert('✅ Catálogo completo sincronizado a Redis ('+((j.sent_bytes||0)/1024/1024).toFixed(2)+' MB).');
+  else alert('❌ '+(j.error||'Error al sincronizar'));
 }
 
 const MODE_LABEL={normal:'🆓 Gratis',credito:'⚡ Crédito',pase:'⚡ Pase',salto:'⏫ Salto',single:'💰 Cobrado'};

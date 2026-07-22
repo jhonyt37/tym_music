@@ -4856,6 +4856,29 @@ class H(BaseHTTPRequestHandler):
                 save_state()
             return self._send(200, {"ok": True, "public_key": TYM.get("vapid", {}).get("public_key_b64", "")})
 
+        # ---- TYM Master: sincronizar el catálogo COMPLETO a Redis, a mano ----
+        # Pedido explícito tras encontrar que el respaldo automático (con el catálogo local
+        # completo, carátulas propias incluidas) era el mayor consumidor de banda ancha que
+        # tumbó el sitio por exceder el límite gratis de Render. El respaldo automático ahora
+        # manda solo una muestra chica del catálogo (ver _redis_light_snapshot) — este botón
+        # es la única forma de que el catálogo COMPLETO quede a salvo en Redis, para usarlo a
+        # propósito justo antes de un deploy manual importante, no en cada cambio.
+        if path == "/api/tym/sync_redis":
+            if not self.authed_master():
+                return self._send(403, {"error": "Solo TYM master"})
+            if not (REDIS_URL and REDIS_TOKEN):
+                return self._send(400, {"error": "Upstash Redis no está configurado en este servidor "
+                                         "(faltan las variables de entorno)."})
+            with LOCK:
+                data = {"version": 3, "ids": {"_id": _id[0], "_fb": FB_IDX[0]},
+                        "tym": TYM, "venues": {vid: venue_snapshot(v) for vid, v in VENUES.items()},
+                        "auth": AUTH}
+            size = len(json.dumps(data, ensure_ascii=False))
+            ok = redis_save(data)
+            if ok:
+                _redis_last_save[0] = time.time()   # el automático espera 3 min más desde ahora
+            return self._send(200 if ok else 502, {"ok": ok, "sent_bytes": size})
+
         # ---- TYM Master: bloquear/desbloquear el login de un local (ej. moroso) ----
         if path == "/api/tym/toggle_block":
             if not self.authed_master():
@@ -4929,9 +4952,9 @@ def venue_snapshot(v):
     return snap
 
 def redis_save(data):
-    """Guarda en Upstash Redis vía REST API (sin dependencias extra)."""
+    """Guarda en Upstash Redis vía REST API (sin dependencias extra). Devuelve True/False."""
     if not REDIS_URL or not REDIS_TOKEN:
-        return
+        return False
     try:
         payload = json.dumps(["SET", REDIS_KEY, json.dumps(data, ensure_ascii=False)]).encode("utf-8")
         req = urllib.request.Request(REDIS_URL,
@@ -4939,8 +4962,12 @@ def redis_save(data):
             headers={"Authorization": f"Bearer {REDIS_TOKEN}",
                      "Content-Type": "application/json"})
         urllib.request.urlopen(req, timeout=10)
+        return True
     except Exception as e:
         print("redis_save error:", e)
+        return False
+
+CATALOG_AUTO_BACKUP_SAMPLE = 10   # ver _redis_light_snapshot
 
 def redis_load():
     """Recupera estado desde Upstash Redis."""
@@ -4959,6 +4986,21 @@ def redis_load():
 
 _redis_last_save = [0]
 
+def _redis_light_snapshot(data):
+    """Copia liviana del snapshot completo, para el respaldo AUTOMÁTICO a Redis — pedido
+    explícito tras confirmar que el catálogo local (con carátulas propias en base64) era el
+    consumidor real de banda ancha que hizo que Render suspendiera el sitio: en esta etapa
+    (sin cliente real, solo pruebas) no hace falta que el catálogo completo sobreviva un
+    redeploy automáticamente — con una muestra chica alcanza para confirmar que el mecanismo
+    de respaldo/recuperación sigue funcionando. El resto del estado (mesas, sesiones, caja,
+    historial, ajustes — todo chico) sigue viajando completo, sin muestrear.
+
+    El catálogo COMPLETO se puede subir a mano cuando de verdad haga falta (ej. justo antes de
+    un deploy manual importante) con /api/tym/sync_redis — ver ese endpoint."""
+    venues = {vid: {**vs, "curated": vs.get("curated", [])[:CATALOG_AUTO_BACKUP_SAMPLE]}
+              for vid, vs in data["venues"].items()}
+    return {**data, "venues": venues}
+
 def save_state():
     """{version:3, tym:{...global...}, venues:{id:{...bar...}}} — multi-bar; listo para DB."""
     try:
@@ -4969,27 +5011,20 @@ def save_state():
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         os.replace(tmp, DATA_FILE)
-        # Backup a Redis: máx una vez cada 3 minutos (antes 1 min), en hilo separado para no
-        # bloquear. Causa real encontrada del consumo de banda ancha que hizo que Render
-        # suspendiera el sitio (ver conversación 2026-07-22): este backup manda el snapshot
-        # COMPLETO de TODOS los venues combinados (incluye "curated" — ahí vive el catálogo
-        # local completo, con carátulas propias en base64 embebidas) en cada llamada. Medido
-        # con un catálogo realista (300 canciones, 50 con carátula propia): ~3.5MB por
-        # llamada. En una sesión de edición intensa del catálogo (justo lo que veníamos
-        # haciendo estas últimas semanas) eso son cientos de MB por sesión con el throttle
-        # de 1 min — con 3 min, ~66% menos. Costo del cambio: si el proceso se cae justo
-        # antes de un deploy manual, se puede perder hasta 3 min de ediciones (antes 1 min)
-        # en vez de perderse TODO por falta de banda ancha para servir el sitio.
-        # Los logos (venue_logo/tym_logo) SÍ viajan en este backup — antes se excluían por
-        # miedo a que fueran muy pesados para el free tier de Redis, pero desde que
-        # remove_solid_bg() recorta y redimensiona (ver más arriba) un logo real pesa unos
-        # 50-150KB, no varios MB — dejar el logo afuera del backup significa que un redeploy
-        # de Render (disco efímero, sin data.json local) lo perdía y el admin tenía que
-        # volver a subirlo cada vez.
+        # Backup automático a Redis: máx una vez cada 3 minutos, en hilo separado para no
+        # bloquear, y con el catálogo local recortado a una muestra (ver
+        # _redis_light_snapshot) — antes mandaba TODO el catálogo (con carátulas propias
+        # embebidas) en cada llamada, causa real del consumo de banda ancha que hizo que
+        # Render suspendiera el sitio (ver conversación 2026-07-22). Sincronizar el catálogo
+        # COMPLETO ya no es automático — es una acción a mano desde /tym, no algo que corra
+        # solo cada pocos minutos sin que el dev lo pida.
+        # Los logos (venue_logo/tym_logo) SÍ viajan completos en este backup liviano — pesan
+        # unos 50-150KB (remove_solid_bg() ya los recorta/redimensiona), no varios MB.
         now = time.time()
         if REDIS_URL and REDIS_TOKEN and now - _redis_last_save[0] > 180:
             _redis_last_save[0] = now
-            threading.Thread(target=redis_save, args=(data,), daemon=True).start()
+            light = _redis_light_snapshot(data)
+            threading.Thread(target=redis_save, args=(light,), daemon=True).start()
     except Exception as e:
         print("save_state error:", e)
 
