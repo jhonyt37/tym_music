@@ -200,6 +200,12 @@ body{padding-bottom:80px}
 #pullRefresh.ready #pullRefreshIcon{transform:rotate(180deg)}
 #pullRefresh.spinning #pullRefreshIcon{animation:pullSpin .7s linear infinite}
 @keyframes pullSpin{from{transform:rotate(0)}to{transform:rotate(360deg)}}
+/* Anuncio del bar en "Ahora" — mismo latido que ya tiene #annBanner en tv.html, pero SIN el
+   translateX(-50%) del banner de TV (ese card se centra con transform, este es un <div> de
+   flujo normal) — reusar el keyframe de TV tal cual habría dejado el card corrido de lugar en
+   cuanto terminara la animación de entrada, mismo gotcha ya documentado para #annBanner. */
+#clientAnnCard{animation:clientAnnHeartbeat 1.1s ease-in-out infinite}
+@keyframes clientAnnHeartbeat{0%,100%{transform:scale(1)}50%{transform:scale(1.015)}}
 </style>
 </head>
 <body>
@@ -280,7 +286,14 @@ body{padding-bottom:80px}
 
   <!-- ===== AHORA (antes "Suena") ===== -->
   <section class="tab" id="tab-ahora">
-    <div class="card" id="clientAnnCard" style="display:none;border-color:var(--gold);background:rgba(245,179,1,.08)"></div>
+    <div class="card" id="clientAnnCard" style="display:none;border-color:var(--gold);background:rgba(245,179,1,.08)">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+        <span class="pulse" style="background:var(--gold)"></span>
+        <span style="font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--gold)">📢 Anuncio del bar</span>
+        <span id="clientAnnTimer" style="margin-left:auto;font-size:11px;color:var(--mut)"></span>
+      </div>
+      <div id="clientAnnText" style="font-weight:600"></div>
+    </div>
     <div class="card now-live" id="nowCard">
       <div class="now-live-lbl">🟢 EN VIVO</div>
       <h2><span class="pulse"></span>Sonando ahora</h2>
@@ -2090,6 +2103,16 @@ function renderLoved(items){
 // ---------- Poll ----------
 let _lastNpId=null,_lastPollActive=false,_lastDueloActive=false;
 let _seenAnnIds=new Set();
+// Countdown del anuncio del bar en "Ahora" — pedido explícito, mismo espíritu que el timer de
+// votación/duelo ya existente (mm:ss + se apaga solo al llegar a 0, no hace falta esperar el
+// próximo poll de 2s para que se vea fluido).
+let _annCardExpiresAt=null,_annCardTimerT=null;
+function _annCardTimerTick(){
+  if(!_annCardExpiresAt){$('clientAnnTimer').textContent='';return;}
+  const rem=Math.max(0,Math.round(_annCardExpiresAt-Date.now()/1000));
+  $('clientAnnTimer').textContent=rem>0?mm(rem)+' restante':'';
+  if(rem>0)_annCardTimerT=setTimeout(_annCardTimerTick,1000);
+}
 async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
@@ -2192,10 +2215,19 @@ async function poll(){
       if(np.priority&&sess) setTimeout(poll,400);
     }
 
-    // Verificar si nuestra asistencia fue atendida por el admin
-    if(assistActive&&assistId!==null){
-      const still=(s.assists||[]).some(a=>a.id===assistId);
-      if(!still){assistActive=false;assistId=null;updateAssistBtn();toast('✓ Alguien está en camino 👋','ok');}
+    // Asistencia de la mesa — pedido explícito: antes assistActive solo vivía en memoria del
+    // navegador, así que refrescar la página con una asistencia ya pedida la mostraba como si
+    // nunca se hubiera pedido (el servidor sí la tenía activa, la campana mentía). Ahora se
+    // sincroniza cada poll contra s.assists por MESA (no por token — varias personas de la
+    // misma mesa comparten una sola asistencia, ver /api/assist), así que también se refleja
+    // sola si alguien más de tu mesa ya llamó antes que vos.
+    if(sess){
+      const mine=(s.assists||[]).find(a=>a.table===sess.table);
+      if(mine){
+        if(!assistActive||assistId!==mine.id){assistActive=true;assistId=mine.id;updateAssistBtn();}
+      }else if(assistActive){
+        assistActive=false;assistId=null;updateAssistBtn();toast('✓ Alguien está en camino 👋','ok');
+      }
     }
 
     // Sugerencias basadas en lo que suena (fallback también, si tiene artista) — mismo
@@ -2324,8 +2356,10 @@ async function poll(){
     const annCard=$('clientAnnCard');
     if(clientAnns.length){
       const latest=clientAnns[clientAnns.length-1];
-      annCard.style.display='';annCard.textContent='📢 '+latest.text;
-    }else annCard.style.display='none';
+      annCard.style.display='';$('clientAnnText').textContent=latest.text;
+      _annCardExpiresAt=latest.expires_at||null;
+      clearTimeout(_annCardTimerT);_annCardTimerTick();
+    }else{annCard.style.display='none';_annCardExpiresAt=null;clearTimeout(_annCardTimerT);}
     renderVibe(s.vibe);
     renderDedicaCard(s.tables,s.session,s.settings.dedica_presets);
     renderSheetDedicaPresets(s.settings.dedica_presets);

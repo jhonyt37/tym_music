@@ -959,7 +959,10 @@ function renderAssists(assists){
   if(!ids.size)return;
   const MAX=3;const visible=(assists||[]).slice(0,MAX);const extra=(assists||[]).length-MAX;
   visible.forEach(a=>{
-    const label='🔔 '+a.table+(a.buzz_count>1?' ×'+a.buzz_count:'');
+    // Pedido explícito: cuántas veces llamó una mesa es dato interno del bar (para que el
+    // personal sepa qué tan urgente atenderla), no algo para mostrar en la pantalla pública —
+    // acá solo el nombre de la mesa, el conteo se quedó en /admin.
+    const label='🔔 '+a.table;
     if(_assistShown.has(a.id)){
       const pill=_assistShown.get(a.id);
       pill.textContent=label;

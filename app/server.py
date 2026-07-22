@@ -86,6 +86,26 @@ def _scheduled_genre():
             pass
     return s.get("genre", "reggaeton")
 
+def _next_loved_reset_boundary(now_ts):
+    """Última hora exacta (epoch) en la que debería haber pasado un reinicio automático de
+    'Top de Hoy', según settings.loved_reset_hour/loved_reset_interval_hours (zona horaria del
+    venue) — pedido explícito, default 24h empezando a las 9am a diario. Se ancla en la
+    ocurrencia de loved_reset_hour de hoy (o ayer, si todavía no llega esa hora) y avanza de a
+    intervalos hasta la más reciente que ya pasó, para que un intervalo menor a 24h (ej. cada
+    12h) también calce bien contra esa misma hora ancla."""
+    s = STATE["settings"]
+    tz = _tz(s.get("timezone"))
+    reset_hour = max(0, min(23, int(s.get("loved_reset_hour", 9))))
+    interval_h = max(1, int(s.get("loved_reset_interval_hours", 24)))
+    now_dt = datetime.datetime.fromtimestamp(now_ts, tz=tz)
+    anchor = now_dt.replace(hour=reset_hour, minute=0, second=0, microsecond=0)
+    if anchor > now_dt:
+        anchor -= datetime.timedelta(hours=interval_h)
+    anchor_ts = anchor.timestamp()
+    while anchor_ts + interval_h * 3600 <= now_ts:
+        anchor_ts += interval_h * 3600
+    return anchor_ts
+
 LOCK = threading.Lock()
 _id = [0]
 FB_IDX = [0]   # índice para recorrer la lista sugerida en orden (nunca silencio)
@@ -493,6 +513,9 @@ def make_venue(name):
                                             # la duración real, ya era dinámica).
             "schedule": [],                # [{from:"HH:MM", to:"HH:MM", genre:str, label:str}]
             "timezone": DEFAULT_TZ,         # zona horaria IANA del local (ej: "America/Bogota")
+            "loved_reset_hour": 9,          # hora local (0-23) del reinicio automático diario
+                                             # de "Top de Hoy" — pedido explícito, default 9am
+            "loved_reset_interval_hours": 24,  # cada cuánto se repite el reinicio automático
             "prepaid_mode": False,     # ON: saldo prepago por cliente en vez de cuenta de mesa
             "min_direct_pay": 700,     # piso para pago directo sin wallet (evita que la pasarela se coma el monto)
             "show_tym_brand": False,   # mostrar el logo/texto "TYM Music" en /tv (off por defecto, tema legal)
@@ -538,6 +561,10 @@ def make_venue(name):
                                          # significa que una canción se puede volver a celebrar una vez, sin costo real
         "loved_celebration": None,      # {"yt","title","artist","total","ts"} — última celebración, la TV
                                          # se guía por el "ts" para no repetir la animación en cada poll
+        "loved_reset_at": 0,            # epoch del último reinicio de "Top de Hoy" (manual o
+                                         # automático) — loved_ranking() ignora historial de
+                                         # ANTES de este punto. 0 = nunca se reinició, cuenta
+                                         # todo el historial guardado.
         "_id": 0, "_fb": 0,
     }
 
@@ -1931,8 +1958,13 @@ def loved_ranking():
     top_loved (public_state) y el chequeo de la celebración "Top de Hoy" en /api/react — antes
     vivían duplicados en 2 lugares, con riesgo real de que se desincronizaran."""
     np = STATE["now_playing"]
+    # loved_reset_at (pedido explícito, botón manual + reinicio automático configurable):
+    # solo se ignora historial de ANTES del reinicio — now_playing/items nunca se filtran (ya
+    # están sonando o a punto de sonar, siempre "después" de cualquier reinicio pasado).
+    reset_at = STATE.get("loved_reset_at", 0)
+    hist = [h for h in STATE["history"] if h.get("played_at", h.get("ts", 0)) >= reset_at]
     agg = {}
-    for it in (([np] if np else []) + STATE["items"] + STATE["history"]):
+    for it in (([np] if np else []) + STATE["items"] + hist):
         _, _, tot = react_counts(it["id"])
         if tot > 0:
             rp = STATE.get("reaction_pub", {}).get(it["id"], {})
@@ -2062,6 +2094,17 @@ def public_state(token=None, admin=False, mark_dedica=None):
             if token in voters:
                 my_bis_votes.append(yt)
 
+    # ---- "Top de Hoy": reinicio automático (pedido explícito, default cada 24h desde las
+    # 9am) — mismo estilo que los auto-cierres de poll/duelo de acá abajo: se revisa en cada
+    # poll (cada 2s), sin hilo/timer aparte. Nunca dispara en el pasado: si el venue estuvo
+    # offline y se saltó varios reinicios, next_boundary sigue dando el más reciente que ya
+    # pasó, así que solo se reinicia UNA vez al ponerse al día, no una vez por reinicio perdido.
+    _next_loved_boundary = _next_loved_reset_boundary(time.time())
+    if _next_loved_boundary > STATE.get("loved_reset_at", 0):
+        STATE["loved_reset_at"] = _next_loved_boundary
+        STATE["celebrated_loved"] = set()
+        STATE["loved_celebration"] = None
+
     # ---- Duelo: auto-cerrar si expiró ----
     _d = STATE.get("duelo")
     if _d and _d.get("active") and _d.get("ends_at") and time.time() >= _d["ends_at"]:
@@ -2174,6 +2217,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "venue_logo", "max_priority_queue_min", "max_song_duration_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
                                        "allow_skip_vote", "poll_min_remaining_pct",
+                                       "loved_reset_hour", "loved_reset_interval_hours",
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
                                        "show_tym_brand", "music_only", "content_mode",
                                        "song_message_moderation", "dedica_price", "dedica_display_secs",
@@ -2830,6 +2874,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/push/subscribe",
                        "/api/admin/move", "/api/admin/reorder",
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
+                       "/api/admin/reset_loved",
                        "/api/admin/duelo", "/api/admin/duelo/close",
                        "/api/admin/announcement", "/api/admin/show_qr",
                        "/api/admin/dedica/delete", "/api/admin/dedica/approve", "/api/admin/dedica/reject",
@@ -3419,8 +3464,15 @@ class H(BaseHTTPRequestHandler):
                 if not sess:
                     return self._send(400, {"error": "Sesión no válida"})
                 tok = d.get("token")
+                table = sess["table"]
+                # Pedido explícito: varias personas de la MISMA mesa pueden pedir asistencia —
+                # cuenta como UNA sola llamada de esa mesa (no una tarjeta por persona), pero
+                # cada pedido adicional de CUALQUIERA de la mesa suma al contador de llamados
+                # (buzz_count). Se agrupa por mesa (sess["table"]), no por token individual como
+                # antes — token solo queda como dato de quién la creó primero, no controla
+                # acceso: cualquiera de la mesa puede cancelarla/insistir, coordinan entre ellos.
                 if d.get("cancel"):
-                    STATE["assists"] = [a for a in STATE.get("assists", []) if a.get("token") != tok]
+                    STATE["assists"] = [a for a in STATE.get("assists", []) if a.get("table") != table]
                     return self._send(200, {"ok": True})
                 # Buzz en asistencia existente (con cooldown)
                 def _do_buzz(a):
@@ -3441,23 +3493,24 @@ class H(BaseHTTPRequestHandler):
                     return self._send(200, {"ok": True, "buzzed": True, "id": a["id"]})
                 if d.get("buzz"):
                     for a in STATE.get("assists", []):
-                        if a.get("token") == tok and not a.get("resolved"):
+                        if a.get("table") == table and not a.get("resolved"):
                             return _do_buzz(a)
                     return self._send(400, {"error": "No tienes una asistencia activa"})
-                # Nueva solicitud — si ya hay una activa del mismo token, tratar como buzz
+                # Nueva solicitud — si la mesa ya tiene una activa (la haya creado esta misma
+                # persona u otra en la misma mesa), tratar como buzz.
                 existing = next((a for a in STATE.get("assists", [])
-                                 if a.get("token") == tok and not a.get("resolved")), None)
+                                 if a.get("table") == table and not a.get("resolved")), None)
                 if existing:
                     return _do_buzz(existing)
                 aid = nid()
-                STATE["assists"].append({"id": aid, "table": sess["table"],
+                STATE["assists"].append({"id": aid, "table": table,
                                           "ts": time.time(), "resolved": False,
                                           "resolve_ts": None, "token": tok,
                                           "buzz_count": 1})
-                TYM["events"].append({"venue": CUR_VID, "table": sess["table"],
+                TYM["events"].append({"venue": CUR_VID, "table": table,
                                        "account": tok, "ts": time.time(),
                                        "ev": "assist_requested"})
-                _send_owner_push(vid, "🔔 " + sess["table"] + " pide ayuda",
+                _send_owner_push(vid, "🔔 " + table + " pide ayuda",
                                   "Toca para ver qué necesitan.", "/admin?open=assist")
                 return self._send(200, {"ok": True, "id": aid})
 
@@ -3583,6 +3636,12 @@ class H(BaseHTTPRequestHandler):
                     except Exception: pass
                 if "poll_min_remaining_pct" in d:
                     try: s["poll_min_remaining_pct"] = max(0, min(100, int(d["poll_min_remaining_pct"])))
+                    except Exception: pass
+                if "loved_reset_hour" in d:
+                    try: s["loved_reset_hour"] = max(0, min(23, int(d["loved_reset_hour"])))
+                    except Exception: pass
+                if "loved_reset_interval_hours" in d:
+                    try: s["loved_reset_interval_hours"] = max(1, min(168, int(d["loved_reset_interval_hours"])))
                     except Exception: pass
                 for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote", "music_only", "song_message_moderation", "allow_self_react"):
                     if k in d:
@@ -4516,6 +4575,16 @@ class H(BaseHTTPRequestHandler):
             # ---- Admin: reiniciar vibe ----
             if path == "/api/admin/vibe/reset":
                 STATE["vibe_votes"] = {}
+                return self._send(200, {"ok": True})
+
+            # ---- Admin: reiniciar "Top de Hoy" a mano (pedido explícito) — mismo efecto que
+            # el reinicio automático, solo que disparado ahora mismo en vez de esperar la hora
+            # configurada. No borra reacciones/historial reales, solo mueve el punto desde el
+            # que loved_ranking() empieza a contar. ----
+            if path == "/api/admin/reset_loved":
+                STATE["loved_reset_at"] = time.time()
+                STATE["celebrated_loved"] = set()
+                STATE["loved_celebration"] = None
                 return self._send(200, {"ok": True})
 
             # ---- Admin: cambiar contraseña propia ----

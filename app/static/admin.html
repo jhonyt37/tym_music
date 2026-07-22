@@ -816,6 +816,23 @@
       </label>
     </div>
 
+    <!-- Top de Hoy (pedido explícito: reinicio manual + automático configurable) -->
+    <div class="card" style="margin-bottom:14px">
+      <p class="sec">🏆 Top de Hoy</p>
+      <div class="small" style="color:var(--mut);margin-bottom:10px">El ranking "Lo más querido" (Social, cliente y TV) se reinicia solo cada cierto tiempo, o cuando quieras a mano — no borra reacciones ni historial, solo deja de contar lo de antes del reinicio.</div>
+      <button class="btn ghost block sm" onclick="resetLoved()">↺ Reiniciar Top de Hoy ahora</button>
+      <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap">
+        <div>
+          <label class="small" style="display:block;margin-bottom:4px">Hora del reinicio automático</label>
+          <input class="field" id="lovedResetHour" type="number" min="0" max="23" step="1" placeholder="9" style="max-width:90px" onchange="post('/api/admin/settings',{loved_reset_hour:parseInt($('lovedResetHour').value||9)}).then(()=>toast('Guardado','ok'))">
+        </div>
+        <div>
+          <label class="small" style="display:block;margin-bottom:4px">Cada cuántas horas</label>
+          <input class="field" id="lovedResetInterval" type="number" min="1" max="168" step="1" placeholder="24" style="max-width:90px" onchange="post('/api/admin/settings',{loved_reset_interval_hours:parseInt($('lovedResetInterval').value||24)}).then(()=>toast('Guardado','ok'))">
+        </div>
+      </div>
+    </div>
+
     <!-- Vibe -->
     <div class="card">
       <p class="sec">🎭 Encuesta de vibe</p>
@@ -2661,6 +2678,8 @@ async function tick(){
       _dedicaPresetsCache=Array.isArray(s.settings.dedica_presets)?[...s.settings.dedica_presets]:[];
       renderDedicaPresetsAdmin();
       if($('pollMinRemainingPct'))$('pollMinRemainingPct').value=s.settings.poll_min_remaining_pct!=null?s.settings.poll_min_remaining_pct:50;
+      if($('lovedResetHour'))$('lovedResetHour').value=s.settings.loved_reset_hour!=null?s.settings.loved_reset_hour:9;
+      if($('lovedResetInterval'))$('lovedResetInterval').value=s.settings.loved_reset_interval_hours||24;
       _schedule=Array.isArray(s.settings.schedule)?JSON.parse(JSON.stringify(s.settings.schedule)):[];
       renderScheduleSlots();
       _kwBlocked=Array.isArray(s.settings.blocked_keywords)?[...s.settings.blocked_keywords]:[];
@@ -3252,6 +3271,11 @@ async function closePoll(){
 async function resetVibe(){
   const j=await post('/api/admin/vibe/reset',{});
   if(j.ok){toast('Encuesta de vibe reiniciada');tick();}else toast(j.error||'Error','err');
+}
+async function resetLoved(){
+  if(!confirm('¿Reiniciar el ranking "Lo más querido" de hoy? No borra reacciones ni historial, solo deja de contar lo de antes de este momento.'))return;
+  const j=await post('/api/admin/reset_loved',{});
+  if(j.ok){toast('🏆 Top de Hoy reiniciado','ok');tick();}else toast(j.error||'Error','err');
 }
 
 // ---------- Duelo ----------
