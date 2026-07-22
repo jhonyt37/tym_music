@@ -18,6 +18,30 @@
 .pinrow{display:flex;align-items:center;gap:10px;background:var(--bg2);border:1px solid var(--line);border-radius:12px;padding:10px 12px}
 .pinrow .name{flex:1;font-weight:600}
 .pinrow .pin{font-size:22px;font-weight:800;letter-spacing:3px;color:var(--gold)}
+/* Mesas (rediseño, pedido explícito): antes era un solo <div class="pinrow"> con
+   flex-wrap:wrap donde el botón "Cerrar cuenta" y los códigos extra se acomodaban donde
+   cupieran — se veía distinto según si la mesa tenía cuenta abierta o no, y en pantallas
+   angostas quedaba desordenado. Ahora es una tarjeta con secciones fijas: siempre las mismas
+   partes en el mismo orden, la única diferencia real entre una mesa con cuenta y una sin
+   cuenta es que la sección de cuenta aparece o no — el resto se ve idéntico. */
+.mesa-card{background:var(--bg2);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.mesa-card-top{display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px}
+.mesa-card-name{font-weight:700;font-size:15px}
+.mesa-card-badges{display:flex;gap:8px;flex-wrap:wrap;font-size:11px;font-weight:700}
+.mesa-card-pin{margin-left:auto;font-size:20px;font-weight:800;letter-spacing:3px;color:var(--gold)}
+.mesa-card-tab{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  background:rgba(245,179,1,.1);border:1px solid rgba(245,179,1,.3);border-radius:10px;padding:8px 12px}
+.mesa-card-tab .amt{font-weight:800;color:var(--gold);font-size:15px}
+.mesa-card-extra{display:flex;flex-wrap:wrap;gap:6px}
+.mesa-card-extra:empty{display:none}
+.mesa-card-actions{display:flex;gap:8px;flex-wrap:wrap}
+.mesa-card-actions .btn{flex:1;min-width:64px}
+/* Sin grid a 2+ columnas a propósito: TODO admin.html vive dentro de .wrap (max-width:520px,
+   ver style.css) sin importar el ancho de pantalla — mismo patrón que el resto del panel, una
+   sola columna angosta también en PC. Una tarjeta por fila ya es "responsive" acá: lo que
+   cambiaba de desordenado a ordenado era la estructura interna de cada tarjeta, no cuántas
+   caben por fila. */
+#tables{display:flex;flex-direction:column;gap:10px}
 .pkgrow{display:flex;gap:8px;align-items:center;margin-top:8px}
 .pkgrow input{width:90px}
 .grp{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:7px 0;font-size:14px}
@@ -1367,21 +1391,48 @@ async function loadTables(){
   const t=await (await fetch('/api/admin/tables')).json();
   const box=$('tables');box.innerHTML='';
   t.forEach(m=>{
-    const r=document.createElement('div');r.className='pinrow';r.style.cssText='flex-wrap:wrap;row-gap:8px';
     const blocked=!!m.msg_blocked;
     const hasTab=(m.tab_total||0)>0;
-    const statusBits=[
-      blocked?'<span style="color:var(--red)">🚫 mensajes bloqueados</span>':'',
-      m.active_now?'<span style="color:var(--green)">🟢 activa ahora</span>':'',
-      hasTab?`<span style="color:var(--gold);display:inline-flex;align-items:center"><span class="pulse" style="background:var(--gold)"></span>💳 debe ${cop(m.tab_total)}</span>`:'',
-    ].filter(Boolean);
-    const statusHtml=statusBits.length?`<div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:4px;font-size:11px;font-weight:700">${statusBits.join('')}</div>`:'';
-    r.innerHTML=`<div class="name">${esc(m.name)}${statusHtml}</div><div class="pin">${esc(m.pin)}</div>`;
+    const card=document.createElement('div');card.className='mesa-card';
+
+    // Encabezado: nombre + insignias + PIN — siempre las mismas partes, en el mismo orden,
+    // tenga o no cuenta abierta esta mesa.
+    const top=document.createElement('div');top.className='mesa-card-top';
+    const badges=[
+      m.active_now?'<span style="color:var(--green)">🟢 Activa ahora</span>':'',
+      blocked?'<span style="color:var(--red)">🚫 Mensajes bloqueados</span>':'',
+    ].filter(Boolean).join('');
+    top.innerHTML=`<div class="mesa-card-name">${esc(m.name)}</div>`+
+      (badges?`<div class="mesa-card-badges">${badges}</div>`:'')+
+      `<div class="mesa-card-pin">${esc(m.pin)}</div>`;
+    card.appendChild(top);
+
+    // Cuenta abierta: sección propia, separada visualmente — solo aparece si hay algo que
+    // cobrar. Es la ÚNICA parte que cambia entre una mesa con cuenta y una sin cuenta.
     if(hasTab){
-      const cb=document.createElement('button');cb.className='btn sm';cb.style.cssText='background:var(--gold);color:#1a1408';cb.textContent='💳 Cerrar cuenta';
+      const tabBox=document.createElement('div');tabBox.className='mesa-card-tab';
+      tabBox.innerHTML=`<span class="amt">💳 Debe ${cop(m.tab_total)}</span>`;
+      const cb=document.createElement('button');cb.className='btn sm';cb.style.cssText='background:var(--gold);color:#1a1408';cb.textContent='Cerrar cuenta';
       cb.onclick=()=>closeTable(m.name,m.tab_total);
-      r.appendChild(cb);
+      tabBox.appendChild(cb);
+      card.appendChild(tabBox);
     }
+
+    // Códigos extra (si hay) — chips dentro de la MISMA tarjeta, no una caja aparte flotando.
+    const extraPins=m.extra_pins||[];
+    const extraBox=document.createElement('div');extraBox.className='mesa-card-extra';
+    extraPins.forEach(p=>{
+      const chip=document.createElement('span');
+      chip.style.cssText='display:inline-flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700;color:var(--gold)';
+      chip.innerHTML=esc(p)+' <span style="cursor:pointer;color:var(--mut)" title="Quitar este código">✕</span>';
+      chip.querySelector('span').onclick=async()=>{await post('/api/admin/tables',{action:'remove_pin',name:m.name,pin:p});loadTables();};
+      extraBox.appendChild(chip);
+    });
+    card.appendChild(extraBox);
+
+    // Acciones: siempre el mismo set, mismo orden, mismo ancho — no compiten por espacio con
+    // el botón de cerrar cuenta (que vive en su propia sección arriba).
+    const actions=document.createElement('div');actions.className='mesa-card-actions';
     const ap=document.createElement('button');ap.className='btn ghost sm';ap.textContent='+ Código';
     ap.title='Generar un código individual para otra persona de esta mesa (misma cuenta, identidad separada)';
     ap.onclick=async()=>{
@@ -1389,32 +1440,22 @@ async function loadTables(){
       if(j.new_pin)alert('✅ Código nuevo para '+m.name+':\n\n'+j.new_pin+'\n\nPásaselo a la persona — entra igual que el PIN de mesa, pero como identidad propia (los cobros siguen siendo de la mesa).');
       loadTables();
     };
-    const mb=document.createElement('button');mb.className='btn sm';mb.textContent=blocked?'🔊':'🔇';
+    const mb=document.createElement('button');mb.className='btn ghost sm';mb.textContent=blocked?'🔊 Reactivar':'🔇 Bloquear';
     mb.title=blocked?'Reactivar mensajes/dedicatorias de esta mesa':'Bloquear mensajes/dedicatorias de esta mesa';
     mb.onclick=async()=>{await post('/api/admin/tables',{action:'toggle_msg_block',name:m.name});loadTables();};
-    const rg=document.createElement('button');rg.className='btn ghost sm';rg.textContent='↻';rg.title='Nuevo PIN';
+    const rg=document.createElement('button');rg.className='btn ghost sm';rg.textContent='↻ PIN';rg.title='Generar un PIN nuevo';
     rg.onclick=async()=>{await post('/api/admin/tables',{action:'regen',name:m.name});loadTables();};
-    const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';
+    const rm=document.createElement('button');rm.className='btn red sm';rm.textContent='✕';rm.style.flex='none';
     rm.onclick=async()=>{
       if(!confirm('¿Borrar '+m.name+'? Esta acción no se puede deshacer.'))return;
       const j=await post('/api/admin/tables',{action:'remove',name:m.name});
       if(j.error)alert('⚠️ '+j.error);
       loadTables();
     };
-    r.appendChild(ap);r.appendChild(mb);r.appendChild(rg);r.appendChild(rm);
-    const extraPins=m.extra_pins||[];
-    if(extraPins.length){
-      const ep=document.createElement('div');ep.style.cssText='flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;margin-top:4px';
-      extraPins.forEach(p=>{
-        const chip=document.createElement('span');
-        chip.style.cssText='display:inline-flex;align-items:center;gap:6px;background:var(--bg2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700;color:var(--gold)';
-        chip.innerHTML=esc(p)+' <span style="cursor:pointer;color:var(--mut)" title="Quitar este código">✕</span>';
-        chip.querySelector('span').onclick=async()=>{await post('/api/admin/tables',{action:'remove_pin',name:m.name,pin:p});loadTables();};
-        ep.appendChild(chip);
-      });
-      box.appendChild(r);box.appendChild(ep);return;
-    }
-    box.appendChild(r);
+    actions.appendChild(ap);actions.appendChild(mb);actions.appendChild(rg);actions.appendChild(rm);
+    card.appendChild(actions);
+
+    box.appendChild(card);
   });
 }
 async function addTable(){await post('/api/admin/tables',{action:'add'});loadTables();}
