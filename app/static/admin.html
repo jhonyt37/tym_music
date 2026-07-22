@@ -475,28 +475,29 @@
       <!-- Pedido explícito: "no hay en Ajustes una sección para configurar lanzamiento
            automático de votaciones y duelos" — antes solo existía el cooldown de votación,
            escondido dentro de la tarjeta de Votación en Social, sin ningún interruptor para
-           prender/apagar cada una por separado. Solo aplica en Modo catálogo local. -->
+           prender/apagar cada una por separado. Aplica en los 2 modos (local y YouTube) — lo
+           único que cambia es de dónde salen las canciones ofrecidas. -->
       <details class="settingsSection">
         <summary><span class="sec">🎲 Auto-lanzamiento de votación y duelo</span><span class="chev">▸</span></summary>
         <div class="secBody">
-      <div class="small" style="color:var(--mut);margin-bottom:14px">Solo aplica en Modo catálogo local: con la cola vacía y sonando la lista del bar, lanza una votación o un duelo cada cierto número de canciones, para reenganchar a los clientes.</div>
+      <div class="small" style="color:var(--mut);margin-bottom:14px">Con la cola vacía y sonando la lista de fondo del bar, lanza una votación o un duelo cada cierto número de canciones, para reenganchar a los clientes. Funciona igual en Modo catálogo local y en modo YouTube — solo cambia de dónde salen las opciones (ver abajo). El duelo automático es exclusivo de modo local.</div>
 
       <label class="opt" style="margin-bottom:10px">
-        <div><b>🗳️ Auto-lanzar votación</b><div class="small">Cada N canciones (ver abajo), arma una votación con opciones de la lista del bar.</div></div>
+        <div><b>🗳️ Auto-lanzar votación</b><div class="small">Cada N canciones (ver abajo), arma una votación con opciones de la lista de fondo.</div></div>
         <input type="checkbox" id="pollAutoEnabled" style="width:22px;height:22px">
       </label>
       <label class="opt" style="margin-bottom:10px">
-        <div><b>⚔️ Auto-lanzar duelo</b><div class="small">Cada N canciones, enfrenta 2 canciones en vez de una votación de varias opciones.</div></div>
+        <div><b>⚔️ Auto-lanzar duelo</b><div class="small">Cada N canciones, enfrenta 2 canciones en vez de una votación de varias opciones. Solo en Modo catálogo local.</div></div>
         <input type="checkbox" id="dueloAutoEnabled" style="width:22px;height:22px">
       </label>
       <div class="small" style="color:var(--mut);margin-bottom:14px">Si activas las 2, se turnan en orden fijo — votación, duelo, votación... — nunca las 2 a la vez.</div>
 
       <label class="small" style="display:block;margin-bottom:4px">🎚️ Canciones entre un auto-lanzamiento y el siguiente</label>
-      <div class="small" style="color:var(--mut);margin-bottom:6px">La canción ganadora de la votación/duelo NO cuenta — a partir de que arranca hacen falta N canciones frescas del catálogo local antes del próximo lanzamiento. Mínimo 2 (con 1 se siente como un loop). Default: 2.</div>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">La canción ganadora de la votación/duelo NO cuenta — a partir de que arranca hacen falta N canciones frescas de la lista de fondo antes del próximo lanzamiento. Mínimo 2 (con 1 se siente como un loop). Default: 2.</div>
       <input class="field" id="pollAutoCooldownSongs" type="number" min="2" max="20" placeholder="2" style="max-width:140px;margin-bottom:14px">
 
-      <label class="small" style="display:block;margin-bottom:4px">🌟 De dónde salen las opciones</label>
-      <div class="small" style="color:var(--mut);margin-bottom:6px">"Solo destacadas" nunca sale del catálogo que el bar marcó como Recomendadas del local — "cualquier canción" es una sugerencia más amplia, al azar sobre todo el catálogo.</div>
+      <label class="small" style="display:block;margin-bottom:4px">🌟 De dónde salen las opciones (solo Modo catálogo local)</label>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">"Solo destacadas" nunca sale del catálogo que el bar marcó como Recomendadas del local — "cualquier canción" es una sugerencia más amplia, al azar sobre todo el catálogo. En modo YouTube esto no aplica — busca por artista/género de lo sonado recientemente, igual que siempre.</div>
       <select class="field" id="pollAutoSource" style="max-width:320px;margin-bottom:14px">
         <option value="featured">Solo destacadas (Recomendadas del local)</option>
         <option value="catalog">Cualquier canción del catálogo, al azar</option>

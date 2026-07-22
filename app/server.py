@@ -2318,70 +2318,40 @@ def public_state(token=None, admin=False, mark_dedica=None):
         if _p_song_changed or (_p.get("ends_at") and time.time() >= _p["ends_at"]):
             _close_poll_winner(_p)
 
-    # ---- Poll: auto-lanzar si condiciones se cumplen (modo YouTube) ----
-    # content_mode!="local" a propósito: esta rama busca candidatos en YouTube según el
-    # artista/género de lo que se acaba de pedir — nunca debe correr en un bar que
-    # deliberadamente eligió modo local, aunque la canción que suena no sea fallback (ej. el
-    # ganador de una votación anterior, que SÍ cuenta como "no fallback").
+    # ---- Poll/Duelo: auto-lanzar cuando la lista de fondo lleva sonando sola (AMBOS modos) ----
+    # Pedido explícito, confirmado con el usuario tras reportar que en modo YouTube los ajustes
+    # de Auto-lanzamiento no tenían ningún efecto: "esto aplica en ambos modos local y youtube,
+    # lo que cambia es de dónde salen las canciones, pero las configs y lógica aplican igual".
+    # Antes había 2 ramas separadas: una para YouTube (se lanzaba nada más quedar la cola casi
+    # vacía tras un pedido real, sin delay ni cooldown configurable) y otra para modo local (con
+    # todos los ajustes de Ajustes → Auto-lanzamiento). Unificadas en un solo bloque — mismo
+    # gate, mismo cooldown, mismo delay, mismo interruptor — solo cambia DE DÓNDE salen las
+    # opciones al momento de lanzar (catálogo propio vs. búsqueda en YouTube por artista/género
+    # reciente). poll_auto_source (destacadas/catálogo completo) y el duelo automático siguen
+    # siendo exclusivos de modo local — no existe un "duelo por YouTube".
+    # Reglas ya afinadas en rondas anteriores (ver detalle en memoria del proyecto):
+    # - "songs_since_local_poll" cuenta cualquier canción de fondo (fallback) desde el último
+    #   auto-lanzamiento; la ganadora de una votación/duelo NO cuenta (resetea el contador a 0,
+    #   hacen falta N canciones de fondo GENUINAMENTE frescas después de ella).
+    # - Mínimo N=2 (con 1 se siente como un loop).
+    # - Delay configurable en segundos o % de la duración de la canción actual, tras arrancar.
+    # - poll_auto_enabled/duelo_auto_enabled: si ambas están activas, se alternan en orden fijo
+    #   (votación, duelo, votación...) — auto_alt_turn guarda a cuál le toca la próxima vez.
     _p = STATE.get("poll")
-    if np and not np.get("fallback") and STATE["settings"].get("content_mode") != "local":
-        _queue_len = len(q)
-        _no_active_poll = not (_p and _p.get("active"))
-        _not_launched = STATE.get("poll_launched_for_id") != np["id"]
-        # _poll_gate_error() de paso también cubre "el siguiente puesto ya es un salto pagado"
-        # (antes el auto-lanzamiento no lo chequeaba, solo el manual) — mismo gate para los 2
-        # caminos, pedido explícito de dejar de tener 2 comportamientos distintos.
-        if _queue_len <= 2 and _no_active_poll and _not_launched and _poll_gate_error() is None:
-            STATE["poll_launched_for_id"] = np["id"]  # reservar para evitar doble disparo
-            _hist_artists = [h.get("artist", "") for h in STATE.get("history", [])[:5]]
-            _played = {np["yt"]} | {h["yt"] for h in STATE.get("history", [])} | {i["yt"] for i in STATE.get("items", [])}
-            _vid = CUR_VID
-            threading.Thread(
-                target=_auto_create_poll_bg,
-                args=(_vid, np["id"], np["yt"], np.get("artist", ""), _hist_artists,
-                      _scheduled_genre(), _played),
-                daemon=True
-            ).start()
-
-    # ---- Poll/Duelo: auto-lanzar cuando "la lista del local" lleva sonando sola (modo local) ----
-    # Pedido explícito, con varias rondas de ajuste tras probarlo en vivo (ver historial en
-    # memoria del proyecto para el detalle de cada bug encontrado en el camino):
-    # 1) el disparador original de arriba EXCLUYE canciones fallback a propósito (busca en
-    #    YouTube, no aplica sin un pedido real detrás) — esta rama es la versión "modo local"
-    #    de esa misma idea, con su propio candidato (el catálogo del bar, no YouTube).
-    # 2) "songs_since_local_poll" cuenta CUALQUIER canción que suene (fallback o no) desde el
-    #    último auto-lanzamiento (votación O duelo, cooldown compartido) — no solo canciones
-    #    fallback consecutivas, para no caer en un loop de lanzamientos sin parar cuando el
-    #    ganador (no fallback) empieza a sonar.
-    # 3) El delay tras arrancar la canción (settings.poll_auto_delay_unit/_value, antes fijo en
-    #    8s y luego 20s) ahora es configurable por el admin en Ajustes — en segundos o en % de
-    #    la duración de la canción actual.
-    # 4) poll_auto_enabled/duelo_auto_enabled: cada una con su propio interruptor (pedido
-    #    explícito, "En vivo cada una debería tener un check"). Si ambas están activas, se
-    #    alternan en orden fijo (votación, duelo, votación...) — auto_alt_turn guarda a cuál le
-    #    toca la próxima vez. Si solo una está activa, siempre es esa.
     if np:
         if STATE.get("last_song_id_seen") != np["id"]:
             STATE["last_song_id_seen"] = np["id"]
-            # Pedido explícito, confirmado con el usuario: la canción GANADORA de una votación/
-            # duelo no debe contar como una de las N canciones del catálogo local — es su propio
-            # evento (la "N+1"), y a partir de que arranca hacen falta N canciones FRESCAS del
-            # catálogo antes de poder auto-lanzar de nuevo. Antes contaba como +1 (el reset solo
-            # pasaba al CREAR el poll/duelo, no al arrancar la ganadora), lo que dejaba el ciclo
-            # real en N-1 canciones locales tras la ganadora — más apretado de lo esperado.
             _is_winner_song = (np.get("table") or "").startswith("Votación") or "Duelo" in (np.get("table") or "")
             if _is_winner_song:
                 STATE["songs_since_local_poll"] = 0
             else:
                 STATE["songs_since_local_poll"] = STATE.get("songs_since_local_poll", 0) + 1
         _s = STATE["settings"]
+        _is_local_mode = _s.get("content_mode") == "local"
         _poll_auto_on = bool(_s.get("poll_auto_enabled", True))
-        _duelo_auto_on = bool(_s.get("duelo_auto_enabled", False))
-        if (np.get("fallback") and _s.get("content_mode") == "local"
-                and (_poll_auto_on or _duelo_auto_on)):
+        _duelo_auto_on = bool(_s.get("duelo_auto_enabled", False)) and _is_local_mode  # sin duelo por YouTube
+        if np.get("fallback") and (_poll_auto_on or _duelo_auto_on):
             started_ago = time.time() - (np.get("played_at") or np.get("ts") or 0)
-            # Mínimo 2, no 1 (pedido explícito): con N=1 el ciclo se siente como un loop — vota
-            # de nuevo apenas suena UNA canción tras la ganadora, muy poco respiro real.
             cooldown = max(2, int(_s.get("poll_local_cooldown_songs", 2)))
             _delay_unit = _s.get("poll_auto_delay_unit", "secs")
             _delay_value = _s.get("poll_auto_delay_value", 20)
@@ -2390,6 +2360,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
                 _delay_secs = _np_dur * max(0, min(100, _delay_value)) / 100
             else:
                 _delay_secs = max(0, _delay_value)
+            # _poll_gate_error() de paso también cubre "el siguiente puesto ya es un salto
+            # pagado" — mismo gate para lanzamiento manual y automático, en los 2 modos.
             if (STATE.get("songs_since_local_poll", 0) >= cooldown
                     and started_ago >= _delay_secs
                     and not (_p and _p.get("active"))
@@ -2406,12 +2378,24 @@ def public_state(token=None, admin=False, mark_dedica=None):
                 _played = ({np["yt"]} | {h["yt"] for h in STATE.get("history", [])}
                            | {i["yt"] for i in STATE.get("items", [])})
                 _vid = CUR_VID
-                _source = _s.get("poll_auto_source", "featured")
-                threading.Thread(
-                    target=_auto_create_local_poll_bg if _launch == "poll" else _auto_create_local_duelo_bg,
-                    args=(_vid, np["id"], _played, _source),
-                    daemon=True
-                ).start()
+                if _is_local_mode:
+                    _source = _s.get("poll_auto_source", "featured")
+                    threading.Thread(
+                        target=_auto_create_local_poll_bg if _launch == "poll" else _auto_create_local_duelo_bg,
+                        args=(_vid, np["id"], _played, _source),
+                        daemon=True
+                    ).start()
+                else:
+                    # _launch siempre es "poll" acá (duelo_auto_on se fuerza a False fuera de
+                    # modo local) — busca en YouTube por artista/género reciente, igual que
+                    # antes, solo que ahora respeta el mismo cooldown/delay que el modo local.
+                    _hist_artists = [h.get("artist", "") for h in STATE.get("history", [])[:5]]
+                    threading.Thread(
+                        target=_auto_create_poll_bg,
+                        args=(_vid, np["id"], np["yt"], np.get("artist", ""), _hist_artists,
+                              _scheduled_genre(), _played),
+                        daemon=True
+                    ).start()
 
     # ---- Poll (estado público) ----
     _p = STATE.get("poll")
