@@ -2660,6 +2660,41 @@ def public_state(token=None, admin=False, mark_dedica=None):
         out["customers"] = sorted(STATE["customers"].values(), key=lambda c: -c.get("balance", 0))[:100]
         own = next((o for o in TYM["owners"].values() if o.get("venue") == CUR_VID), None)
         out["owner_email"] = (own or {}).get("email", "")
+        # Pedido explícito: "si sale una canción en la cual va a lanzarse una votación
+        # automática debería salirle al admin... que en esta ya va a lanzarse una votación" —
+        # recalcula el MISMO gate que el disparador de arriba (sin lanzar nada acá, solo
+        # informar) para avisar que en la canción actual, apenas pase el delay, va a salir un
+        # poll/duelo. Si el delay ya pasó, el disparador de arriba ya lo lanzó en este mismo
+        # tick — acá solo aplica mientras SIGUE esperando.
+        out["auto_launch_preview"] = None
+        if np and np.get("fallback"):
+            _s2 = STATE["settings"]
+            _poll_on2 = bool(_s2.get("poll_auto_enabled", True))
+            _duelo_on2 = bool(_s2.get("duelo_auto_enabled", False))
+            if _poll_on2 or _duelo_on2:
+                _cooldown2 = max(2, int(_s2.get("poll_local_cooldown_songs", 2)))
+                _pnow = STATE.get("poll"); _dnow = STATE.get("duelo")
+                if (STATE.get("songs_since_local_poll", 0) >= _cooldown2
+                        and not (_pnow and _pnow.get("active"))
+                        and not (_dnow and _dnow.get("active"))
+                        and _poll_gate_error() is None):
+                    _unit2 = _s2.get("poll_auto_delay_unit", "secs")
+                    _val2 = _s2.get("poll_auto_delay_value", 20)
+                    if _unit2 == "pct":
+                        _dur2 = np.get("duration") or DEFAULT_DUR
+                        _delay2 = _dur2 * max(0, min(100, _val2)) / 100
+                    else:
+                        _delay2 = max(0, _val2)
+                    _started2 = time.time() - (np.get("played_at") or np.get("ts") or 0)
+                    if _started2 < _delay2:
+                        if _poll_on2 and _duelo_on2:
+                            _kind2 = STATE.get("auto_alt_turn", "poll")
+                        else:
+                            _kind2 = "poll" if _poll_on2 else "duelo"
+                        out["auto_launch_preview"] = {
+                            "type": _kind2,
+                            "at": (np.get("played_at") or np.get("ts") or 0) + _delay2,
+                        }
     return out
 
 def _pad(lst, n=6, genre=None):

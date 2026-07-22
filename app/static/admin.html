@@ -861,6 +861,15 @@
 <div id="tab-social" class="tabpanel">
   <div class="wrap" style="max-width:600px">
 
+    <!-- Pedido explícito: "si sale una canción en la cual va a lanzarse una votación
+         automática debería salirle al admin en el tab social que en esta ya va a lanzarse una
+         votación" — aviso cuando la canción actual (de fondo) va a disparar un auto-lanzamiento
+         apenas pase el delay configurado. Se oculta solo cuando no aplica (auto_launch_preview
+         viene null desde el servidor). -->
+    <div class="card" id="autoLaunchPreviewCard" style="display:none;margin-bottom:14px;border-color:var(--pri)">
+      <div id="autoLaunchPreviewText" style="font-weight:700"></div>
+    </div>
+
     <!-- Votación -->
     <div class="card" style="margin-bottom:14px">
       <p class="sec">🗳️ Votación de próxima canción</p>
@@ -3762,6 +3771,19 @@ async function closeDuelo(){
 }
 
 function renderSocialAdmin(s){
+  // Aviso de auto-lanzamiento inminente (ver comentario junto a #autoLaunchPreviewCard).
+  const alp=s.auto_launch_preview;
+  const alpCard=$('autoLaunchPreviewCard');
+  if(alpCard){
+    if(alp){
+      const secsLeft=Math.max(0,Math.round(alp.at-Date.now()/1000));
+      const kindTxt=alp.type==='duelo'?'⚔️ un duelo':'🗳️ una votación';
+      alpCard.style.display='';
+      $('autoLaunchPreviewText').textContent=`En esta canción va a lanzarse ${kindTxt} automática en ~${secsLeft}s`;
+    }else{
+      alpCard.style.display='none';
+    }
+  }
   // Poll status
   const p=s.poll;
   const statusBox=$('pollAdminStatus');
