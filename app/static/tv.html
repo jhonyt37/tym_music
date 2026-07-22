@@ -134,25 +134,58 @@ body.audio-mode #now{order:3;padding-bottom:30px}
 .pp-bar .fill{height:100%;background:#3b82f6;border-radius:5px;transition:width .6s}
 .pp-count{font-size:14px;color:#c3ccdd;width:34px;text-align:right;font-weight:800;flex-shrink:0}
 
-/* Panel de duelo en TV */
-#dueloPanel{position:fixed;bottom:90px;right:30px;z-index:22;
-  background:rgba(10,14,22,.55);border:1px solid rgba(245,158,11,.5);border-radius:20px;
-  padding:16px 22px;width:420px;backdrop-filter:blur(6px);
-  display:none;box-shadow:0 8px 32px rgba(0,0,0,.25)}
-#dueloPanel .dp-title{font-size:17px;font-weight:900;color:#fff;text-align:center;margin-bottom:3px}
-#dueloPanel .dp-sub{font-size:11px;color:#c3ccdd;text-align:center;margin-bottom:8px}
-#dueloTimerTV{font-size:13px;font-weight:800;color:#f59e0b;text-align:center;margin-bottom:5px}
-#dueloTimerBarTV{height:4px;background:rgba(30,41,64,.7);border-radius:3px;overflow:hidden;margin-bottom:12px}
-#dueloTimerBarTV .fill{height:100%;background:#f59e0b;border-radius:3px;transition:width .5s linear}
-.dp-team{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-.dp-thumb{width:38px;height:38px;border-radius:7px;object-fit:cover;flex-shrink:0;background:#1e2940}
-.dp-label{font-size:11px;font-weight:900;color:#f59e0b;letter-spacing:.5px;width:16px;text-align:center;flex-shrink:0}
-.dp-info{flex:1;min-width:0}
-.dp-title-s{font-size:13px;font-weight:700;line-height:1.2;margin-bottom:4px;color:#fff}
-.dp-row{display:flex;align-items:center;gap:8px}
-.dp-bar{flex:1;height:8px;background:rgba(30,41,64,.7);border-radius:4px;overflow:hidden}
-.dp-bar .fill{height:100%;background:#f59e0b;border-radius:4px;transition:width .6s}
-.dp-count{font-size:12px;color:#c3ccdd;width:28px;text-align:right;font-weight:800;flex-shrink:0}
+/* Panel de duelo en TV — pedido explícito: "más grande y centrado, visible para diferenciar
+   de una votación" (que ya vive abajo-centro, chica). Se rediseña como pantalla tipo "VS" de
+   juego de peleas: centrado en el medio de la pantalla, ancho, con los 2 equipos a los lados
+   de un "VS" grande y latiendo — de un vistazo, sin leer texto, ya se nota que es OTRA cosa
+   distinta de la votación. */
+#dueloPanel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:22;
+  width:min(90vw,980px);
+  background:linear-gradient(135deg,rgba(28,14,0,.72),rgba(10,14,22,.72));
+  border:2px solid rgba(245,158,11,.65);border-radius:28px;
+  padding:26px 36px 32px;backdrop-filter:blur(10px);
+  display:none;
+  box-shadow:0 0 70px rgba(245,158,11,.22),0 24px 70px rgba(0,0,0,.55);
+  animation:dueloPanelGlow 2.2s ease-in-out infinite}
+@keyframes dueloPanelGlow{
+  0%,100%{box-shadow:0 0 70px rgba(245,158,11,.22),0 24px 70px rgba(0,0,0,.55)}
+  50%{box-shadow:0 0 110px rgba(245,158,11,.42),0 24px 70px rgba(0,0,0,.55)}
+}
+#dueloPanel .dp-title{font-size:30px;font-weight:900;color:#fff;text-align:center;margin-bottom:4px;letter-spacing:.3px;text-shadow:0 2px 12px rgba(0,0,0,.6)}
+#dueloPanel .dp-sub{font-size:14px;color:#e8c48a;text-align:center;margin-bottom:14px;font-weight:600}
+#dueloTimerTV{font-size:17px;font-weight:900;color:#f59e0b;text-align:center;margin-bottom:8px;letter-spacing:.5px}
+#dueloTimerBarTV{height:6px;background:rgba(30,41,64,.7);border-radius:4px;overflow:hidden;margin-bottom:20px}
+#dueloTimerBarTV .fill{height:100%;background:#f59e0b;border-radius:4px;transition:width .5s linear}
+.dp-vs-row{display:flex;align-items:center;justify-content:center;gap:18px}
+.dp-team{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;text-align:center;gap:10px}
+.dp-thumb{width:130px;height:130px;border-radius:18px;object-fit:cover;background:#1e2940;
+  box-shadow:0 10px 34px rgba(0,0,0,.55),0 0 0 3px rgba(245,158,11,.35)}
+.dp-label{font-size:13px;font-weight:900;color:#f59e0b;letter-spacing:1px}
+.dp-info{width:100%;min-width:0}
+.dp-title-s{font-size:19px;font-weight:800;line-height:1.25;color:#fff;
+  overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.dp-artist-s{font-size:13px;color:#c3ccdd;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dp-row{display:flex;align-items:center;gap:8px;width:100%}
+.dp-bar{flex:1;height:12px;background:rgba(30,41,64,.7);border-radius:6px;overflow:hidden}
+.dp-bar .fill{height:100%;background:linear-gradient(90deg,#f59e0b,#fbbf24);border-radius:6px;transition:width .6s}
+.dp-count{font-size:16px;color:#fff;font-weight:900;flex-shrink:0;min-width:30px;text-align:right}
+.dp-vs-divider{flex-shrink:0;font-size:44px;font-weight:900;color:#f59e0b;
+  text-shadow:0 0 24px rgba(245,158,11,.9),0 2px 8px rgba(0,0,0,.6);
+  animation:dpVsPulse 1.1s ease-in-out infinite}
+@keyframes dpVsPulse{0%,100%{transform:scale(1)}50%{transform:scale(1.18)}}
+
+/* Partículas de "apoyo" volando desde cada lado hacia el centro mientras el duelo está
+   activo — pedido explícito: "animaciones que van de izquierda a derecha o de derecha a
+   izquierda hasta el centro tipo iconos". Mismo patrón que ya usa spawnFirework() (elemento
+   suelto en body, --dx custom property, se borra solo tras la animación). */
+.dp-particle{position:fixed;z-index:23;pointer-events:none;font-size:26px;top:50%;
+  filter:drop-shadow(0 2px 6px rgba(0,0,0,.5));
+  animation:dpParticleTravel 1.6s cubic-bezier(.2,.7,.4,1) forwards}
+@keyframes dpParticleTravel{
+  0%{transform:translate(0,-50%) scale(.4);opacity:0}
+  12%{opacity:1;transform:translate(calc(var(--dx) * .12),calc(-50% + var(--dy) * .12)) scale(1)}
+  100%{transform:translate(var(--dx),calc(-50% + var(--dy))) scale(.7);opacity:0}
+}
 /* Indicador de vibe (esquina inferior derecha) */
 #vibeIndicator{position:fixed;bottom:90px;right:26px;z-index:21;background:rgba(10,14,22,.80);
   border:1px solid #2a3550;border-radius:12px;padding:8px 16px;font-size:15px;font-weight:700;
@@ -467,7 +500,7 @@ body.audio-mode #now{order:3;padding-bottom:30px}
   <div class="dp-sub">Escanea el QR y vota por tu favorita</div>
   <div id="dueloTimerTV"></div>
   <div id="dueloTimerBarTV"><div class="fill" id="dueloTimerBarFillTV" style="width:100%"></div></div>
-  <div id="dpTeams"></div>
+  <div class="dp-vs-row" id="dpTeams"></div>
 </div>
 
 <!-- Indicador de vibe dominante -->
@@ -1222,10 +1255,34 @@ function _tvDueloTick(){
   if(bar)bar.style.width=Math.round(100*rem/_tvDueloDur)+'%';
   if(rem>0)_tvDueloRaf=setTimeout(_tvDueloTick,500);
 }
+// Partículas de apoyo volando desde cada lado hacia el centro (ver keyframes dpParticleTravel)
+// — corre en un intervalo propio mientras el duelo sigue activo, se detiene solo al cerrarse.
+const DP_SUPPORT_EMOJIS=['🔥','❤️','👊','⚡','🎉','💪'];
+function spawnDueloSupportParticle(fromLeft){
+  const s=document.createElement('div');s.className='dp-particle';
+  s.textContent=DP_SUPPORT_EMOJIS[Math.floor(Math.random()*DP_SUPPORT_EMOJIS.length)];
+  const startX=fromLeft?-40:window.innerWidth+40;
+  const centerX=window.innerWidth/2+(Math.random()*100-50);
+  const y=window.innerHeight*0.5+(Math.random()*140-70);
+  s.style.left=startX+'px';s.style.top=y+'px';
+  s.style.setProperty('--dx',(centerX-startX)+'px');
+  s.style.setProperty('--dy',(Math.random()*40-20)+'px');
+  document.body.appendChild(s);
+  setTimeout(()=>s.remove(),1700);
+}
+let _dpSupportTimer=null;
+function _startDueloSupportParticles(){
+  if(_dpSupportTimer)return;
+  _dpSupportTimer=setInterval(()=>{spawnDueloSupportParticle(Math.random()<0.5);},550);
+}
+function _stopDueloSupportParticles(){
+  clearInterval(_dpSupportTimer);_dpSupportTimer=null;
+}
 function renderDueloTV(duelo){
   const panel=$('dueloPanel');if(!panel)return;
-  if(!duelo||!duelo.active){panel.style.display='none';_tvDueloEndsAt=null;clearTimeout(_tvDueloRaf);return;}
+  if(!duelo||!duelo.active){panel.style.display='none';_tvDueloEndsAt=null;clearTimeout(_tvDueloRaf);_stopDueloSupportParticles();return;}
   panel.style.display='block';
+  _startDueloSupportParticles();
   // Forzar el QR visible mientras el duelo este activo — ver comentario igual en renderPollTV.
   burst($('qr'),30000);
   _tvDueloEndsAt=duelo.ends_at||null;
@@ -1236,9 +1293,10 @@ function renderDueloTV(duelo){
   const box=$('dpTeams');box.innerHTML='';
   teams.forEach((team,idx)=>{
     const count=votes[team.yt]||0;const pct=Math.round(100*count/totalV);
-    const row=document.createElement('div');row.className='dp-team';
-    row.innerHTML=`<div class="dp-label">${idx===0?'A':'B'}</div><img class="dp-thumb" src="https://i.ytimg.com/vi/${team.yt}/mqdefault.jpg" onerror="this.style.visibility='hidden'"><div class="dp-info"><div class="dp-title-s">${esc(team.title)}</div><div class="dp-row"><div class="dp-bar"><div class="fill" style="width:${pct}%"></div></div><div class="dp-count">${count}</div></div></div>`;
-    box.appendChild(row);
+    const col=document.createElement('div');col.className='dp-team';
+    col.innerHTML=`<div class="dp-label">EQUIPO ${idx===0?'A':'B'}</div><img class="dp-thumb" src="https://i.ytimg.com/vi/${team.yt}/mqdefault.jpg" onerror="this.style.visibility='hidden'"><div class="dp-info"><div class="dp-title-s">${esc(team.title)}</div><div class="dp-artist-s">${esc(team.artist||'')}</div></div><div class="dp-row"><div class="dp-bar"><div class="fill" style="width:${pct}%"></div></div><div class="dp-count">${count}</div></div>`;
+    box.appendChild(col);
+    if(idx===0){const vs=document.createElement('div');vs.className='dp-vs-divider';vs.textContent='VS';box.appendChild(vs);}
   });
 }
 
