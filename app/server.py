@@ -3407,7 +3407,8 @@ class H(BaseHTTPRequestHandler):
                     a["buzzed_at"] = now_t
                     a["buzz_count"] = a.get("buzz_count", 1) + 1
                     _send_owner_push(vid, "🔔 " + a["table"] + " insiste en pedir ayuda",
-                                      "Llevan esperando desde hace un rato — atiéndelos.")
+                                      "Llevan esperando desde hace un rato — atiéndelos.",
+                                      "/admin?open=assist")
                     return self._send(200, {"ok": True, "buzzed": True, "id": a["id"]})
                 if d.get("buzz"):
                     for a in STATE.get("assists", []):
@@ -3428,7 +3429,7 @@ class H(BaseHTTPRequestHandler):
                                        "account": tok, "ts": time.time(),
                                        "ev": "assist_requested"})
                 _send_owner_push(vid, "🔔 " + sess["table"] + " pide ayuda",
-                                  "Toca para ver qué necesitan.")
+                                  "Toca para ver qué necesitan.", "/admin?open=assist")
                 return self._send(200, {"ok": True, "id": aid})
 
             if path == "/api/admin/assist_resolve":

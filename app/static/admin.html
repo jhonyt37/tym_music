@@ -2824,11 +2824,16 @@ async function tick(){
     _qSnapshot=q.map(x=>x.id);   // usado por el drop-to-reorder — se actualiza siempre, aunque no se redibuje
     // Firma SOLO con los campos que de verdad se muestran acá — np.position avanza cada
     // segundo mientras suena (no se pinta ninguna barra de progreso en esta vista), incluirlo
-    // habría invalidado la guarda en cada tick y vuelto a este fix inútil.
+    // habría invalidado la guarda en cada tick y vuelto a este fix inútil. npFavSig entra acá
+    // a propósito: el botón ⭐ se oculta/muestra según si ya está en Destacadas/Recomendadas,
+    // y ese estado puede cambiar SIN que cambie ningún otro campo de np (justo al tocar el
+    // botón) — sin esto en la firma, el botón se quedaba pegado visible tras favoritearla.
+    const npFav=np&&(s.curated||[]).find(c=>c.yt===np.yt);
+    const npFavSig=np&&(isLocalId(np.yt)?!!(npFav&&npFav.featured):!!npFav);
     const qSig=JSON.stringify([
       np&&[np.id,np.yt,np.title,np.table,np.priority,np.fallback,np.cover,np.media_type,np.played_at||np.ts],
       q.map(it=>[it.id,it.yt,it.title,it.table,it.priority,it.ts,it.cover,it.media_type]),
-      _liveMesaFilter,
+      _liveMesaFilter,npFavSig,
     ]);
     if(_renderIfChanged(Q,qSig)){
       Q.innerHTML='';
@@ -2840,9 +2845,14 @@ async function tick(){
         // "⭐ Favorito" (pedido explícito): si un cliente pidió algo bueno, agregarla a
         // Destacadas/Recomendadas del local sin tener que ir hasta el tab Contenido y
         // buscarla de nuevo — mismo mecanismo dual que ya usa renderCurated() según el modo.
-        const fav=document.createElement('button');fav.className='btn ghost sm';fav.textContent='⭐';fav.title='Agregar a Destacadas/Recomendadas del local';
-        fav.onclick=()=>favoriteNowPlaying(np);
-        r.appendChild(fav);
+        // Pedido explícito de después: solo se muestra si TODAVÍA no está — si ya es
+        // destacada (local) o ya está en Recomendadas (YouTube), no tiene nada que ofrecer
+        // (npFavSig ya tiene este mismo cálculo, calculado arriba para la firma de re-render).
+        if(!npFavSig){
+          const fav=document.createElement('button');fav.className='btn ghost sm';fav.textContent='⭐';fav.title='Agregar a Destacadas/Recomendadas del local';
+          fav.onclick=()=>favoriteNowPlaying(np);
+          r.appendChild(fav);
+        }
         // "🚫 Bloquear" (pedido explícito, solo tiene sentido para YouTube — un id local ya
         // tiene su propio mecanismo de exclusión en el catálogo, ver "excluded" en Modo local).
         if(!isLocalId(np.yt)){
@@ -3558,6 +3568,26 @@ async function _subscribeAdminPush(){
     return true;
   }catch(e){return false;}
 }
+// Deep link a la sección de asistencias — pedido explícito: "al dar clic sobre la
+// notificación debe dirigir a las asistencias", no solo abrir /admin en general. Se dispara
+// desde 2 lugares: la URL al cargar (?open=assist, cuando el service worker abre una pestaña
+// nueva porque no había ninguna abierta) y el postMessage del SW (cuando SÍ había una pestaña
+// y solo hizo focus() — ver notificationclick en sw.js, que ahora manda la URL destino en vez
+// de asumir que enfocar alcanza).
+function focusAssist(){
+  showTab('live');
+  const card=$('assistCard');
+  if(!card)return;
+  card.scrollIntoView({behavior:'smooth',block:'center'});
+  card.style.transition='box-shadow .3s';card.style.boxShadow='0 0 0 3px var(--pri)';
+  setTimeout(()=>{card.style.boxShadow='';},2200);
+}
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.addEventListener('message',e=>{
+    if(e.data&&e.data.type==='tym-notification-click'&&(e.data.url||'').includes('open=assist'))focusAssist();
+  });
+}
+
 function setupAdminPwa(){
   const isIos=/iphone|ipad|ipod/i.test(navigator.userAgent)&&!window.MSStream;
   const isStandalone=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone;
@@ -3589,6 +3619,9 @@ function setupAdminPwa(){
   if(!me.ok){$('loginGate').style.display='flex';return;}
   const j=await me.json();$('venueTag').textContent=j.venue_name;
   try{const t=sessionStorage.getItem('adminTab');if(t)showTab(t);}catch(e){}
+  // ?open=assist gana sobre el tab recordado — llegó de tocar una notificación, la intención
+  // es ir ahí AHORA, no a lo último que se estaba viendo antes.
+  if(new URLSearchParams(location.search).get('open')==='assist')focusAssist();
   setupAdminPwa();
   loadTables();tick();setInterval(tick,2500);
   loadAnalytics();setInterval(loadAnalytics,15000);

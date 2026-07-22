@@ -36,10 +36,21 @@ self.addEventListener('push', e => {
 self.addEventListener('notificationclick', e => {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || '/';
+  const targetPath = new URL(url, self.location.origin).pathname;
   e.waitUntil(
     self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(wcs => {
-      for (const wc of wcs) {
-        if ('focus' in wc) return wc.focus();
+      // Antes solo hacía focus() en la primera pestaña que encontrara, sin navegarla ni
+      // avisarle a la página a dónde ir — si el admin ya tenía /admin abierto (el caso más
+      // común, pedido explícito: "debe llegarle a cualquiera con /admin abierto"), el clic en
+      // la notificación de asistencia solo enfocaba la pestaña sin llevarlo a la sección real.
+      // Busca una pestaña con el MISMO path (evita enfocar /admin cuando el destino es /, o
+      // viceversa) y le manda postMessage con la URL completa (incluye ?open=assist) para que
+      // la propia página decida qué tab/sección mostrar — más flexible que forzar una
+      // navegación dura, que perdería el estado ya cargado (cola, mesas, etc.).
+      const match = wcs.find(wc => new URL(wc.url).pathname === targetPath) || wcs[0];
+      if (match && 'focus' in match) {
+        match.postMessage({ type: 'tym-notification-click', url });
+        return match.focus();
       }
       if (self.clients.openWindow) return self.clients.openWindow(url);
     })
