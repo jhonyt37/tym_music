@@ -4969,7 +4969,17 @@ def save_state():
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
         os.replace(tmp, DATA_FILE)
-        # Backup a Redis: máx una vez por minuto, en hilo separado para no bloquear.
+        # Backup a Redis: máx una vez cada 3 minutos (antes 1 min), en hilo separado para no
+        # bloquear. Causa real encontrada del consumo de banda ancha que hizo que Render
+        # suspendiera el sitio (ver conversación 2026-07-22): este backup manda el snapshot
+        # COMPLETO de TODOS los venues combinados (incluye "curated" — ahí vive el catálogo
+        # local completo, con carátulas propias en base64 embebidas) en cada llamada. Medido
+        # con un catálogo realista (300 canciones, 50 con carátula propia): ~3.5MB por
+        # llamada. En una sesión de edición intensa del catálogo (justo lo que veníamos
+        # haciendo estas últimas semanas) eso son cientos de MB por sesión con el throttle
+        # de 1 min — con 3 min, ~66% menos. Costo del cambio: si el proceso se cae justo
+        # antes de un deploy manual, se puede perder hasta 3 min de ediciones (antes 1 min)
+        # en vez de perderse TODO por falta de banda ancha para servir el sitio.
         # Los logos (venue_logo/tym_logo) SÍ viajan en este backup — antes se excluían por
         # miedo a que fueran muy pesados para el free tier de Redis, pero desde que
         # remove_solid_bg() recorta y redimensiona (ver más arriba) un logo real pesa unos
@@ -4977,7 +4987,7 @@ def save_state():
         # de Render (disco efímero, sin data.json local) lo perdía y el admin tenía que
         # volver a subirlo cada vez.
         now = time.time()
-        if REDIS_URL and REDIS_TOKEN and now - _redis_last_save[0] > 60:
+        if REDIS_URL and REDIS_TOKEN and now - _redis_last_save[0] > 180:
             _redis_last_save[0] = now
             threading.Thread(target=redis_save, args=(data,), daemon=True).start()
     except Exception as e:
