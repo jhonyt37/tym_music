@@ -1011,14 +1011,12 @@ function applyTicker(el){
   if(el.dataset.tkd)return;
   if(!el.getClientRects().length)return; // oculto — no marcar, reintentar después
   el.dataset.tkd='1';
-  if(el.scrollWidth<=el.clientWidth+2)return; // título cabe, sin ticker
+  if(el.scrollWidth<=el.clientWidth+2)return; // título cabe, sin nada que hacer
+  // Antes esto armaba un texto que se desplazaba sin parar (marquee). Se veía en movimiento
+  // correctamente, pero en admin (donde hay que escanear varias filas rápido, sobre todo en
+  // mobile) un título moviéndose es más difícil de leer que uno quieto — se deja truncado con
+  // "..." (ya lo hace el CSS) y un toque muestra el título completo en un toast.
   const fullText=el.textContent;
-  const html=el.innerHTML;
-  const dur=Math.max(10,el.textContent.length*0.34)+'s';
-  const span=document.createElement('span');
-  span.style.cssText=`display:inline-block;white-space:nowrap;font-size:inherit;line-height:inherit;animation:rowTick ${dur} linear infinite`;
-  span.innerHTML=`<span style="padding-right:40px">${html}</span><span style="padding-right:40px">${html}</span>`;
-  el.innerHTML='';el.appendChild(span);
   el.style.cursor='pointer';
   el.addEventListener('click',e=>{e.stopPropagation();toast('🎵 '+fullText,'',3500);});
 }

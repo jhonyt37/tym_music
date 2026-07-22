@@ -2228,15 +2228,30 @@ def public_state(token=None, admin=False, mark_dedica=None):
         STATE["celebrated_loved"] = set()
         STATE["loved_celebration"] = None
 
-    # ---- Duelo: auto-cerrar si expiró ----
+    # ---- Duelo/Poll: auto-cerrar si expiró, O si la canción a la que estaban atados ya
+    # cambió (saltada a mano, terminó antes de lo estimado, etc.) ----
+    # Bug real reportado en vivo: "la duración de una votación debería durar desde que se
+    # lanza hasta el final de ESA canción, así no está". _poll_dynamic_duration() calcula
+    # ends_at UNA sola vez al crear el poll/duelo, a partir de la duración/posición estimadas
+    # en ESE momento — pero triggered_by_np_id (guardado desde el principio en los 3 caminos
+    # de creación) nunca se leía en ningún lado. Si la canción cambiaba ANTES de lo estimado
+    # (el admin la saltó, terminó antes por el trim_end configurado, la duración de YouTube
+    # no coincidía con lo esperado), el poll/duelo seguía "vivo" corriendo su cronómetro
+    # propio, desconectado de si la canción real ya había terminado o cambiado — atado a una
+    # canción que ya no está sonando. Ahora se cierra de una en cuanto se detecta que
+    # now_playing ya no es la misma canción que cuando se lanzó, sin esperar a ends_at.
     _d = STATE.get("duelo")
-    if _d and _d.get("active") and _d.get("ends_at") and time.time() >= _d["ends_at"]:
-        _close_duelo_winner(_d)
+    if _d and _d.get("active"):
+        _d_song_changed = _d.get("triggered_by_np_id") is not None and _d["triggered_by_np_id"] != (np.get("id") if np else None)
+        if _d_song_changed or (_d.get("ends_at") and time.time() >= _d["ends_at"]):
+            _close_duelo_winner(_d)
 
-    # ---- Poll: auto-cerrar si expiró ----
+    # ---- Poll: auto-cerrar si expiró, o si la canción ya cambió (ver comentario arriba) ----
     _p = STATE.get("poll")
-    if _p and _p.get("active") and _p.get("ends_at") and time.time() >= _p["ends_at"]:
-        _close_poll_winner(_p)
+    if _p and _p.get("active"):
+        _p_song_changed = _p.get("triggered_by_np_id") is not None and _p["triggered_by_np_id"] != (np.get("id") if np else None)
+        if _p_song_changed or (_p.get("ends_at") and time.time() >= _p["ends_at"]):
+            _close_poll_winner(_p)
 
     # ---- Poll: auto-lanzar si condiciones se cumplen (modo YouTube) ----
     # content_mode!="local" a propósito: esta rama busca candidatos en YouTube según el
@@ -4853,6 +4868,7 @@ class H(BaseHTTPRequestHandler):
                     return self._send(400, {"error": "Se necesitan exactamente 2 equipos con yt y título."})
                 duration = _poll_dynamic_duration()
                 now = time.time()
+                duelo_np_id = (STATE.get("now_playing") or {}).get("id")
                 STATE["duelo"] = {
                     "teams": [{"yt": t["yt"], "title": t["title"],
                                "artist": t.get("artist", ""), "label": t.get("label", f"Equipo {i+1}")}
@@ -4861,6 +4877,7 @@ class H(BaseHTTPRequestHandler):
                     "active": True,
                     "created_at": now,
                     "ends_at": now + duration,
+                    "triggered_by_np_id": duelo_np_id,
                     "winner_yt": None,
                 }
                 return self._send(200, {"ok": True})
