@@ -296,10 +296,14 @@
         <!-- Historial reciente / Canciones del bar — pedido explícito: no 2 tablas apiladas,
              2 sub-tabs que comparten el mismo espacio, una lista visible a la vez. -->
         <div class="card" id="recentHistCard" style="display:none">
-          <div style="display:flex;gap:8px;margin-bottom:12px">
+          <!-- Pedido explícito: con 3 sub-tabs, "Canciones del bar"/"Sugeridos" hacía que la fila
+               se saliera de la pantalla en mobile (solo se veían los 2 primeros) — flex-wrap deja
+               que el 3ro baje de línea en vez de cortarse, y nombres más cortos ("Favoritas"/
+               "Sugeridas") ayudan a que en la mayoría de anchos entren los 3 en una sola fila. -->
+          <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px">
             <button type="button" class="subtab on" id="liveSubHist" onclick="setLiveSubTab('hist')">🕓 Historial reciente</button>
-            <button type="button" class="subtab" id="liveSubFeatured" onclick="setLiveSubTab('featured')">🌟 Canciones del bar</button>
-            <button type="button" class="subtab" id="liveSubSuggested" onclick="setLiveSubTab('suggested')">🎯 Sugeridos</button>
+            <button type="button" class="subtab" id="liveSubFeatured" onclick="setLiveSubTab('featured')">🌟 Favoritas</button>
+            <button type="button" class="subtab" id="liveSubSuggested" onclick="setLiveSubTab('suggested')">🎯 Sugeridas</button>
           </div>
           <div class="list" id="recentHistList"></div>
           <div class="list" id="liveFeaturedList" style="display:none"></div>
