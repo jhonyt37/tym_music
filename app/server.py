@@ -5435,10 +5435,23 @@ def _redis_light_snapshot(data):
     de respaldo/recuperación sigue funcionando. El resto del estado (mesas, sesiones, caja,
     historial, ajustes — todo chico) sigue viajando completo, sin muestrear.
 
-    El catálogo COMPLETO se puede subir a mano cuando de verdad haga falta (ej. justo antes de
-    un deploy manual importante) con /api/tym/sync_redis — ver ese endpoint."""
-    venues = {vid: {**vs, "curated": vs.get("curated", [])[:CATALOG_AUTO_BACKUP_SAMPLE]}
-              for vid, vs in data["venues"].items()}
+    BUG REAL encontrado en vivo: este recorte se aplicaba a `curated` de TODOS los venues sin
+    mirar el modo — Render no tiene disco persistente en el plan gratis, así que CADA redeploy
+    pierde data.json y recarga desde este backup muestreado. Un venue en modo YouTube (sin
+    carátulas propias embebidas, solo texto — yt id/título/artista, nunca fue el problema de
+    banda ancha) perdía igual todo lo agregado más allá de las primeras 10 "Recomendadas" en
+    cada redeploy, aunque el admin las siguiera agregando/destacando — el recorte estaba pensado
+    solo para modo local, pero pegaba parejo. Ahora solo se recorta si el venue está en modo
+    local; YouTube conserva el catálogo curado completo (es liviano, nunca fue el problema).
+
+    El catálogo COMPLETO (local) se puede subir a mano cuando de verdad haga falta (ej. justo
+    antes de un deploy manual importante) con /api/tym/sync_redis — ver ese endpoint."""
+    venues = {}
+    for vid, vs in data["venues"].items():
+        if vs.get("settings", {}).get("content_mode") == "local":
+            venues[vid] = {**vs, "curated": vs.get("curated", [])[:CATALOG_AUTO_BACKUP_SAMPLE]}
+        else:
+            venues[vid] = vs
     return {**data, "venues": venues}
 
 def save_state():
