@@ -554,6 +554,23 @@ body{padding-bottom:80px}
   </div>
 </div>
 
+<!-- Llamar asistencia — pedido explícito: antes era un solo confirm() genérico ("te van a
+     avisar"), el admin no tenía ninguna pista de QUÉ necesitaba la mesa. Motivos rápidos
+     (configurables por el bar) + texto propio, opcional — si no elige nada, llama igual sin
+     motivo (no se bloquea el botón por esto). -->
+<div class="sheet-bg" id="assistBg" style="z-index:31">
+  <div class="sheet">
+    <h3>🔔 Llamar asistencia</h3>
+    <div class="muted" style="margin-top:6px;font-size:14px;margin-bottom:12px">El personal de tu mesa será avisado. Cuéntales qué necesitas (opcional) — así llegan preparados:</div>
+    <div id="assistPresets" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>
+    <input class="field" id="assistCustomMsg" maxlength="80" placeholder="O escribe algo más…">
+    <div style="display:flex;gap:10px;margin-top:16px">
+      <button class="btn ghost" style="flex:1" onclick="closeAssistSheet()">Cancelar</button>
+      <button class="btn" style="flex:2" onclick="confirmAssistCall()">🔔 Llamar</button>
+    </div>
+  </div>
+</div>
+
 <!-- Now detail sheet -->
 <div class="sheet-bg" id="nowDetailBg" style="z-index:25">
   <div class="sheet" style="text-align:center;padding-bottom:max(32px,env(safe-area-inset-bottom,32px))">
@@ -1431,9 +1448,31 @@ function initBellDrag(){
 }
 
 // ---------- Asistencia (campana flotante) ----------
-async function doAssist(){
+let _assistPresets=[];
+function openAssistSheet(){
+  if(!token){toast('Ingresa el código de tu mesa primero','err');return;}
+  const box=$('assistPresets');box.innerHTML='';
+  _assistPresets.forEach(p=>{
+    const b=document.createElement('button');b.type='button';b.className='btn ghost sm';b.textContent=p;
+    b.onclick=()=>confirmAssistCall(p);
+    box.appendChild(b);
+  });
+  $('assistCustomMsg').value='';
+  $('assistBg').classList.add('open');document.body.style.overflow='hidden';$('nav').classList.add('modal-open');
+}
+function closeAssistSheet(){
+  $('assistBg').classList.remove('open');document.body.style.overflow='';
+  if(!$('sheet').classList.contains('open'))$('nav').classList.remove('modal-open');
+}
+function confirmAssistCall(preset){
+  const reason=preset||($('assistCustomMsg').value||'').trim();
+  closeAssistSheet();
+  doAssist(reason);
+}
+async function doAssist(reason){
   if(!token)return;
-  const j=await (await fetch('/api/assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token})})).json();
+  const body={token};if(reason)body.reason=reason;
+  const j=await (await fetch('/api/assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})).json();
   if(j.ok){assistActive=true;assistId=j.id;updateAssistBtn();toast('🔔 Asistencia solicitada. Alguien vendrá en un momento.','ok');}
   else toast(j.error||'Error','err');
 }
@@ -1453,7 +1492,7 @@ async function sendBuzz(){
 function toggleAssist(){
   if(!token){toast('Ingresa el código de tu mesa primero','err');return;}
   if(assistActive){sendBuzz();}
-  else{confirmModal('Llamar asistencia 🔔','El personal de '+esc((sess&&sess.table)||'tu mesa')+' será avisado que necesitas atención.',doAssist);}
+  else openAssistSheet();
 }
 function updateAssistBtn(){
   const btn=$('floatBell');if(!btn)return;
@@ -2456,6 +2495,7 @@ async function poll(){
     renderVibe(s.vibe);
     renderDedicaCard(s.tables,s.session,s.settings.dedica_presets);
     renderSheetDedicaPresets(s.settings.dedica_presets);
+    _assistPresets=s.settings.assist_presets||[];
 
     // Badges de navegación
     $('badgeQ').style.display=s.queue_count?'':'none';$('badgeQ').textContent=s.queue_count;

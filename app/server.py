@@ -533,6 +533,13 @@ def make_venue(name):
                 "💃 ¡A bailar se ha dicho!",
                 "🙌 Saludos para toda la mesa",
             ],
+            "assist_presets": [             # motivos rápidos al llamar asistencia — pedido
+                "🍺 Otra ronda igual",       # explícito: así el admin ya llega sabiendo qué
+                "💧 Una botella de agua",    # necesita la mesa, en vez de solo "te llaman".
+                "🧹 Limpieza en la mesa, por favor",
+                "🗣️ Acércate para hablar",
+                "🧾 Dame la cuenta",
+            ],
             "fallback_shuffle": True,       # lista del local en orden aleatorio
             "theme": "azul",               # tema de color: azul | purpura | verde | rojo | dorado | rosa
             "blocked_keywords": [],        # palabras en título/artista que bloquean el pedido
@@ -583,7 +590,7 @@ def make_venue(name):
         "repeat_exceptions": set(),  # yt IDs a los que el admin permite repetir aunque estén en historial
         "jump_used_for": None,
         "learned_end": {},         # yt -> seg de corte aprendido por saltos manuales
-        "assists": [],             # {id, table, ts, resolved, resolve_ts, token}
+        "assists": [],             # {id, table, ts, resolved, resolve_ts, token, buzz_count, reason}
         "tv_lastseen": 0,          # timestamp del último ping de la TV activa
         "tv_owner": None,          # {"id": device_id, "last_seen": ts} — dueño actual de la TV (anti 2 TVs a la vez)
         "qr_force_until": 0,       # timestamp: si es futuro, /tv fuerza el QR visible (botón "Mostrar QR ya")
@@ -1786,7 +1793,6 @@ def promote_next(manual=False):
         if shuffle:
             # Usa una copia barajada; cuando se agota, baraja de nuevo
             if not STATE.get("curated_shuffle"):
-                import random
                 STATE["curated_shuffle"] = list(base_pool)
                 random.shuffle(STATE["curated_shuffle"])
             pool = STATE["curated_shuffle"]
@@ -1795,14 +1801,28 @@ def promote_next(manual=False):
         s = None
         if pool:
             recent = {h["yt"] for h in STATE["history"][:STATE["settings"].get("repeat_block_songs", 3)]}
+            # Bug real encontrado (reportado como "el random siempre cae en las primeras
+            # canciones"): `pool` es la MISMA lista que STATE["curated_shuffle"] (misma
+            # referencia en memoria) — pero al agotarse, esta rama reasignaba
+            # STATE["curated_shuffle"] a una lista NUEVA, sin que `pool` (variable local, ya
+            # vaciada por los pop(0) de arriba) se enterara. La condición del while
+            # (`tries < len(pool)`) volvía a evaluar len() sobre esa MISMA lista vieja, ya en 0
+            # — el bucle terminaba ahí mismo sin llegar a mirar la lista recién barajada, y
+            # el código caía siempre a `base_pool[0]` (el primer elemento del catálogo en su
+            # orden natural, NUNCA barajado) cada vez que la vuelta se agotaba justo con la
+            # última candidata bloqueada por repetición. No era un problema de la calidad del
+            # random (random.shuffle() de Python es un Fisher-Yates real, no "simple") — era
+            # que el reemplazo nunca llegaba a usarse. Fix: mutar la MISMA lista en el lugar
+            # (slice assignment) en vez de reasignar un objeto nuevo, así `pool` y
+            # STATE["curated_shuffle"] seguros viendo lo mismo.
             tries = 0
             while tries < len(pool):
                 if shuffle:
                     cand = pool[0]; pool.pop(0)
                     if not pool:   # se agotó la lista, mezcla de nuevo para la próxima vuelta
-                        import random
-                        STATE["curated_shuffle"] = list(base_pool)
-                        random.shuffle(STATE["curated_shuffle"])
+                        new_order = list(base_pool)
+                        random.shuffle(new_order)
+                        pool[:] = new_order
                 else:
                     cand = pool[FB_IDX[0] % len(pool)]; FB_IDX[0] += 1
                 if cand["yt"] not in recent:
@@ -2339,7 +2359,8 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
                                        "show_tym_brand", "music_only", "content_mode",
                                        "song_message_moderation", "dedica_price", "dedica_display_secs",
-                                       "dedica_presets", "allow_self_react", "dedica_code_expiry_min")},
+                                       "dedica_presets", "allow_self_react", "dedica_code_expiry_min",
+                                       "assist_presets")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
         "active_genre": _active_genre,
         "active_slot": _active_slot,
@@ -3066,7 +3087,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/duelo", "/api/admin/duelo/close",
                        "/api/admin/announcement", "/api/admin/show_qr",
                        "/api/admin/dedica/delete", "/api/admin/dedica/approve", "/api/admin/dedica/reject",
-                       "/api/admin/dedica_presets", "/api/admin/dedica_codes",
+                       "/api/admin/dedica_presets", "/api/admin/dedica_codes", "/api/admin/assist_presets",
                        "/api/admin/song_message/approve", "/api/admin/song_message/reject",
                        "/api/admin/change_password", "/api/admin/update_email",
                        "/api/admin/local_catalog", "/api/admin/classify_track", "/api/admin/cover_suggestions")
@@ -3679,6 +3700,10 @@ class H(BaseHTTPRequestHandler):
                 if d.get("cancel"):
                     STATE["assists"] = [a for a in STATE.get("assists", []) if a.get("table") != table]
                     return self._send(200, {"ok": True})
+                # Motivo rápido (preset del bar o texto propio del cliente) — pedido explícito:
+                # "que al admin le llegue previamente una intención de lo que quiere el
+                # cliente y vaya preparado", en vez de un aviso genérico de "te llaman".
+                reason = str(d.get("reason") or "").strip()[:80]
                 # Buzz en asistencia existente (con cooldown)
                 def _do_buzz(a):
                     now_t = time.time()
@@ -3692,9 +3717,11 @@ class H(BaseHTTPRequestHandler):
                         return self._send(400, {"error": "Espera antes de volver a llamar", "wait": int(30 - since_buzzed)})
                     a["buzzed_at"] = now_t
                     a["buzz_count"] = a.get("buzz_count", 1) + 1
+                    if reason:  # si insiste con un motivo nuevo (ej. ya no es la ronda, ahora es la cuenta), se actualiza
+                        a["reason"] = reason
+                    body = a.get("reason") or "Llevan esperando desde hace un rato — atiéndelos."
                     _send_owner_push(vid, "🔔 " + a["table"] + " insiste en pedir ayuda",
-                                      "Llevan esperando desde hace un rato — atiéndelos.",
-                                      "/admin?open=assist")
+                                      body, "/admin?open=assist")
                     return self._send(200, {"ok": True, "buzzed": True, "id": a["id"]})
                 if d.get("buzz"):
                     for a in STATE.get("assists", []):
@@ -3711,12 +3738,12 @@ class H(BaseHTTPRequestHandler):
                 STATE["assists"].append({"id": aid, "table": table,
                                           "ts": time.time(), "resolved": False,
                                           "resolve_ts": None, "token": tok,
-                                          "buzz_count": 1})
+                                          "buzz_count": 1, "reason": reason})
                 TYM["events"].append({"venue": CUR_VID, "table": table,
                                        "account": tok, "ts": time.time(),
                                        "ev": "assist_requested"})
                 _send_owner_push(vid, "🔔 " + table + " pide ayuda",
-                                  "Toca para ver qué necesitan.", "/admin?open=assist")
+                                  reason or "Toca para ver qué necesitan.", "/admin?open=assist")
                 return self._send(200, {"ok": True, "id": aid})
 
             if path == "/api/admin/assist_resolve":
@@ -4352,6 +4379,19 @@ class H(BaseHTTPRequestHandler):
                 elif act == "remove":
                     STATE["settings"]["dedica_presets"] = [p for p in presets if p != d.get("text")]
                 return self._send(200, {"ok": True, "dedica_presets": STATE["settings"]["dedica_presets"]})
+
+            # Pedido explícito: motivos rápidos configurables por el bar para cuando un
+            # cliente llama asistencia — mismo patrón que dedica_presets.
+            if path == "/api/admin/assist_presets":
+                act = d.get("action")
+                presets = STATE["settings"].setdefault("assist_presets", [])
+                if act == "add":
+                    text = str(d.get("text") or "").strip()[:60]
+                    if text and text not in presets and len(presets) < 20:
+                        presets.append(text)
+                elif act == "remove":
+                    STATE["settings"]["assist_presets"] = [p for p in presets if p != d.get("text")]
+                return self._send(200, {"ok": True, "assist_presets": STATE["settings"]["assist_presets"]})
 
             if path == "/api/admin/dedica_codes":
                 if d.get("action") == "generate":

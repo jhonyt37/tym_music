@@ -898,6 +898,19 @@
       <div id="dedicaAdminList"><div class="empty">Sin dedicatorias aún.</div></div>
     </div>
 
+    <!-- Asistencia: motivos rápidos — pedido explícito: que el aviso de asistencia le llegue
+         al admin con una intención ya clara ("otra ronda", "la cuenta"...) en vez de un
+         genérico "te llaman", para que llegue a la mesa ya preparado. -->
+    <div class="card">
+      <p class="sec">🔔 Asistencia — motivos rápidos</p>
+      <div class="small" style="color:var(--mut);margin-bottom:14px">Cuando un cliente llama asistencia, puede elegir uno de estos motivos (o escribir el suyo) — así te llega ya sabiendo qué necesita, en vez de un aviso genérico.</div>
+      <div style="display:flex;gap:6px;margin-bottom:6px">
+        <input class="field" id="assistPresetInput" maxlength="60" placeholder="Ej: 🍰 Otro postre" style="margin:0;flex:1" onkeydown="if(event.key==='Enter'){addAssistPreset();event.preventDefault()}">
+        <button class="btn sm" onclick="addAssistPreset()">+ Agregar</button>
+      </div>
+      <div id="assistPresetsAdminList" style="display:flex;flex-wrap:wrap;gap:6px;min-height:28px"></div>
+    </div>
+
     <!-- Mensajes en pedidos de canción (separado de las dedicatorias mesa a mesa) -->
     <div class="card">
       <p class="sec">🎵 Mensaje al pedir canción</p>
@@ -1266,6 +1279,31 @@ async function removeDedicaPreset(text){
   const j=await post('/api/admin/dedica_presets',{action:'remove',text});
   _dedicaPresetsCache=j.dedica_presets||_dedicaPresetsCache;
   renderDedicaPresetsAdmin();
+}
+// Motivos rápidos de asistencia — mismo patrón que los presets de dedicatoria de arriba.
+let _assistPresetsCache=[];
+function renderAssistPresetsAdmin(){
+  const box=$('assistPresetsAdminList');if(!box)return;
+  box.innerHTML='';
+  _assistPresetsCache.forEach(p=>{
+    const t=document.createElement('span');t.className='kwtag allowed';
+    t.innerHTML=`${esc(p)}<button title="Eliminar">×</button>`;
+    t.querySelector('button').onclick=()=>removeAssistPreset(p);
+    box.appendChild(t);
+  });
+}
+async function addAssistPreset(){
+  const inp=$('assistPresetInput');
+  const text=(inp.value||'').trim();
+  if(!text)return;
+  const j=await post('/api/admin/assist_presets',{action:'add',text});
+  _assistPresetsCache=j.assist_presets||_assistPresetsCache;
+  inp.value='';renderAssistPresetsAdmin();
+}
+async function removeAssistPreset(text){
+  const j=await post('/api/admin/assist_presets',{action:'remove',text});
+  _assistPresetsCache=j.assist_presets||_assistPresetsCache;
+  renderAssistPresetsAdmin();
 }
 // Códigos de un solo uso para dedicatorias personalizadas — se generan desde En vivo para
 // tenerlos a mano rápido mientras el mesero espera en la mesa.
@@ -2817,6 +2855,8 @@ async function tick(){
       if($('dedicaDisplaySecs'))$('dedicaDisplaySecs').value=s.settings.dedica_display_secs||5;
       _dedicaPresetsCache=Array.isArray(s.settings.dedica_presets)?[...s.settings.dedica_presets]:[];
       renderDedicaPresetsAdmin();
+      _assistPresetsCache=Array.isArray(s.settings.assist_presets)?[...s.settings.assist_presets]:[];
+      renderAssistPresetsAdmin();
       if($('pollMinRemainingPct'))$('pollMinRemainingPct').value=s.settings.poll_min_remaining_pct!=null?s.settings.poll_min_remaining_pct:50;
       if($('lovedResetHour'))$('lovedResetHour').value=s.settings.loved_reset_hour!=null?s.settings.loved_reset_hour:9;
       if($('lovedResetInterval'))$('lovedResetInterval').value=s.settings.loved_reset_interval_hours||24;
@@ -2872,7 +2912,10 @@ async function tick(){
         const waitMin=Math.floor((Date.now()/1000-a.ts)/60);
         const waitTxt=waitMin<1?'recién':(waitMin+' min esperando');
         const urgent=waitMin>=2;
-        r.innerHTML=`<span class="pulse" style="background:#dc2626${urgent?'':';opacity:.35;animation:none'}"></span><div class="info"><div class="t" style="font-size:18px;font-weight:800">${esc(a.table)}</div><div class="a" style="color:${urgent?'#f87171':'var(--mut)'};font-weight:${urgent?'700':'400'}">🔔 ${esc(waitTxt)}${a.buzz_count>1?' · '+a.buzz_count+' avisos':''}</div></div>`;
+        // Motivo (pedido explícito): que el admin llegue ya sabiendo qué necesita la mesa,
+        // no solo "te llaman" — se muestra destacado si lo hay, el resto igual que antes.
+        const reasonHtml=a.reason?`<div style="font-weight:700;margin-top:2px">${esc(a.reason)}</div>`:'';
+        r.innerHTML=`<span class="pulse" style="background:#dc2626${urgent?'':';opacity:.35;animation:none'}"></span><div class="info"><div class="t" style="font-size:18px;font-weight:800">${esc(a.table)}</div>${reasonHtml}<div class="a" style="color:${urgent?'#f87171':'var(--mut)'};font-weight:${urgent?'700':'400'}">🔔 ${esc(waitTxt)}${a.buzz_count>1?' · '+a.buzz_count+' avisos':''}</div></div>`;
         const b=document.createElement('button');b.className='btn green sm';b.textContent='✓ Resolver';b.onclick=()=>resolveAssist(a.id);
         r.appendChild(b);al.appendChild(r);
       });
