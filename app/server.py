@@ -480,8 +480,17 @@ def make_venue(name):
                                             # sobre la canción sonando) — no se expone en el
                                             # settings público, solo se usa server-side en /api/request
             "allow_skip_vote": False,      # permite que las mesas voten para saltar la canción
-            "poll_duration_secs": 120,     # duración del timer de la votación (segundos)
-            "duelo_duration_secs": 60,     # duración del timer del duelo (segundos)
+            # poll_duration_secs quedó vestigial (pedido explícito de simplificar): la duración
+            # real de una votación siempre fue dinámica (_poll_dynamic_duration — dura hasta que
+            # termine la canción actual, con un margen de cierre), este valor fijo ya no se usa
+            # para eso en ningún lado. Lo único configurable ahora es CUÁNDO se permite lanzarla.
+            "poll_min_remaining_pct": 50,  # % mínimo que debe quedar de la canción actual para
+                                            # poder lanzar una votación O DUELO (mismo gate
+                                            # compartido, _poll_gate_error) — evita votaciones
+                                            # tan cortas que casi nadie alcanza a votar.
+                                            # duelo_duration_secs se quitó por el mismo motivo
+                                            # que poll_duration_secs arriba (nunca se usaba para
+                                            # la duración real, ya era dinámica).
             "schedule": [],                # [{from:"HH:MM", to:"HH:MM", genre:str, label:str}]
             "timezone": DEFAULT_TZ,         # zona horaria IANA del local (ej: "America/Bogota")
             "prepaid_mode": False,     # ON: saldo prepago por cliente en vez de cuenta de mesa
@@ -1606,9 +1615,11 @@ def priority_abuse_preview(table, now, kind):
 
 # ---- Gate + duración dinámica para votación/duelo (llamar bajo LOCK) ----
 # El ganador siempre se marca "super" para sonar inmediatamente después de la actual (ver
-# _close_poll_winner/_close_duelo_winner) — por eso el lanzamiento se bloquea si la canción
-# ya va en >=50% (played_enough, ya trackeado por /api/progress) o si el siguiente puesto de
-# la cola ya es un salto pagado (nadie puede colarse antes de quien pagó por sonar de primera).
+# _close_poll_winner/_close_duelo_winner) — por eso el lanzamiento se bloquea si a la canción
+# actual le queda menos del % configurado (settings.poll_min_remaining_pct, pedido explícito:
+# antes esto era un 50% fijo sin poder ajustarlo — muy poco tiempo restante da una votación tan
+# corta que casi nadie alcanza a votar) o si el siguiente puesto de la cola ya es un salto
+# pagado (nadie puede colarse antes de quien pagó por sonar de primera).
 POLL_CLOSE_BUFFER_SECS = 8
 POLL_MIN_DURATION_SECS = 20
 
@@ -1622,15 +1633,16 @@ def _poll_gate_error():
     # calcularlo directo evita depender de ese acoplamiento).
     dur = np.get("duration") or DEFAULT_DUR
     pos = np.get("position") or 0
-    if dur > 0 and pos / dur >= 0.5:
-        return "Esta canción ya va en más de la mitad — espera a la siguiente para lanzar esto."
+    min_pct = max(0, min(100, int(STATE["settings"].get("poll_min_remaining_pct", 50))))
+    if dur > 0 and pos / dur >= (100 - min_pct) / 100.0:
+        return f"A esta canción le queda menos del {min_pct}% configurado — espera a la siguiente para lanzar esto."
     q = queue_view()
     if q and q[0].get("super"):
         return "La siguiente canción ya fue pagada para sonar de primera — espera a que termine."
     return None
 
-def _poll_dynamic_duration():
-    np = STATE["now_playing"]
+def _poll_dynamic_duration(np=None):
+    np = np or STATE["now_playing"]
     dur = np.get("duration") or DEFAULT_DUR
     pos = np.get("position") or 0
     remaining = dur - pos
@@ -1876,7 +1888,16 @@ def _auto_create_poll_bg(vid, np_id, np_yt, np_artist, history_artists, genre, p
             return
         if v.get("poll", {}) and v["poll"].get("active"):
             return
-        duration = int(v["settings"].get("poll_duration_secs", 120))
+        _v_np = v.get("now_playing")
+        if not _v_np:
+            return  # la canción que disparó esto ya terminó/cambió — nada a lo cual atarse
+        # Dinámica, igual que el poll manual (_poll_dynamic_duration) — antes esta rama usaba
+        # el viejo poll_duration_secs fijo, inconsistente con el poll manual que ya calculaba
+        # esto dinámico desde hace rato (dura hasta que termine la canción actual). Se pasa
+        # v["now_playing"] explícito porque este hilo corre fuera del ciclo normal de
+        # self.set_venue() — el STATE global acá podría apuntar a OTRO venue en cualquier
+        # momento, nunca hay que asumir que coincide con `v`.
+        duration = _poll_dynamic_duration(_v_np)
         now = time.time()
         v["poll"] = {
             "options": [{"yt": s["yt"], "title": s["title"], "artist": s.get("artist", "")} for s in selected],
@@ -2057,7 +2078,10 @@ def public_state(token=None, admin=False, mark_dedica=None):
         _queue_len = len(q)
         _no_active_poll = not (_p and _p.get("active"))
         _not_launched = STATE.get("poll_launched_for_id") != np["id"]
-        if _queue_len <= 2 and _no_active_poll and _not_launched:
+        # _poll_gate_error() de paso también cubre "el siguiente puesto ya es un salto pagado"
+        # (antes el auto-lanzamiento no lo chequeaba, solo el manual) — mismo gate para los 2
+        # caminos, pedido explícito de dejar de tener 2 comportamientos distintos.
+        if _queue_len <= 2 and _no_active_poll and _not_launched and _poll_gate_error() is None:
             STATE["poll_launched_for_id"] = np["id"]  # reservar para evitar doble disparo
             _hist_artists = [h.get("artist", "") for h in STATE.get("history", [])[:5]]
             _played = {np["yt"]} | {h["yt"] for h in STATE.get("history", [])} | {i["yt"] for i in STATE.get("items", [])}
@@ -2085,6 +2109,10 @@ def public_state(token=None, admin=False, mark_dedica=None):
             "my_vote": my_vote_poll,
             "active": _p.get("active", False),
             "ends_at": _p.get("ends_at"),
+            # created_at (pedido explícito, de paso): la duración ya siempre fue dinámica —
+            # admin.html la usa para calcular el % real de la barra de progreso en vez de un
+            # fijo de settings que ya no representaba nada.
+            "created_at": _p.get("created_at"),
             "auto": _p.get("auto", False),
         }
 
@@ -2103,6 +2131,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
             "votes": {_yt: len(_v) for _yt, _v in _d.get("votes", {}).items()},
             "active": _d.get("active", False),
             "ends_at": _d.get("ends_at"),
+            "created_at": _d.get("created_at"),
             "winner_yt": _d.get("winner_yt"),
             "my_vote": my_duelo_vote,
         }
@@ -2144,7 +2173,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "priority_abuse_window_min", "jump_abuse_window_min",
                                        "venue_logo", "max_priority_queue_min", "max_song_duration_min", "fallback_shuffle",
                                        "theme", "blocked_keywords", "allowed_keywords",
-                                       "allow_skip_vote", "poll_duration_secs", "duelo_duration_secs",
+                                       "allow_skip_vote", "poll_min_remaining_pct",
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
                                        "show_tym_brand", "music_only", "content_mode",
                                        "song_message_moderation", "dedica_price", "dedica_display_secs",
@@ -3545,13 +3574,15 @@ class H(BaseHTTPRequestHandler):
                 for k in ("repeat_block_min", "repeat_block_songs", "trim_end_secs",
                           "free_per_window", "free_window_min", "jump_multiplier",
                           "priority_abuse_window_min", "jump_abuse_window_min",
-                          "max_priority_queue_min", "max_song_duration_min",
-                          "poll_duration_secs", "duelo_duration_secs", "dedica_price"):
+                          "max_priority_queue_min", "max_song_duration_min", "dedica_price"):
                     if k in d:
                         try: s[k] = max(0, int(d[k]))
                         except Exception: pass
                 if "dedica_display_secs" in d:
                     try: s["dedica_display_secs"] = max(2, min(30, int(d["dedica_display_secs"])))
+                    except Exception: pass
+                if "poll_min_remaining_pct" in d:
+                    try: s["poll_min_remaining_pct"] = max(0, min(100, int(d["poll_min_remaining_pct"])))
                     except Exception: pass
                 for k in ("fallback_shuffle", "prepaid_mode", "show_tym_brand", "allow_skip_vote", "music_only", "song_message_moderation", "allow_self_react"):
                     if k in d:

@@ -1112,7 +1112,10 @@ function renderPollTV(poll){
   // as' el timeout de 30s nunca alcanza a vencer y el QR queda mostrado todo el tiempo.
   burst($('qr'),30000);
   _tvPollEndsAt=poll.ends_at||null;
-  _tvPollDur=poll.duration||120;
+  // Bug real (mismo en index.html/admin.html): poll.duration nunca existió, este fallback
+  // SIEMPRE caía en 120 — la duración ya es dinámica desde hace rato (_poll_dynamic_duration
+  // en server.py), created_at/ends_at ahora expuestos dan la duración real de esta votación.
+  _tvPollDur=(poll.created_at&&poll.ends_at)?(poll.ends_at-poll.created_at):120;
   clearTimeout(_tvPollRaf);_tvPollTick();
   const opts=poll.options||[];const votes=poll.votes||{};
   const totalV=Object.values(votes).reduce((a,n)=>a+n,0)||1;
@@ -1142,7 +1145,8 @@ function renderDueloTV(duelo){
   panel.style.display='block';
   // Forzar el QR visible mientras el duelo este activo — ver comentario igual en renderPollTV.
   burst($('qr'),30000);
-  _tvDueloEndsAt=duelo.ends_at||null;_tvDueloDur=duelo.duration||60;
+  _tvDueloEndsAt=duelo.ends_at||null;
+  _tvDueloDur=(duelo.created_at&&duelo.ends_at)?(duelo.ends_at-duelo.created_at):60;
   clearTimeout(_tvDueloRaf);_tvDueloTick();
   const teams=duelo.teams||[];const votes=duelo.votes||{};
   const totalV=Object.values(votes).reduce((a,n)=>a+n,0)||1;
@@ -1639,8 +1643,6 @@ setInterval(async()=>{
     }
 
     // Poll TV
-    _tvPollDur=s.settings&&s.settings.poll_duration_secs||120;
-    _tvDueloDur=s.settings&&s.settings.duelo_duration_secs||60;
     renderPollTV(s.poll);
     renderDueloTV(s.duelo);
     renderAnnouncementsTV(s.announcements||[]);

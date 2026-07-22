@@ -1465,7 +1465,11 @@ function renderPoll(poll){
   card.style.display='';
   if(badge)badge.style.display='';
   _pollEndsAt=poll.ends_at||null;
-  _pollDuration=poll.duration||120;
+  // Bug real encontrado de paso: poll.duration nunca existió en la respuesta del servidor (solo
+  // ends_at) — este fallback SIEMPRE caía en 120 sin importar cuánto durara de verdad la
+  // votación (que ya es dinámica desde hace rato, ver _poll_dynamic_duration en server.py). Con
+  // created_at ahora expuesto, se calcula la duración real de ESTA votación puntual.
+  _pollDuration=(poll.created_at&&poll.ends_at)?(poll.ends_at-poll.created_at):120;
   clearTimeout(_pollTimerRaf);_pollTimerTick();
   const box=$('pollOptions');box.innerHTML='';
   const opts=poll.options||[];const votes=poll.votes||{};const myVote=poll.my_vote;
@@ -1516,7 +1520,9 @@ function renderDuelo(duelo){
     return;
   }
   card.style.display='';
-  _dueloEndsAt=duelo.ends_at||null;_dueloDur=duelo.duration||60;
+  _dueloEndsAt=duelo.ends_at||null;
+  // Mismo bug/fix que _pollDuration arriba.
+  _dueloDur=(duelo.created_at&&duelo.ends_at)?(duelo.ends_at-duelo.created_at):60;
   clearTimeout(_dueloRaf);_dueloTick();
   const box=$('dueloOptions');box.innerHTML='';
   const teams=duelo.teams||[];const votes=duelo.votes||{};const myVote=duelo.my_vote;
@@ -2278,8 +2284,6 @@ async function poll(){
     renderTopRequested(s.top_requested);
     renderMyLikes(s.my_liked||[]);
     renderTopTables(s.top_tables||[]);
-    _pollDuration=s.settings.poll_duration_secs||120;
-    _dueloDur=s.settings.duelo_duration_secs||60;
     renderPoll(s.poll);
     renderDuelo(s.duelo);
     // Toast clickeable: antes había que notar el badge en la nav y navegar solo — un solo

@@ -763,9 +763,14 @@
       </div>
       <button class="btn ghost block sm" id="closePollBtn" style="margin-top:10px;display:none" onclick="closePoll()">✕ Cerrar votación (encola ganador)</button>
 
-      <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">⏱ Duración de la votación (segundos)</label>
-      <div class="small" style="color:var(--mut);margin-bottom:6px">La votación se cierra automáticamente después de este tiempo. Default: 120 (2 min).</div>
-      <input class="field" id="pollDurationSecs" type="number" min="30" max="600" step="10" placeholder="120" style="max-width:140px" onchange="post('/api/admin/settings',{poll_duration_secs:parseInt($('pollDurationSecs').value||120)}).then(()=>toast('Guardado','ok'))">
+      <!-- Pedido explícito: la duración en segundos era confusa y ya no reflejaba lo que
+           realmente pasaba — una votación siempre dura hasta que termina la canción actual
+           (así el ganador puede sonar justo después, sin hueco). Lo único que de verdad hace
+           falta configurar es CUÁNDO se permite lanzarla — mismo % para duelo también, ver
+           abajo. -->
+      <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">🗳️ % mínimo restante para poder lanzar una votación (o duelo)</label>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">Si a la canción que suena ahora le queda menos de este % de su duración, no se puede lanzar — ni a mano ni automática. Evita votaciones tan cortas que casi nadie alcanza a votar. Siempre dura hasta que termine la canción actual. Default: 50%.</div>
+      <input class="field" id="pollMinRemainingPct" type="number" min="0" max="100" step="5" placeholder="50" style="max-width:140px" onchange="post('/api/admin/settings',{poll_min_remaining_pct:parseInt($('pollMinRemainingPct').value||50)}).then(()=>toast('Guardado','ok'))">
     </div>
 
     <!-- Duelo de canciones -->
@@ -790,9 +795,7 @@
       </div>
       <button class="btn ghost block sm" id="closeDueloBtn" style="margin-top:8px;display:none" onclick="closeDuelo()">✕ Cerrar duelo (encola ganador)</button>
 
-      <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">⚔️ Duración del duelo (segundos)</label>
-      <div class="small" style="color:var(--mut);margin-bottom:6px">Tiempo para votar en un duelo de canciones. Default: 60 (1 min).</div>
-      <input class="field" id="dueloDurationSecs" type="number" min="20" max="300" step="10" placeholder="60" style="max-width:140px" onchange="post('/api/admin/settings',{duelo_duration_secs:parseInt($('dueloDurationSecs').value||60)}).then(()=>toast('Guardado','ok'))">
+      <div class="small" style="color:var(--mut);margin-top:14px">⏱ Dura hasta que termine la canción actual, igual que la votación — el % mínimo restante para poder lanzarlo se configura arriba, en Votación (es el mismo ajuste para los dos).</div>
     </div>
 
     <!-- Skip democrático: 3er mecanismo de votación, junto a Votación y Duelo -->
@@ -1242,8 +1245,6 @@ async function save(){
     time_pass:{minutes:parseInt($('passMin').value||30),price:parseInt($('passPrice').value||0)},
     allow_skip_vote:$('allowSkipVote').checked,
     music_only:$('musicOnly').checked,
-    poll_duration_secs:parseInt($('pollDurationSecs').value||120),
-    duelo_duration_secs:parseInt($('dueloDurationSecs').value||60),
     schedule:_schedule};
   if(tymLogoData)payload.tym_logo=tymLogoData;
   if(venueLogoData)payload.venue_logo=venueLogoData;
@@ -2659,8 +2660,7 @@ async function tick(){
       if($('dedicaDisplaySecs'))$('dedicaDisplaySecs').value=s.settings.dedica_display_secs||5;
       _dedicaPresetsCache=Array.isArray(s.settings.dedica_presets)?[...s.settings.dedica_presets]:[];
       renderDedicaPresetsAdmin();
-      if($('pollDurationSecs'))$('pollDurationSecs').value=s.settings.poll_duration_secs||120;
-      if($('dueloDurationSecs'))$('dueloDurationSecs').value=s.settings.duelo_duration_secs||60;
+      if($('pollMinRemainingPct'))$('pollMinRemainingPct').value=s.settings.poll_min_remaining_pct!=null?s.settings.poll_min_remaining_pct:50;
       _schedule=Array.isArray(s.settings.schedule)?JSON.parse(JSON.stringify(s.settings.schedule)):[];
       renderScheduleSlots();
       _kwBlocked=Array.isArray(s.settings.blocked_keywords)?[...s.settings.blocked_keywords]:[];
@@ -3311,7 +3311,13 @@ function renderSocialAdmin(s){
     formBox.style.display='none';closeBtn.style.display='';
     const totalV=Object.values(p.votes||{}).reduce((a,n)=>a+n,0)||0;
     const rem=p.ends_at?Math.max(0,Math.round(p.ends_at-Date.now()/1000)):null;
-    const dur=s.settings&&s.settings.poll_duration_secs||120;
+    // Bug real encontrado de paso: la duración siempre fue dinámica (ver
+    // _poll_dynamic_duration en server.py — dura hasta que termine la canción actual), pero
+    // esta barra de progreso calculaba el % contra un "120" fijo de settings que ya no
+    // representaba la duración real de ESTA votación — con una canción casi terminada (poll
+    // corto de verdad) la barra se veía casi llena todo el tiempo, mintiendo. created_at/
+    // ends_at SÍ son la duración real de esta votación puntual.
+    const dur=p.created_at&&p.ends_at?(p.ends_at-p.created_at):120;
     const timerHtml=rem!==null
       ?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:13px;font-weight:800;color:var(--pri)">⏱ ${Math.floor(rem/60)}:${String(rem%60).padStart(2,'0')}</span><div style="flex:1;height:5px;background:var(--line);border-radius:3px;overflow:hidden"><div style="height:100%;width:${Math.round(100*rem/dur)}%;background:var(--pri);border-radius:3px"></div></div></div>`:'';
     let html=timerHtml+'<div class="small" style="color:var(--mut);margin-bottom:6px">Votación activa — '+totalV+' voto'+(totalV!==1?'s':'')+'</div>';
@@ -3337,7 +3343,8 @@ function renderSocialAdmin(s){
       dueloFormBox.style.display='none';dueloCloseBtn.style.display='';
       const totalDV=Object.values(dd.votes||{}).reduce((a,n)=>a+n,0)||0;
       const rem2=dd.ends_at?Math.max(0,Math.round(dd.ends_at-Date.now()/1000)):null;
-      const dur2=s.settings&&s.settings.duelo_duration_secs||60;
+      // Mismo bug/fix que la barra de la votación arriba — dur2 real, no un fijo de settings.
+      const dur2=dd.created_at&&dd.ends_at?(dd.ends_at-dd.created_at):60;
       let dhtml=rem2!==null?`<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:13px;font-weight:800;color:#f59e0b">⏱ ${Math.floor(rem2/60)}:${String(rem2%60).padStart(2,'0')}</span><div style="flex:1;height:5px;background:var(--line);border-radius:3px;overflow:hidden"><div style="height:100%;width:${Math.round(100*rem2/dur2)}%;background:#f59e0b;border-radius:3px"></div></div></div>`:'';
       dhtml+=`<div class="small" style="color:var(--mut);margin-bottom:6px">Duelo activo — ${totalDV} voto${totalDV!==1?'s':''}</div>`;
       (dd.teams||[]).forEach((team,idx)=>{
