@@ -286,9 +286,11 @@
           <div style="display:flex;gap:8px;margin-bottom:12px">
             <button type="button" class="subtab on" id="liveSubHist" onclick="setLiveSubTab('hist')">🕓 Historial reciente</button>
             <button type="button" class="subtab" id="liveSubFeatured" onclick="setLiveSubTab('featured')">🌟 Canciones del bar</button>
+            <button type="button" class="subtab" id="liveSubSuggested" onclick="setLiveSubTab('suggested')">🎯 Sugeridos</button>
           </div>
           <div class="list" id="recentHistList"></div>
           <div class="list" id="liveFeaturedList" style="display:none"></div>
+          <div class="list" id="liveSuggestedList" style="display:none"></div>
         </div>
 
         <!-- Por aprobar -->
@@ -1781,8 +1783,80 @@ function setLiveSubTab(tab){
   _liveSubTab=tab;
   $('liveSubHist').classList.toggle('on',tab==='hist');
   $('liveSubFeatured').classList.toggle('on',tab==='featured');
+  $('liveSubSuggested').classList.toggle('on',tab==='suggested');
   $('recentHistList').style.display=tab==='hist'?'':'none';
   $('liveFeaturedList').style.display=tab==='featured'?'':'none';
+  $('liveSuggestedList').style.display=tab==='suggested'?'':'none';
+}
+// Pedido explícito: "Por si te gustó" (lado cliente) también visible para el admin en
+// En vivo, como 3er sub-tab. Mismo criterio/endpoints que index.html (loadSimilar/
+// loadSimilarLocal) — SIN pasar v= en la URL, porque acá la sesión de admin ya resuelve
+// el venue por cookie (a diferencia del cliente, que sí necesita v= explícito).
+function interleaveArtists(perArtist,max){
+  const out=[];
+  for(let i=0;out.length<max;i++){
+    let any=false;
+    for(const ar of perArtist){
+      if(i<ar.length){out.push(ar[i]);any=true;if(out.length>=max)break;}
+    }
+    if(!any)break;
+  }
+  return out;
+}
+function normTitle(t){
+  return (t||'').toLowerCase()
+    .replace(/[\(\[][^)\]]*[\)\]]/g,' ')
+    .replace(/\b(ft|feat|featuring)\b.*$/,'')
+    .replace(/[^a-z0-9áéíóúñ]+/g,' ')
+    .trim();
+}
+let _adminSimLoadedForId=null;
+function renderAdminSuggested(list,isLocal){
+  const box=$('liveSuggestedList');
+  box.innerHTML='';
+  if(!list.length){box.innerHTML='<div class="empty">Nada parecido por ahora.</div>';return;}
+  list.forEach(s=>{
+    const r=document.createElement('div');r.className='row';
+    const thumb=isLocal?miniThumbHtml(s.yt,s.media_type,s.cover):`<img class="mini" src="${img(s.yt)}">`;
+    r.innerHTML=`${thumb}<div class="info"><div class="t">${esc(s.title)}</div><div class="a">${esc(s.artist||'')}</div></div>`;
+    const q=document.createElement('button');q.className='btn green icon';q.textContent='➕';q.title='Agregar a la cola en vivo';
+    q.onclick=()=>adminAddSong(s.yt,s.title,s.artist,isLocal?s.duration:s.length,null);
+    r.appendChild(q);
+    box.appendChild(r);
+  });
+  tickify(box);
+}
+async function loadAdminSuggested(np,hist){
+  const isLocal=window._curatedIsLocal;
+  const artists=[np.artist,(hist[0]||{}).artist,(hist[1]||{}).artist];
+  const unique=[...new Set(artists.filter(Boolean))].slice(0,3);
+  const recentTitles=[np.title,...hist.map(h=>h.title)];
+  const seenYt=new Set([np.yt]);
+  const seenTitle=new Set(recentTitles.map(normTitle).filter(Boolean));
+  const dedupe=ar=>ar.filter(s=>{
+    if(!s.yt||seenYt.has(s.yt))return false;
+    const nt=normTitle(s.title);
+    if(nt&&seenTitle.has(nt))return false;
+    seenYt.add(s.yt);if(nt)seenTitle.add(nt);
+    return true;
+  });
+  try{
+    if(isLocal){
+      const genre=np.genre?[np.genre.toLowerCase()]:[];
+      if(!unique.length&&!genre.length){renderAdminSuggested([],true);return;}
+      const artistQ=unique.map(a=>fetch('/api/search_local?q='+encodeURIComponent(a)).then(r=>r.json()).catch(()=>[]));
+      const genreQ=genre.map(g=>fetch('/api/search_local?genre='+encodeURIComponent(g)).then(r=>r.json()).catch(()=>[]));
+      const perQuery=await Promise.all([...artistQ,...genreQ]);
+      renderAdminSuggested(interleaveArtists(perQuery.map(dedupe),9),true);
+    }else{
+      if(!unique.length){renderAdminSuggested([],false);return;}
+      const g=await fetch('/api/genre?artist='+encodeURIComponent(np.artist)+'&title='+encodeURIComponent(np.title)).then(r=>r.json()).catch(()=>({}));
+      if(_adminSimLoadedForId!==np.id)return; // ya cambió la canción, descarta esta respuesta vieja
+      const queries=[...unique,g.genre].filter(Boolean);
+      const perQuery=await Promise.all(queries.map(q=>fetch('/api/search?q='+encodeURIComponent(q)).then(r=>r.json()).catch(()=>[])));
+      renderAdminSuggested(interleaveArtists(perQuery.map(dedupe),9),false);
+    }
+  }catch(e){renderAdminSuggested([],isLocal);}
 }
 function renderLiveFeatured(fullList){
   const isLocal=window._curatedIsLocal;
@@ -3203,6 +3277,13 @@ async function tick(){
       :!(c.yt&&c.yt.startsWith('local:'))).length;
     HC.style.display=(hist.length||featuredCount)?'':'none';
     renderLiveFeatured(s.curated||[]);
+    if(np&&np.artist&&np.id!==_adminSimLoadedForId){
+      _adminSimLoadedForId=np.id;
+      loadAdminSuggested(np,hist);
+    }else if(!np&&_adminSimLoadedForId!==null){
+      _adminSimLoadedForId=null;
+      renderAdminSuggested([],window._curatedIsLocal);
+    }
     if(hist.length){
       const histSig=JSON.stringify([hist.map(h=>[h.yt,h.title,h.artist,h.played_at||h.ts,h.cover,h.media_type]),[...reptExc]]);
       if(_renderIfChanged(HL,histSig)){
