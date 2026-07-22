@@ -3049,7 +3049,23 @@ class H(BaseHTTPRequestHandler):
         if path == "/offline.html":
             return self._file("offline.html", "text/html; charset=utf-8")
         if path == "/sw.js":
-            return self._file("sw.js", "application/javascript; charset=utf-8")
+            # Pedido explícito tras un reporte real: "la PWA en iPhone no se actualiza si no se
+            # reinstala el bookmark". _file() serviría esto con el mismo Cache-Control corto
+            # (60s) que el resto de estáticos — pero el ALGORITMO DE ACTUALIZACIÓN del service
+            # worker (que decide si hay una versión nueva) depende de que el navegador vea el
+            # archivo cambiar byte a byte; iOS Safari en modo standalone es notoriamente
+            # inconsistente respetando ese chequeo cuando el archivo viene de caché. Doble
+            # refuerzo: (1) nunca cacheable — el navegador SIEMPRE lo pide fresco; (2) el propio
+            # contenido incluye BOOT_ID, así que es literalmente un archivo distinto en cada
+            # deploy (antes solo cambiaba si alguien editaba sw.js a mano, algo que casi nunca
+            # pasa en un deploy normal de solo contenido) — eso dispara install/activate del SW
+            # nuevo en CADA deploy, no solo cuando sw.js mismo cambia de verdad.
+            p = os.path.join(STATIC, "sw.js")
+            if not os.path.exists(p):
+                return self._send(404, {"error": "not found"})
+            with open(p, "r", encoding="utf-8") as f:
+                body = f.read().replace("tym-v3", f"tym-v3-{BOOT_ID}")
+            return self._send(200, body, "application/javascript; charset=utf-8", cache="no-store")
         if path == "/version.js":
             js = (
                 f'const TYM_VERSION="{VERSION}";\n'

@@ -2267,6 +2267,15 @@ function _annCardTimerTick(){
   if(rem>0)_annCardTimerT=setTimeout(_annCardTimerTick,1000);
 }
 let _lastBootId=null,_pendingBootId=null;
+// Pedido explícito: "la PWA en iPhone no se actualiza si no se reinstala el bookmark" — un
+// location.reload() plano puede resolverse desde una copia en caché (iOS Safari en modo
+// standalone es notoriamente agresivo con esto). Una URL con un parámetro único no puede
+// servirse desde NINGÚN caché HTTP — fuerza una descarga real del servidor.
+function _hardReload(){
+  const u=new URL(location.href);
+  u.searchParams.set('_r', Date.now());
+  location.href=u.toString();
+}
 async function poll(){
   try{
     const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
@@ -2282,7 +2291,7 @@ async function poll(){
       if(_lastBootId===null)_lastBootId=s.boot_id;
       else if(s.boot_id!==_lastBootId){
         if(s.boot_id===_pendingBootId){
-          if(!document.querySelector('.sheet-bg.open')){location.reload();return;}
+          if(!document.querySelector('.sheet-bg.open')){_hardReload();return;}
         }else{
           _pendingBootId=s.boot_id;
         }
