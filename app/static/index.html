@@ -355,7 +355,10 @@ body{padding-bottom:80px}
     <div class="card" id="clientNotifyBox">
       <div style="font-weight:700;margin-bottom:4px" id="clientNotifyTitle">🔔 Entérate de votaciones y anuncios</div>
       <div class="small" style="margin-bottom:10px" id="clientNotifySub">Recibe un aviso cuando haya una votación nueva, un duelo o un anuncio del bar — aunque no tengas la app abierta.</div>
-      <button class="btn ghost block sm" id="clientNotifyBtn" onclick="reverifyClientNotifications()">🔔 Activar notificaciones</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost sm" id="clientNotifyBtn" style="flex:1" onclick="reverifyClientNotifications()">🔔 Activar notificaciones</button>
+        <button class="btn ghost sm" id="clientNotifyOffBtn" style="display:none" onclick="disableClientNotifications()">🔕 Desactivar</button>
+      </div>
     </div>
 
     <!-- Votación activa (solo si hay poll) -->
@@ -780,12 +783,18 @@ function showTab(name){
   tickify($('tab-'+name));
   if(name==='social'){$('badgePoll').style.display='none';_subscribePush();renderClientNotifyStatus();}
 }
-function renderClientNotifyStatus(){
-  const box=$('clientNotifyBox'),title=$('clientNotifyTitle'),sub=$('clientNotifySub'),btn=$('clientNotifyBtn');
+async function renderClientNotifyStatus(){
+  const box=$('clientNotifyBox'),title=$('clientNotifyTitle'),sub=$('clientNotifySub'),btn=$('clientNotifyBtn'),offBtn=$('clientNotifyOffBtn');
   if(!box)return;
   if(!('Notification' in window)){box.style.display='none';return;}
   box.style.display='';
   const p=Notification.permission;
+  // Pedido explícito: si el cliente se va del bar, debe poder apagar las notificaciones desde
+  // acá mismo, sin depender de los ajustes del navegador — "Activar" ya existía, "Desactivar"
+  // no. Se muestra solo cuando de verdad hay una suscripción activa (no solo permiso concedido:
+  // el permiso es del navegador, la suscripción es la que de verdad manda algo al servidor).
+  const sub2=_swReg?await _swReg.pushManager.getSubscription().catch(()=>null):null;
+  if(offBtn)offBtn.style.display=(p==='granted'&&sub2)?'':'none';
   if(p==='granted'){
     title.textContent='✅ Notificaciones activadas';
     sub.textContent='Si dejaste de recibirlas, toca reverificar.';
@@ -811,6 +820,20 @@ async function reverifyClientNotifications(){
   }
   const ok=await _subscribePush(true);
   toast(ok?'🔔 Notificaciones activadas':'No se pudo activar — intenta de nuevo en un momento',ok?'ok':'err');
+  renderClientNotifyStatus();
+}
+async function disableClientNotifications(){
+  if(!_swReg)return;
+  try{
+    const sub=await _swReg.pushManager.getSubscription();
+    if(sub){
+      await fetch('/api/push/unsubscribe',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({venue:VENUE,endpoint:sub.endpoint})});
+      await sub.unsubscribe();
+    }
+  }catch(e){}
+  _pushSubscribed=false;
+  toast('🔕 Notificaciones desactivadas','ok');
   renderClientNotifyStatus();
 }
 

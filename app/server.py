@@ -1701,6 +1701,7 @@ def priority_abuse_preview(table, now, kind):
 # pagado (nadie puede colarse antes de quien pagó por sonar de primera).
 POLL_CLOSE_BUFFER_SECS = 8
 POLL_MIN_DURATION_SECS = 20
+POLL_LOCAL_DELAY_SECS = 20  # espera tras arrancar la canción antes de poder auto-lanzar votación
 
 def _poll_gate_error():
     np = STATE.get("now_playing")
@@ -2032,19 +2033,22 @@ def _auto_create_local_poll_bg(vid, np_id, played_yts):
         _v_np = v.get("now_playing")
         if not _v_np:
             return  # la canción fallback que disparó esto ya cambió — nada a lo cual atarse
-        # Pedido explícito: las opciones deben salir de las canciones PREFERIDAS del bar
-        # (destacadas/"Recomendadas del local", mismo flag "featured" que ya usa el fallback
-        # de fondo) — no de cualquier cosa del catálogo entero. Si el bar no ha destacado nada
-        # todavía, cae al catálogo completo (nunca deja de ofrecer una votación por eso).
+        # Pedido explícito: las opciones deben salir ÚNICAMENTE de las canciones PREFERIDAS del
+        # bar (destacadas/"Recomendadas del local", mismo flag "featured" que ya usa el fallback
+        # de fondo) — nunca de cualquier cosa del catálogo entero. Antes, si el bar no había
+        # destacado (casi) nada, esto caía al catálogo completo para "nunca dejar de ofrecer una
+        # votación" — pero eso es justo lo que se reportó como bug ("salen recomendaciones fuera
+        # del catálogo destacado"): mejor no lanzar votación automática que lanzarla con
+        # canciones fuera de esa lista. El admin sigue pudiendo lanzar una votación manual con
+        # cualquier canción cuando quiera, esto solo afecta la automática.
         local_pool = [c for c in v.get("curated", [])
                       if is_local_id(c.get("yt")) and not c.get("missing") and not c.get("excluded")]
-        featured_pool = [c for c in local_pool if c.get("featured")]
-        base = featured_pool or local_pool
+        base = [c for c in local_pool if c.get("featured")]
+        if len(base) < 2:
+            return
         pool = [c for c in base if c["yt"] not in played_yts]
         if len(pool) < 2:
             pool = base  # el filtro de "no repetir recientes" dejó muy pocas — mejor repetir que no votar
-        if len(pool) < 2:
-            return
         # A veces 2 opciones, a veces 3 — pedido explícito ("que sea parejo"): 50/50 cuando el
         # pool alcanza para 3, nunca menos de 2.
         n_opts = 3 if len(pool) >= 3 and random.random() < 0.5 else 2
@@ -2291,9 +2295,10 @@ def public_state(token=None, admin=False, mark_dedica=None):
     #    (la primera después de la votación) ya hubiera vuelto a disparar otra — votación tras
     #    votación sin parar. Contando TODAS las canciones, la ganadora también cuenta para el
     #    cooldown antes de poder lanzar la próxima.
-    # 3) "started_ago >= 8": lanzar la votación en el mismo instante en que arranca la canción
-    #    competía visualmente con la animación/aviso de "nueva canción" — un respiro corto
-    #    antes de mostrar la votación se siente menos atropellado.
+    # 3) "started_ago >= POLL_LOCAL_DELAY_SECS": lanzar la votación en el mismo instante en que
+    #    arranca la canción competía visualmente con la animación/aviso de "nueva canción". Un
+    #    delay de 8s se reportó como "sigue sintiéndose instantáneo" — 8s es casi imperceptible
+    #    para alguien mirando el TV de reojo; se sube a 20s para que el respiro sea inconfundible.
     if np:
         if STATE.get("last_song_id_seen") != np["id"]:
             STATE["last_song_id_seen"] = np["id"]
@@ -2303,7 +2308,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         if (np.get("fallback")
                 and STATE["settings"].get("content_mode") == "local"
                 and STATE.get("songs_since_local_poll", 0) >= cooldown
-                and started_ago >= 8
+                and started_ago >= POLL_LOCAL_DELAY_SECS
                 and not (_p and _p.get("active"))
                 and STATE.get("poll_launched_for_id") != np["id"]
                 and _poll_gate_error() is None):
@@ -3124,7 +3129,7 @@ class H(BaseHTTPRequestHandler):
                        "/api/admin/remove", "/api/admin/settings", "/api/admin/tables", "/api/admin/stations",
                        "/api/admin/curated", "/api/admin/close_table", "/api/admin/reset",
                        "/api/admin/add", "/api/admin/allow_repeat", "/api/admin/content_block",
-                       "/api/admin/push/subscribe", "/api/admin/push/test",
+                       "/api/admin/push/subscribe", "/api/admin/push/unsubscribe", "/api/admin/push/test",
                        "/api/admin/move", "/api/admin/reorder",
                        "/api/admin/poll", "/api/admin/poll/close", "/api/admin/vibe/reset",
                        "/api/admin/reset_loved",
@@ -3697,6 +3702,18 @@ class H(BaseHTTPRequestHandler):
                     subs.append(sub)
                 return self._send(200, {"ok": True})
 
+            # Pedido explícito: si el cliente se va del bar, debe poder apagar las notificaciones
+            # desde la propia app — antes solo se podía "activar", nunca "desactivar" sin ir a los
+            # ajustes del navegador. Quita la suscripción de este endpoint del lado del servidor;
+            # el navegador da de baja la suya (unsubscribe()) por separado, del lado del cliente.
+            if path == "/api/push/unsubscribe":
+                vid = d.get("venue") or CUR_VID
+                endpoint = (d.get("endpoint") or "").strip()
+                if endpoint:
+                    subs = TYM.get("push_subs", {}).get(vid, [])
+                    TYM.setdefault("push_subs", {})[vid] = [s for s in subs if s.get("endpoint") != endpoint]
+                return self._send(200, {"ok": True})
+
             # ---- Suscripción push del dueño/staff en /admin (pedido explícito: notificarle
             # llamados de asistencia aunque no tenga la pestaña abierta/enfocada) — vid sale de
             # la sesión de admin autenticada, nunca del body, para que nadie pueda suscribirse a
@@ -3709,6 +3726,14 @@ class H(BaseHTTPRequestHandler):
                 endpoint = sub["endpoint"]
                 if not any(s.get("endpoint") == endpoint for s in subs):
                     subs.append(sub)
+                return self._send(200, {"ok": True})
+
+            # Contraparte de /api/push/unsubscribe, para el dueño/staff en /admin.
+            if path == "/api/admin/push/unsubscribe":
+                endpoint = (d.get("endpoint") or "").strip()
+                if endpoint:
+                    subs = TYM.get("owner_push_subs", {}).get(vid, [])
+                    TYM.setdefault("owner_push_subs", {})[vid] = [s for s in subs if s.get("endpoint") != endpoint]
                 return self._send(200, {"ok": True})
 
             # Pedido explícito: probar que las notificaciones realmente llegan a un celular real
