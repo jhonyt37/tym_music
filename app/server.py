@@ -5038,9 +5038,16 @@ class H(BaseHTTPRequestHandler):
                 if not np_sv:
                     return self._send(400, {"error": "No hay ninguna canción sonando ahora."})
                 # Aplica a la lista del local y a las canciones gratis — nunca a una pagada
-                # (prioridad o salto al #1): sería injusto para quien pagó por sonar.
+                # (prioridad o salto al #1): sería injusto para quien pagó por sonar. Pedido
+                # explícito: la GANADORA de una votación/duelo tampoco — ya ganó un voto real
+                # del bar entero, saltarla por un segundo voto (distinto, más chico) le quitaría
+                # sentido a la votación que la puso ahí.
+                _sv_table = np_sv.get("table") or ""
+                _sv_is_winner = _sv_table.startswith("Votación") or "Duelo" in _sv_table
                 if np_sv.get("charge_on_play", 0) > 0 or np_sv.get("paid_amount", 0) > 0:
                     return self._send(400, {"error": "Esta canción fue pagada — el skip por votación no aplica a canciones pagadas."})
+                if _sv_is_winner:
+                    return self._send(400, {"error": "Esta canción ganó una votación/duelo — el skip por votación no aplica a ella."})
                 sess_sv = get_session(d.get("token"))
                 if not sess_sv:
                     return self._send(400, {"error": "Ingresa el código de tu mesa primero."})

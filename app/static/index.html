@@ -2485,10 +2485,18 @@ async function poll(){
     // el motivo, deshabilitado (el servidor igual lo bloquea en /api/skip_vote, esto es solo
     // para que el cliente entienda sin tener que adivinar).
     const skipEl=$('skipBtn');
+    // Pedido explícito: "las canciones q ganan votación o duelo no se pueden skippear, es
+    // igual q una q fue pagada" — mismo criterio que ya usan tv.html/admin.html para detectar
+    // la ganadora (por su table), acá solo para deshabilitar el botón con el motivo visible.
+    const npIsWinner=np&&((np.table||'').startsWith('Votación')||(np.table||'').includes('Duelo'));
     if(s.settings&&s.settings.allow_skip_vote&&np){
       skipEl.style.display='';
       if(np.paid){
         skipEl.textContent='🔒 No se puede saltar — esta canción fue pagada';
+        skipEl.className='skip-btn';
+        skipEl.disabled=true;
+      }else if(npIsWinner){
+        skipEl.textContent='🔒 No se puede saltar — ganó una votación/duelo';
         skipEl.className='skip-btn';
         skipEl.disabled=true;
       }else{
