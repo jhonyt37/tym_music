@@ -1633,8 +1633,15 @@ function renderPoll(poll){
   // created_at ahora expuesto, se calcula la duración real de ESTA votación puntual.
   _pollDuration=(poll.created_at&&poll.ends_at)?(poll.ends_at-poll.created_at):120;
   clearTimeout(_pollTimerRaf);_pollTimerTick();
-  const box=$('pollOptions');box.innerHTML='';
+  const box=$('pollOptions');
   const opts=poll.options||[];const votes=poll.votes||{};const myVote=poll.my_vote;
+  // Bug real reportado en vivo: "da la sensación de que vota varias veces" — cada poll() (cada
+  // ~2.5s) reconstruía TODA la fila desde cero, incluida la animación de la barra (arranca en
+  // 0% y sube al % real con un setTimeout), aunque los votos NO hubieran cambiado — se veía
+  // como si la barra "se pusiera" de nuevo una y otra vez. Ahora solo se reconstruye si options/
+  // votes/my_vote realmente cambiaron desde el último render.
+  if(!_renderIfChanged(box,JSON.stringify([opts.map(o=>o.yt),votes,myVote])))return;
+  box.innerHTML='';
   const totalVotes=Object.values(votes).reduce((s,n)=>s+n,0)||1;
   // Con exactamente 2 opciones, mismo layout cara a cara que el duelo (pedido explícito del
   // usuario) — con 3 sigue como lista vertical, que es lo correcto cuando no es un 1 contra 1.
@@ -1686,8 +1693,12 @@ function renderDuelo(duelo){
   // Mismo bug/fix que _pollDuration arriba.
   _dueloDur=(duelo.created_at&&duelo.ends_at)?(duelo.ends_at-duelo.created_at):60;
   clearTimeout(_dueloRaf);_dueloTick();
-  const box=$('dueloOptions');box.innerHTML='';
+  const box=$('dueloOptions');
   const teams=duelo.teams||[];const votes=duelo.votes||{};const myVote=duelo.my_vote;
+  // Mismo bug/fix que renderPoll arriba — no reconstruir (ni re-animar la barra) si los votos
+  // no cambiaron desde el último render.
+  if(!_renderIfChanged(box,JSON.stringify([teams.map(t=>t.yt),votes,myVote])))return;
+  box.innerHTML='';
   const total=Object.values(votes).reduce((s,n)=>s+n,0)||1;
   teams.forEach((team,idx)=>{
     const count=votes[team.yt]||0;const pct=Math.round(100*count/total);const on=myVote===team.yt;
