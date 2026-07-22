@@ -124,7 +124,11 @@
   <div class="logo">TY<b>M</b> Music</div>
   <div class="tag" id="venueTag">Panel del dueño</div>
   <div class="spacer"></div>
-  <a class="tag" href="/player" target="_blank">Abrir pantalla ▶</a>
+  <!-- Pedido explícito: en iPhone (PWA instalada) el pull-to-refresh ni siquiera se detecta
+       (iOS Safari en modo standalone no manda los eventos touch de la misma manera) — hace
+       falta un botón manual siempre visible, no solo el gesto. "Abrir pantalla" se quita del
+       header (no es algo que se use seguido) para hacerle espacio. -->
+  <a class="tag" href="#" id="manualRefreshBtn" style="display:inline-block" onclick="manualRefresh();return false" title="Actualizar">🔄</a>
   <a class="tag" href="#" onclick="logout();return false">Salir</a>
 </header>
 
@@ -4112,6 +4116,25 @@ async function sendTestPush(){
   }
 }
 
+// Refresco manual compartido: el botón 🔄 del header (pedido explícito — en iPhone/PWA
+// instalada el gesto de pull-to-refresh ni siquiera se detecta, iOS Safari en modo standalone
+// no manda los eventos touch igual que Android) y el pull-to-refresh de abajo llaman a esto
+// mismo, así los dos caminos quedan sincronizados sin duplicar lógica.
+let _refreshing=false;
+async function manualRefresh(){
+  if(_refreshing)return;
+  _refreshing=true;
+  const btn=$('manualRefreshBtn');
+  if(btn)btn.style.animation='spin .6s linear infinite';
+  try{
+    await Promise.all([tick(),loadTables()]);
+    toast('🔄 Actualizado','ok',1200);
+  }finally{
+    if(btn)btn.style.animation='';
+    _refreshing=false;
+  }
+}
+
 // Pull-to-refresh a mano (ver comentario junto a #ptrIndicator) — solo dispara si el pull
 // arrancó con la página ya en el tope; un pull que empieza scrolleado (ej. dentro de una lista
 // interna) no cuenta, aunque la página en algún punto llegue a scrollY 0 a mitad de camino.
@@ -4119,13 +4142,13 @@ async function sendTestPush(){
   const ind=$('ptrIndicator');
   if(!ind)return;
   const THRESH=70;
-  let startY=null,armed=false,refreshing=false;
+  let startY=null,armed=false;
   document.addEventListener('touchstart',e=>{
-    if(refreshing||window.scrollY>0||e.touches.length!==1){startY=null;return;}
+    if(_refreshing||window.scrollY>0||e.touches.length!==1){startY=null;return;}
     startY=e.touches[0].clientY;armed=false;
   },{passive:true});
   document.addEventListener('touchmove',e=>{
-    if(startY==null||refreshing)return;
+    if(startY==null||_refreshing)return;
     const dy=e.touches[0].clientY-startY;
     if(dy<=0||window.scrollY>0){ind.style.height='0';return;}
     const h=Math.min(dy*0.5,THRESH);
@@ -4134,12 +4157,9 @@ async function sendTestPush(){
     ind.textContent=armed?'🔄 Suelta para actualizar':'⬇️ Desliza para actualizar';
   },{passive:true});
   document.addEventListener('touchend',()=>{
-    if(startY!=null&&armed&&!refreshing){
-      refreshing=true;
+    if(startY!=null&&armed&&!_refreshing){
       ind.textContent='🔄 Actualizando…';
-      Promise.all([tick(),loadTables()]).finally(()=>{
-        ind.style.height='0';refreshing=false;
-      });
+      manualRefresh().finally(()=>{ind.style.height='0';});
     }else if(startY!=null){
       ind.style.height='0';
     }
