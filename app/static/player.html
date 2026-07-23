@@ -100,6 +100,7 @@ function tickify(parent){
   },120);
 }
 let player,ready=false,curId=null,curYt=null,wantAudio=false,authok=false;
+let _lastFullState=null;
 let _errBurst=[];const ERR_BURST_LIMIT=4,ERR_BURST_WINDOW=25000;
 async function doLogin(){
   const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user:$('lgUser').value.trim(),pass:$('lgPass').value})});
@@ -182,10 +183,10 @@ function load(np){
 
 async function tick(){
   try{
-    const s=await (await fetch('/api/state')).json();
+    const s=await (await fetch('/api/state?src=tv')).json();
     $('venueTag').textContent=s.settings.venue_name;
     if(!s.now_playing){ await fetch('/api/advance',{method:'POST'});
-      const s2=await (await fetch('/api/state')).json(); load(s2.now_playing); paintUp(s2);return; }
+      const s2=await (await fetch('/api/state?src=tv')).json(); load(s2.now_playing); paintUp(s2);return; }
     load(s.now_playing); paintUp(s);
   }catch(e){}
 }
@@ -203,7 +204,12 @@ function paintUp(s){
 setInterval(async()=>{
   if(!authok)return;
   try{
-    const s=await (await fetch('/api/state')).json();
+    let _url='/api/state?src=tv';
+    if(_lastFullState&&_lastFullState.sig)_url+='&sig='+encodeURIComponent(_lastFullState.sig);
+    const raw=await (await fetch(_url)).json();
+    let s;
+    if(raw.same&&_lastFullState){s=_lastFullState;Object.assign(s,raw);}else{s=raw;}
+    _lastFullState=s;
     $('venueTag').textContent=s.settings.venue_name;
     // Watchdog: nunca silencio — si no hay nada o el video terminó, avanza solo
     if(!s.now_playing || (ready&&player&&player.getPlayerState&&player.getPlayerState()===YT.PlayerState.ENDED)){await advance();return;}
@@ -217,7 +223,7 @@ setInterval(async()=>{
     if(s.now_playing.id!==curId) load(s.now_playing);
     paintUp(s);
   }catch(e){}
-},2500);
+},4000);
 
 // Reporta progreso real al servidor (alimenta "cuánto falta" del cliente)
 setInterval(()=>{

@@ -122,8 +122,21 @@ _BW_STARTED_AT = time.time()
 _BW_RETAIN_SECS = 3600   # ventana mínima que se intenta conservar entre reinicios cortos
 
 def _bw_track(path, nbytes):
-    key = path.split("?", 1)[0]
-    if key.startswith("/api/local_cover/"):
+    key, _, qs = path.partition("?")
+    # /api/state es el mayor consumidor con MUCHA diferencia (ver medición real) — separarlo
+    # por quién lo llama (pedido explícito: "separemos el /state por cada front") deja ver si
+    # el ahorro del checksum (ver STATE_FAST_KEYS) está funcionando por vista, en vez de un solo
+    # número mezclado. admin=1 ya lo manda admin.html; src=tv lo manda tv.html/player.html; sin
+    # ninguno de los dos, es el cliente (index.html).
+    if key == "/api/state":
+        qd = urllib.parse.parse_qs(qs)
+        if qd.get("admin", [""])[0] == "1":
+            key = "/api/state[admin]"
+        elif qd.get("src", [""])[0] == "tv":
+            key = "/api/state[tv]"
+        else:
+            key = "/api/state[client]"
+    elif key.startswith("/api/local_cover/"):
         key = "/api/local_cover/*"
     with _BW_LOCK:
         e = _BW_STATS.setdefault(key, {"count": 0, "bytes": 0})
@@ -2350,6 +2363,47 @@ def loved_ranking():
                     a["tables"].append(t)
     return sorted(agg.values(), key=lambda x: -x["total"])
 
+# ---- Checksum de /api/state (pedido explícito: "una consulta hasheada muy pequeña del estado
+# de cada cliente vs el server... si detecta cambio hace un segundo llamado") — medido con datos
+# realistas: 95-99% del payload es "lento" (catálogo, cola, historial, ajustes, agregados), solo
+# cambia cuando pasa un evento real (pedido, moderación, ajuste). STATE_FAST_KEYS son los pocos
+# campos que sí queremos frescos en CADA poll aunque nada más haya cambiado (posición de la
+# canción, votos en vivo) — todo lo demás se hashea; si el hash coincide con el que manda el
+# cliente (query ?sig=), se responde un cuerpo mínimo en vez del payload completo. No hace falta
+# que esta lista sea perfecta: lo que quede afuera simplemente no se siente "en vivo" segundo a
+# segundo, pero sigue siendo correcto (el cliente se queda con el último valor real hasta que de
+# verdad cambie — ver _state_with_sig() y el merge del lado del cliente).
+STATE_FAST_KEYS = {
+    "boot_id", "now_playing", "queue_total_secs", "now_remaining_secs",
+    "poll", "duelo", "vibe", "skip_votes_count", "my_skip_vote",
+    "tv_active", "qr_force", "active_sessions", "my_pos", "my_wait_secs",
+    "new_local_count", "jump_available", "jump_unavailable_reason", "jump_price",
+    "auto_launch_preview",
+}
+
+def _state_signature(slow_dict):
+    """Checksum barato del 'resto' del estado (todo lo que no está en STATE_FAST_KEYS) —
+    NO es un hash del payload completo (eso costaría casi lo mismo que mandarlo). sort_keys
+    hace el resultado determinista sin importar el orden de construcción del dict."""
+    try:
+        raw = json.dumps(slow_dict, ensure_ascii=False, sort_keys=True, default=str)
+        return hashlib.md5(raw.encode("utf-8")).hexdigest()[:16]
+    except Exception:
+        return None
+
+def _state_with_sig(out, client_sig):
+    """Envuelve la salida de public_state(): si el cliente ya tiene la misma versión de la
+    parte 'lenta' (mismo sig), responde solo lo rápido + sig; si no, manda todo + el sig nuevo."""
+    slow = {k: v for k, v in out.items() if k not in STATE_FAST_KEYS}
+    sig = _state_signature(slow)
+    out["sig"] = sig
+    if sig and client_sig == sig:
+        fast = {k: out[k] for k in STATE_FAST_KEYS if k in out}
+        fast["sig"] = sig
+        fast["same"] = True
+        return fast
+    return out
+
 def public_item(it, token):
     counts, mine, total = react_counts(it["id"], token)
     # Filtro de salida (no solo de entrada): cubre cola, now_playing e historial sin importar
@@ -2903,7 +2957,7 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
         try:
-            _bw_track(urlparse(self.path).path, len(body))
+            _bw_track(self.path, len(body))
         except Exception:
             pass
 
@@ -3183,6 +3237,7 @@ class H(BaseHTTPRequestHandler):
             return self._send(200, recommendations_finish(*snap))
         if path == "/api/state":
             admin = self._q("admin") == "1"
+            client_sig = self._q("sig") or None
             with LOCK:
                 if admin:
                     av = self.authed_venue()
@@ -3191,8 +3246,9 @@ class H(BaseHTTPRequestHandler):
                     self.set_venue(av)
                 else:
                     self.set_venue(self.resolve_vid())
-                return self._send(200, public_state(self._q("token") or None, admin,
-                                                       mark_dedica=self._q("mark_dedica") or None))
+                out = public_state(self._q("token") or None, admin,
+                                    mark_dedica=self._q("mark_dedica") or None)
+                return self._send(200, _state_with_sig(out, client_sig))
         if path == "/api/admin/tables":
             av = self.authed_venue()
             if not av or av not in VENUES:

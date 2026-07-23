@@ -3028,9 +3028,18 @@ function filterCustomers(){
 }
 
 let _lastBootId=null,_pendingBootId=null;
+// Checksum de /api/state (ver STATE_FAST_KEYS en server.py y el mismo patrón en index.html):
+// la parte pesada acá es curated (catálogo completo) — casi 75% del payload de admin medido en
+// pruebas reales, y casi nunca cambia dentro de una sesión.
+let _lastFullState=null;
 async function tick(){
   try{
-    const s=await (await fetch('/api/state?admin=1')).json();
+    let _url='/api/state?admin=1';
+    if(_lastFullState&&_lastFullState.sig)_url+='&sig='+encodeURIComponent(_lastFullState.sig);
+    const raw=await (await fetch(_url)).json();
+    let s;
+    if(raw.same&&_lastFullState){s=_lastFullState;Object.assign(s,raw);}else{s=raw;}
+    _lastFullState=s;
     // Redeploy detectado (mismo patrón que ya usan /tv e index.html) — pedido explícito tras
     // un reporte real: "la PWA en iPhone no se actualiza si no se reinstala el bookmark". Esta
     // vista (admin.html) NUNCA había tenido este chequeo pese a que un comentario en

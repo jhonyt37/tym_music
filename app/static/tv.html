@@ -570,6 +570,8 @@ let tvBlocked=false,tvDeviceDecided=false,wasEverOwner=false;
 // Detección de redeploy: BOOT_ID cambia solo cuando arranca un proceso nuevo del servidor
 // (a diferencia de VERSION, no depende de que alguien lo suba a mano en cada deploy).
 let _lastBootId=null,_pendingBootId=null;
+// Checksum de /api/state (ver STATE_FAST_KEYS en server.py) — mismo patrón que index.html.
+let _lastFullState=null;
 // Pedido explícito: "la PWA en iPhone no se actualiza si no se reinstala el bookmark" — un
 // location.reload() plano puede resolverse desde una copia en caché (iOS Safari en modo
 // standalone es notoriamente agresivo con esto). Una URL con un parámetro único no puede
@@ -1680,7 +1682,7 @@ $('clickCatcher').onclick=_revealControls;
 // ---- Estado / poll ----
 async function tick(){
   try{
-    const s=await (await fetch('/api/state'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'')+'')).json();
+    const s=await (await fetch('/api/state?src=tv'+(TV_VENUE?'&v='+encodeURIComponent(TV_VENUE):''))).json();
     applyBrand(s.settings);
     if(!s.now_playing){
       if(isPrimary){
@@ -1690,7 +1692,7 @@ async function tick(){
           try{await fetch('/api/advance',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({from_id:snapId})});}finally{advancingId=undefined;}
         }
       }
-      const s2=await (await fetch('/api/state'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'')+'')).json();
+      const s2=await (await fetch('/api/state?src=tv'+(TV_VENUE?'&v='+encodeURIComponent(TV_VENUE):''))).json();
       load(s2.now_playing);paintNext(s2.queue,s2.queue_count);return;
     }
     load(s.now_playing);paintNext(s.queue,s.queue_count);
@@ -1729,9 +1731,13 @@ setInterval(async()=>{
     }
   }catch(e){}
   try{
-    let _tvUrl='/api/state'+(TV_VENUE?'?v='+encodeURIComponent(TV_VENUE):'');
-    if(_dedicaToMark){_tvUrl+=(_tvUrl.includes('?')?'&':'?')+'mark_dedica='+_dedicaToMark;_dedicaToMark=null;}
-    const s=await (await fetch(_tvUrl)).json();
+    let _tvUrl='/api/state?src=tv'+(TV_VENUE?'&v='+encodeURIComponent(TV_VENUE):'');
+    if(_dedicaToMark){_tvUrl+='&mark_dedica='+_dedicaToMark;_dedicaToMark=null;}
+    if(_lastFullState&&_lastFullState.sig)_tvUrl+='&sig='+encodeURIComponent(_lastFullState.sig);
+    const raw=await (await fetch(_tvUrl)).json();
+    let s;
+    if(raw.same&&_lastFullState){s=_lastFullState;Object.assign(s,raw);}else{s=raw;}
+    _lastFullState=s;
     applyBrand(s.settings);
 
     // Redeploy detectado: BOOT_ID del servidor cambió. Se pide verlo 2 veces seguidas antes

@@ -2297,6 +2297,12 @@ function _annCardTimerTick(){
   if(rem>0)_annCardTimerT=setTimeout(_annCardTimerTick,1000);
 }
 let _lastBootId=null,_pendingBootId=null;
+// Checksum de /api/state (ver STATE_FAST_KEYS en server.py): mandamos el último sig que vimos;
+// si el servidor dice "same", la parte lenta (catálogo/cola/historial/ajustes/etc.) no cambió
+// de verdad — nos quedamos con el último estado completo y solo pisamos encima los campos
+// rápidos que sí vinieron (posición, votos en vivo...). El resto del código sigue leyendo `s`
+// exactamente igual que antes, sin saber si vino completo o fue un merge.
+let _lastFullState=null;
 // Pedido explícito: "la PWA en iPhone no se actualiza si no se reinstala el bookmark" — un
 // location.reload() plano puede resolverse desde una copia en caché (iOS Safari en modo
 // standalone es notoriamente agresivo con esto). Una URL con un parámetro único no puede
@@ -2308,7 +2314,12 @@ function _hardReload(){
 }
 async function poll(){
   try{
-    const s=await (await fetch('/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE)))).json();
+    let _url='/api/state?'+(token?'token='+token:'v='+encodeURIComponent(VENUE))+'&src=client';
+    if(_lastFullState&&_lastFullState.sig)_url+='&sig='+encodeURIComponent(_lastFullState.sig);
+    const raw=await (await fetch(_url)).json();
+    let s;
+    if(raw.same&&_lastFullState){s=_lastFullState;Object.assign(s,raw);}else{s=raw;}
+    _lastFullState=s;
     // Redeploy detectado (mismo patrón que ya usan /tv y /admin, aplicado acá): sin esto, un
     // cliente que dejó la pestaña abierta desde antes de un deploy se queda corriendo el JS
     // VIEJO indefinidamente — cualquier fix nuevo (ej. a dónde navega el clic de una
