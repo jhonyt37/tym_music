@@ -39,7 +39,6 @@ REDIS_KEY   = "tym_state"
 DEFAULT_DUR = 210  # 3:30 si no se conoce la duracion
 NEW_SONG_WINDOW_SECS = 7 * 86400  # ventana de "🆕 nueva" en el catálogo local — no configurable
                                    # todavía (pedido explícito de mantenerlo simple por ahora)
-TV_OWNER_TIMEOUT = 8  # seg sin ping del dueño actual de la TV -> se libera (4x el intervalo de ping de 2s)
 EMOJIS = ["❤️", "🔥", "👍", "💃", "🎉"]  # reacciones positivas
 LOVED_CELEBRATION_TOP_N = 5  # celebra "Top de Hoy" al entrar a estas primeras posiciones del
                              # ranking real (loved_ranking()), no una cuenta fija de reacciones
@@ -4015,6 +4014,19 @@ class H(BaseHTTPRequestHandler):
                 return self._send(200, {"ok": True})
 
             # ---- TV ping (marca TV como activa + arbitra dueño único por dispositivo) ----
+            # Pedido explícito, reportado en vivo: "es muy importante que el /tv no se salte a
+            # menos que alguien a mano entre a ese link y tome el control — está pasando que se
+            # salta y se bloquea". Causa real: antes, si el dueño actual no mandaba un ping en
+            # más de TV_OWNER_TIMEOUT (8s — solo 4x el intervalo normal de ping, ~2s), CUALQUIER
+            # otro dispositivo que pingeara después tomaba el control SIN confirmación humana de
+            # por medio. Un solo hueco de red/CPU (bar con más tráfico, un momento de carga) en
+            # el propio ping de la TV real ya bastaba para que otro dispositivo cualquiera
+            # (incluso uno viejo olvidado, o una pestaña de /tv abierta sin querer en otro
+            # equipo) se quedara con el control sin que nadie lo pidiera a propósito. Ahora la
+            # única forma de desplazar a un dueño YA establecido es force=true — el botón
+            # explícito "Usar esta pantalla" del lado del dispositivo que quiere tomar control.
+            # Un dueño nunca antes establecido (primera vez en este venue) sí se asigna sin
+            # fricción, porque no hay a quién desplazar.
             if path == "/api/tv_ping":
                 now = time.time()
                 device_id = d.get("device_id")
@@ -4028,7 +4040,9 @@ class H(BaseHTTPRequestHandler):
                     # toma el control aunque el dueño anterior siga con ping reciente. El
                     # destronado se entera en su próximo ping (~2s) y queda en espera.
                     STATE["tv_owner"] = {"id": device_id, "last_seen": now}
-                elif not owner or now - owner.get("last_seen", 0) > TV_OWNER_TIMEOUT:
+                elif not owner:
+                    # Nadie ha tomado esta pantalla todavía en este venue — se la queda esta,
+                    # no hay a quién desplazar.
                     STATE["tv_owner"] = {"id": device_id, "last_seen": now}
                 elif owner["id"] == device_id:
                     owner["last_seen"] = now

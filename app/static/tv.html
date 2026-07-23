@@ -139,7 +139,12 @@ body.audio-mode #now{order:3;padding-bottom:30px}
    juego de peleas: centrado en el medio de la pantalla, ancho, con los 2 equipos a los lados
    de un "VS" grande y latiendo — de un vistazo, sin leer texto, ya se nota que es OTRA cosa
    distinta de la votación. */
-#dueloPanel{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:22;
+/* Pedido explícito tras verlo en un TV real: centrado con top:50% se metía encima del QR
+   (arriba-der) en pantallas de menos altura — el QR queda fijo en esa esquina sin importar la
+   resolución. Mismo anclaje "abajo-centro" que ya usa #pollPanel (nunca choca con el QR, sin
+   importar el tamaño de pantalla) — el panel sigue siendo bastante más grande/vistoso que el
+   de votación, solo que crece hacia arriba desde abajo en vez de partir del centro exacto. */
+#dueloPanel{position:fixed;bottom:100px;left:50%;transform:translateX(-50%);z-index:22;
   width:min(90vw,980px);
   background:linear-gradient(135deg,rgba(28,14,0,.72),rgba(10,14,22,.72));
   border:2px solid rgba(245,158,11,.65);border-radius:28px;
@@ -1257,8 +1262,18 @@ function _tvDueloTick(){
 }
 // Partículas de apoyo volando desde cada lado hacia el centro (ver keyframes dpParticleTravel)
 // — corre en un intervalo propio mientras el duelo sigue activo, se detiene solo al cerrarse.
+// Pedido explícito tras reportarse que en TVs/navegadores viejos la MÚSICA se traba justo
+// cuando aparece el recuadro de votación/duelo (o hasta los emojis) — un duelo puede durar
+// varios minutos, así que esta animación (a diferencia de fireworks/lluvia, que son ráfagas
+// cortas de unos segundos) corría de fondo TODO ese tiempo. Antes cada 550ms sin tope — ahora
+// mucho más espaciada y con un tope de partículas vivas a la vez, para pesar bastante menos en
+// un CPU débil (típico de un smart TV viejo) mientras el video sigue decodificando.
 const DP_SUPPORT_EMOJIS=['🔥','❤️','👊','⚡','🎉','💪'];
+const DP_MAX_LIVE_PARTICLES=3;
+let _dpLiveParticles=0;
 function spawnDueloSupportParticle(fromLeft){
+  if(_dpLiveParticles>=DP_MAX_LIVE_PARTICLES)return;
+  _dpLiveParticles++;
   const s=document.createElement('div');s.className='dp-particle';
   s.textContent=DP_SUPPORT_EMOJIS[Math.floor(Math.random()*DP_SUPPORT_EMOJIS.length)];
   const startX=fromLeft?-40:window.innerWidth+40;
@@ -1268,12 +1283,12 @@ function spawnDueloSupportParticle(fromLeft){
   s.style.setProperty('--dx',(centerX-startX)+'px');
   s.style.setProperty('--dy',(Math.random()*40-20)+'px');
   document.body.appendChild(s);
-  setTimeout(()=>s.remove(),1700);
+  setTimeout(()=>{s.remove();_dpLiveParticles--;},1700);
 }
 let _dpSupportTimer=null;
 function _startDueloSupportParticles(){
   if(_dpSupportTimer)return;
-  _dpSupportTimer=setInterval(()=>{spawnDueloSupportParticle(Math.random()<0.5);},550);
+  _dpSupportTimer=setInterval(()=>{spawnDueloSupportParticle(Math.random()<0.5);},1800);
 }
 function _stopDueloSupportParticles(){
   clearInterval(_dpSupportTimer);_dpSupportTimer=null;
