@@ -33,6 +33,7 @@
   <div class="logo">TY<b>M</b> Music</div>
   <div class="tag">Dashboard global</div>
   <div class="spacer"></div>
+  <span class="small" id="lastRefreshLabel" style="color:var(--mut);margin-right:10px"></span>
   <a class="tag" href="#" onclick="load();return false">🔄 Actualizar</a>
   <a class="tag" href="#" onclick="logout();return false">Salir</a>
 </header>
@@ -226,23 +227,42 @@ async function syncRedisNow(){
   else alert('❌ '+(j.error||'Error al sincronizar'));
 }
 const fmtBytes=n=>{n=n||0;if(n<1024)return n+' B';if(n<1024*1024)return (n/1024).toFixed(1)+' KB';return (n/1024/1024).toFixed(2)+' MB';};
+// Snapshot anterior de banda ancha (en memoria del navegador, no del servidor) — pedido
+// explícito: "ver el cambio con un comparativo entre las 2 barras, una tiene lo de antes y
+// otra lo nuevo". Los bytes del servidor son ACUMULADOS desde el boot, no por intervalo — acá
+// se resta contra la última lectura para mostrar qué creció desde la última vez que se miró.
+let _lastBwSnapshot=null;   // {boot_id, rows:{path:bytes}}
 async function loadBandwidthStats(){
   const box=$('bwStats');
   const r=await fetch('/api/tym/bandwidth_stats');
   if(!r.ok){box.innerHTML='<div class="empty">Sin datos aún.</div>';return;}
   const j=await r.json();
+  const sameBoot=_lastBwSnapshot&&_lastBwSnapshot.boot_id===j.boot_id;
+  const prevRows=sameBoot?_lastBwSnapshot.rows:{};
   const sinceH=((Date.now()/1000-(j.since||0))/3600).toFixed(1);
   $('bwSince').textContent='Ventana de ~'+sinceH+'h · boot actual '+esc((j.boot_id||'').slice(0,8))+' · total '+fmtBytes(j.total_bytes)+' — sobrevive a un reinicio corto (máx. 1h), se resetea si el proceso estuvo apagado más tiempo que eso.';
   const rows=j.rows||[];
-  if(!rows.length){box.innerHTML='<div class="empty">Aún no hay tráfico registrado.</div>';return;}
+  if(!rows.length){box.innerHTML='<div class="empty">Aún no hay tráfico registrado.</div>';_lastBwSnapshot={boot_id:j.boot_id,rows:{}};return;}
   const max=Math.max(1,...rows.map(x=>x.bytes));
   box.innerHTML='';
   rows.forEach(row=>{
+    const prevBytes=prevRows[row.path]||0;
+    // Si hubo un redeploy entre 2 actualizaciones (boot_id distinto), no hay "antes" real que
+    // comparar — la barra entera se ve como "nueva" en vez de mostrar un crecimiento falso.
+    const baseBytes=sameBoot?Math.min(prevBytes,row.bytes):0;
+    const deltaBytes=sameBoot?Math.max(0,row.bytes-prevBytes):row.bytes;
+    const baseW=Math.round(180*baseBytes/max),deltaW=Math.round(180*deltaBytes/max);
     const pct=Math.round(100*row.bytes/j.total_bytes)||0;
     const e=document.createElement('div');e.className='barrow';
-    e.innerHTML=`<span class="lbl" style="min-width:220px;font-family:monospace;font-size:12px">${esc(row.path)}</span><div class="bar" style="width:${Math.round(180*row.bytes/max)}px"></div><span>${fmtBytes(row.bytes)} · ${row.count} req · ${pct}%</span>`;
+    e.innerHTML=`<span class="lbl" style="min-width:220px;font-family:monospace;font-size:12px">${esc(row.path)}</span>`+
+      `<div style="height:14px;border-radius:3px;min-width:2px;display:flex;overflow:hidden">`+
+        (baseW>0?`<div style="width:${baseW}px;background:var(--pri);opacity:.45"></div>`:'')+
+        (deltaW>0?`<div style="width:${deltaW}px;background:var(--gold)"></div>`:'')+
+      `</div>`+
+      `<span>${fmtBytes(row.bytes)}`+(sameBoot&&deltaBytes>0?` (<span style="color:var(--gold)">+${fmtBytes(deltaBytes)}</span>)`:'')+` · ${row.count} req · ${pct}%</span>`;
     box.appendChild(e);
   });
+  _lastBwSnapshot={boot_id:j.boot_id, rows:Object.fromEntries(rows.map(x=>[x.path,x.bytes]))};
 }
 
 const MODE_LABEL={normal:'🆓 Gratis',credito:'⚡ Crédito',pase:'⚡ Pase',salto:'⏫ Salto',single:'💰 Cobrado'};
@@ -307,9 +327,18 @@ function renderTymLog(){
   }
 }
 
+let _lastLoadAt=null;
+function updateLastRefreshLabel(){
+  const el=$('lastRefreshLabel');if(!el)return;
+  if(!_lastLoadAt){el.textContent='';return;}
+  const s=Math.round((Date.now()-_lastLoadAt)/1000);
+  el.textContent='Actualizado hace '+(s<5?'un momento':s<60?s+'s':Math.round(s/60)+'m');
+}
+setInterval(updateLastRefreshLabel,5000);   // solo actualiza el texto, no pide nada al servidor
 async function load(){
   const r=await fetch('/api/tym/analytics');
   if(!r.ok){$('loginGate').style.display='flex';return;}
+  _lastLoadAt=Date.now();updateLastRefreshLabel();
   const d=await r.json();
   const vmap=d.venues||{};
   VENMAP=Object.fromEntries(Object.entries(vmap).map(([k,v])=>[k,v.name||v]));
