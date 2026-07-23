@@ -1476,6 +1476,26 @@ def resize_cover_image(data_uri, max_dim=500):
     except Exception:
         return None
 
+# BUG REAL encontrado en vivo (banda ancha disparada en Render probando desde un navegador
+# viejo — el mismo tipo de problema que ya causó la suspensión del sitio por banda ancha, ver
+# _redis_light_snapshot, pero por OTRO camino que nunca se había tocado): una carátula propia
+# subida por el admin (resize_cover_image, arriba) queda guardada como un data: URI base64
+# completo en curated[i]["cover"] — y ese mismo string viaja TAL CUAL en CADA /api/state que
+# cualquier cliente conectado pida (cada ~2.5s, todo el turno), porque el cover de la canción
+# sonando/en cola/en historial y el catálogo completo (solo admin) se copian directo al JSON de
+# salida. Una carátula de ~40-80KB en base64, multiplicada por cada poll de cada dispositivo
+# conectado (clientes+admin+TV), es exactamente el tipo de sangría de banda ancha que ya se
+# vio antes. Fix: en la salida (nunca en el guardado — sigue igual) se reemplaza un data: URI
+# por una URL liviana a /api/local_cover/<yt> — el navegador la cachea UNA vez (Cache-Control
+# largo) en vez de volver a bajar el mismo blob en cada poll. Una URL externa (ej. iTunes) ya
+# es liviana, pasa tal cual sin tocarla.
+def _cover_ref(cover, yt):
+    # v=CUR_VID explícito en la URL: un <img> del lado del cliente no manda la cookie de sesión
+    # de admin ni un token — sin esto, /api/local_cover no sabría en qué bar buscar la carátula.
+    if cover and isinstance(cover, str) and cover.startswith("data:"):
+        return f"/api/local_cover/{yt}?v={CUR_VID}"
+    return cover
+
 # ---- Sugerencias de carátula vía Google Images (respaldo cuando iTunes no tiene nada bueno) —
 # pedido explícito, "combinadas": iTunes primero (oficial, sin riesgo de derechos), Google
 # como respaldo con disclaimer claro en la UI de que NO es oficial y es responsabilidad del
@@ -2255,7 +2275,7 @@ def loved_ranking():
                         pub_tables.add(tok_sess["table"])
             a = agg.setdefault(it["yt"], {"yt": it["yt"], "title": _clean_title_display(it["title"]),
                                           "artist": it.get("artist", ""), "total": 0, "tables": [],
-                                          "media_type": it.get("media_type"), "cover": it.get("cover")})
+                                          "media_type": it.get("media_type"), "cover": _cover_ref(it.get("cover"), it["yt"])})
             a["total"] += tot
             for t in pub_tables:
                 if t not in a["tables"]:
@@ -2275,7 +2295,7 @@ def public_item(it, token):
             "requeue_count": it.get("requeue_count", 0),
             "ts": it.get("ts"), "played_at": it.get("played_at"),
             "media_type": it.get("media_type"), "local_path": it.get("local_path"),
-            "cover": it.get("cover"),
+            "cover": _cover_ref(it.get("cover"), it["yt"]),
             "reactions": counts, "my_reacts": mine, "react_total": total}
 
 def public_state(token=None, admin=False, mark_dedica=None):
@@ -2303,7 +2323,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                   "paid": np.get("charge_on_play", 0) > 0 or np.get("paid_amount", 0) > 0,
                   "duration": np.get("duration", DEFAULT_DUR), "position": np.get("position", 0),
                   "media_type": np.get("media_type"), "local_path": np.get("local_path"),
-                  "genre": np.get("genre"), "cover": np.get("cover"),
+                  "genre": np.get("genre"), "cover": _cover_ref(np.get("cover"), np["yt"]),
                   "learned_end": STATE["learned_end"].get(np["yt"]),
                   "message": (np.get("message") or "") if np.get("message_status", "approved") == "approved" else "",
                   "ts": np.get("ts"), "played_at": np.get("played_at"),
@@ -2326,7 +2346,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
             continue
         if yt not in req_songs:
             req_songs[yt] = {"yt": yt, "title": _clean_title_display(e.get("title") or "?"), "artist": e.get("artist", ""),
-                              "count": 0, "media_type": e.get("media_type"), "cover": e.get("cover")}
+                              "count": 0, "media_type": e.get("media_type"), "cover": _cover_ref(e.get("cover"), yt)}
         req_songs[yt]["count"] += 1
     top_requested = sorted(req_songs.values(), key=lambda x: -x["count"])[:10]
 
@@ -2656,13 +2676,13 @@ def public_state(token=None, admin=False, mark_dedica=None):
             if my_r:
                 my_liked.append({"id": it["id"], "yt": it["yt"], "title": it["title"],
                                  "artist": it.get("artist", ""), "my_reacts": my_r,
-                                 "media_type": it.get("media_type"), "cover": it.get("cover")})
+                                 "media_type": it.get("media_type"), "cover": _cover_ref(it.get("cover"), it["yt"])})
         out["my_liked"] = my_liked[:20]
     if admin:
         out["pending"] = [public_item(i, token) for i in pending_view()]
         out["ledger"] = list(reversed(STATE["ledger"]))[:40]
         out["ledger_total"] = sum(l["amount"] for l in STATE["ledger"])
-        out["curated"] = [{**c, "title": _clean_title_display(c["title"])} for c in STATE["curated"]]
+        out["curated"] = [{**c, "title": _clean_title_display(c["title"]), "cover": _cover_ref(c.get("cover"), c["yt"])} for c in STATE["curated"]]
         out["subscribers"] = list(reversed(TYM["subscribers"]))[:100]
         # media_type/cover/duration/local_path faltaban acá — quedó de antes de que existieran
         # esos campos (mismo tipo de bug ya encontrado en #nowImg del cliente: una vista fija
@@ -2673,7 +2693,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
         out["history"] = [{"id": h["id"], "yt": h["yt"], "title": _clean_title_display(h["title"]),
                            "artist": h.get("artist", ""),
                            "ts": h.get("ts"), "played_at": h.get("played_at"),
-                           "media_type": h.get("media_type"), "cover": h.get("cover"),
+                           "media_type": h.get("media_type"), "cover": _cover_ref(h.get("cover"), h["yt"]),
                            "duration": h.get("duration"), "local_path": h.get("local_path")} for h in STATE["history"][:10]]
         out["repeat_exceptions"] = list(STATE.get("repeat_exceptions", set()))
         out["all_dedicas"] = list(reversed(STATE.get("dedicas", [])))[:30]
@@ -2901,6 +2921,26 @@ class H(BaseHTTPRequestHandler):
             return self._file(routes[path], "text/html; charset=utf-8")
         if path == "/style.css":
             return self._file("style.css", "text/css; charset=utf-8")
+        if path.startswith("/api/local_cover/"):
+            # Sirve la carátula propia (subida por el admin, resize_cover_image) como imagen
+            # real en vez de embebida como base64 en cada /api/state — ver _cover_ref() para el
+            # motivo completo (bug real de banda ancha). Cache largo: el navegador la baja UNA
+            # sola vez por yt y la reutiliza, en vez de re-descargarla en cada poll.
+            yt = path[len("/api/local_cover/"):]
+            vid = self._q("v") or DEFAULT_VID
+            venue = VENUES.get(vid)
+            entry = next((c for c in venue.get("curated", []) if c.get("yt") == yt), None) if venue else None
+            cover = (entry or {}).get("cover")
+            if not cover or not isinstance(cover, str) or not cover.startswith("data:"):
+                return self._send(404, {"error": "not found"})
+            try:
+                import base64
+                header, _, b64 = cover.partition(",")
+                raw = base64.b64decode(b64)
+                ctype = "image/jpeg" if "jpeg" in header else ("image/png" if "png" in header else "image/jpeg")
+            except Exception:
+                return self._send(404, {"error": "not found"})
+            return self._send(200, raw, ctype, cache="public, max-age=604800, immutable")
         if path == "/api/qr":
             vid = self.resolve_vid()
             base = PUBLIC_URL.rstrip("/") if PUBLIC_URL else f"http://{lan_ip()}:{PORT}"
@@ -3024,7 +3064,7 @@ class H(BaseHTTPRequestHandler):
                     added_at = c.get("added_at")
                     out.append({"yt": c["yt"], "title": c["title"], "artist": c.get("artist", ""),
                                 "duration": c.get("duration") or DEFAULT_DUR,
-                                "media_type": c.get("media_type"), "cover": c.get("cover"),
+                                "media_type": c.get("media_type"), "cover": _cover_ref(c.get("cover"), c["yt"]),
                                 "featured": bool(c.get("featured")),
                                 "blocked": bool(info),
                                 "block_reason": (info or {}).get("reason"),
