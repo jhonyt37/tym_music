@@ -523,7 +523,11 @@ def make_venue(name):
             "music_only": False,           # rechazar pedidos que la IA clasifique como no-música
             "song_message_moderation": False,  # moderar el mensaje al pedir canción (separado de dedicatorias)
             "dedica_price": 0,             # cargo extra si el pedido incluye mensaje (0=gratis, se suma al precio de la canción)
-            "dedica_display_secs": 5,      # cuánto dura el overlay de dedicatoria mesa a mesa en /tv
+            "dedica_display_secs": 8,      # cuánto dura el overlay de dedicatoria mesa a mesa en /tv
+            "song_msg_display_secs": 10,   # mensaje de canción (dedicatoria al pedir, PAGA): cuánto
+                                            # dura en pantalla cada vez que aparece en /tv
+            "song_msg_gap_secs": 30,       # ...y cuánto tiempo pasa sin mostrarse entre una
+                                            # aparición y la siguiente, mientras la canción sigue sonando
             "dedica_code_expiry_min": 20,  # minutos que un código de dedicatoria sigue siendo válido tras generarse (0=sin vencimiento)
             "dedica_presets": [             # mensajes predeterminados: pasan SIEMPRE sin código ni moderación
                 "🎉 ¡Qué buen ambiente!",
@@ -1895,6 +1899,28 @@ def bump_count(yt, title, artist):
     else:
         STATE["req_counts"][yt] = {"yt": yt, "title": title, "artist": artist, "count": 1}
 
+def _queue_no_votes_pick(reason_label):
+    """Pedido explícito: si un poll/duelo cierra sin NINGÚN voto, no dejar que "no pase nada" —
+    se omite por falta de interés y se encola una destacada/recomendada al azar del propio
+    catálogo del bar (mismo pool que ya usa el auto-lanzamiento: destacadas en modo local,
+    "Recomendadas" en modo YouTube), en vez de quedar sin ganador. Llamar bajo LOCK."""
+    if STATE["settings"].get("content_mode") == "local":
+        pool = _local_auto_candidate_pool(STATE, STATE["settings"].get("poll_auto_source", "featured"))
+    else:
+        pool = [c for c in STATE.get("curated", []) if not is_local_id(c.get("yt"))]
+    if not pool:
+        return
+    s = random.choice(pool)
+    item = {"id": nid(), "title": s["title"], "artist": s.get("artist", ""), "yt": s["yt"],
+            "token": None, "table": reason_label, "priority": False,
+            "super": True, "mode": "normal", "duration": s.get("duration", DEFAULT_DUR),
+            "status": "approved", "play_status": "pending", "played_enough": False,
+            "requeue_count": 0, "ts": time.time(), "charge_on_play": 0,
+            "charged": False, "charge_kind": "", "repeat_exception": True, "message": ""}
+    STATE["items"].append(item)
+    if STATE.get("now_playing") is None:
+        promote_next()
+
 def _close_poll_winner(p, vid=None):
     """Cierra el poll y encola el ganador. Llamar bajo LOCK con STATE apuntando al venue correcto."""
     p["active"] = False
@@ -1903,6 +1929,7 @@ def _close_poll_winner(p, vid=None):
         return
     max_v = max(len(v) for v in votes.values())
     if max_v == 0:
+        _queue_no_votes_pick("🎲 Sin votos — al azar")
         return
     winners = [yt for yt, v in votes.items() if len(v) == max_v]
     winner_yt = random.choice(winners)
@@ -1932,6 +1959,7 @@ def _close_duelo_winner(d):
         return
     max_v = max(len(v) for v in votes.values())
     if max_v == 0:
+        _queue_no_votes_pick("🎲 Sin votos — al azar")
         return
     winners = [yt for yt, v in votes.items() if len(v) == max_v]
     winner_yt = random.choice(winners)
@@ -2548,6 +2576,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "schedule", "timezone", "prepaid_mode", "min_direct_pay",
                                        "show_tym_brand", "music_only", "content_mode",
                                        "song_message_moderation", "dedica_price", "dedica_display_secs",
+                                       "song_msg_display_secs", "song_msg_gap_secs",
                                        "dedica_presets", "allow_self_react", "dedica_code_expiry_min",
                                        "assist_presets", "announcement_presets")},
                                        socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
@@ -4141,6 +4170,12 @@ class H(BaseHTTPRequestHandler):
                         except Exception: pass
                 if "dedica_display_secs" in d:
                     try: s["dedica_display_secs"] = max(2, min(30, int(d["dedica_display_secs"])))
+                    except Exception: pass
+                if "song_msg_display_secs" in d:
+                    try: s["song_msg_display_secs"] = max(3, min(60, int(d["song_msg_display_secs"])))
+                    except Exception: pass
+                if "song_msg_gap_secs" in d:
+                    try: s["song_msg_gap_secs"] = max(5, min(300, int(d["song_msg_gap_secs"])))
                     except Exception: pass
                 if "poll_min_remaining_pct" in d:
                     try: s["poll_min_remaining_pct"] = max(0, min(100, int(d["poll_min_remaining_pct"])))

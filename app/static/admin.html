@@ -1021,6 +1021,14 @@
         <div><b>Moderar antes de mostrar en TV</b><div class="small">Separado de la moderación de dedicatorias mesa a mesa. Si un cliente escribe un mensaje al pedir su canción y queda marcado, la canción suena igual pero el mensaje no aparece en TV hasta que lo apruebes abajo.</div></div>
         <input type="checkbox" id="songMessageModeration" style="width:22px;height:22px" onchange="post('/api/admin/settings',{song_message_moderation:$('songMessageModeration').checked}).then(()=>toast('Guardado','ok'))">
       </label>
+      <!-- Pedido explícito: "debería durar muchos más segundos y salir varias veces durante la
+           canción" — este mensaje es PAGO (dedica_price), amerita verse bien y repetirse, no
+           una sola pasada rápida. -->
+      <label class="small" style="display:block;margin-top:14px;margin-bottom:4px">⏱️ Segundos en pantalla cada vez que aparece</label>
+      <input class="field" id="songMsgDisplaySecs" type="number" min="3" max="60" placeholder="10" style="max-width:120px;margin-bottom:10px" onchange="post('/api/admin/settings',{song_msg_display_secs:parseInt($('songMsgDisplaySecs').value||10)}).then(()=>toast('Guardado','ok'))">
+      <label class="small" style="display:block;margin-bottom:4px">⏸️ Segundos SIN mostrarse entre una aparición y la siguiente</label>
+      <div class="small" style="color:var(--mut);margin-bottom:6px">Se repite con este ciclo mientras la canción sigue sonando — no una sola vez. Default: 10s en pantalla, 30s de pausa.</div>
+      <input class="field" id="songMsgGapSecs" type="number" min="5" max="300" placeholder="30" style="max-width:120px" onchange="post('/api/admin/settings',{song_msg_gap_secs:parseInt($('songMsgGapSecs').value||30)}).then(()=>toast('Guardado','ok'))">
     </div>
 
     <div class="card" id="songMsgCard" style="display:none">
@@ -3071,7 +3079,9 @@ async function tick(){
       if($('allowSkipVote'))$('allowSkipVote').checked=!!s.settings.allow_skip_vote;
       if($('allowSelfReact'))$('allowSelfReact').checked=!!s.settings.allow_self_react;
       if($('musicOnly'))$('musicOnly').checked=!!s.settings.music_only;
-      if($('dedicaDisplaySecs'))$('dedicaDisplaySecs').value=s.settings.dedica_display_secs||5;
+      if($('dedicaDisplaySecs'))$('dedicaDisplaySecs').value=s.settings.dedica_display_secs||8;
+      if($('songMsgDisplaySecs'))$('songMsgDisplaySecs').value=s.settings.song_msg_display_secs||10;
+      if($('songMsgGapSecs'))$('songMsgGapSecs').value=s.settings.song_msg_gap_secs||30;
       _dedicaPresetsCache=Array.isArray(s.settings.dedica_presets)?[...s.settings.dedica_presets]:[];
       renderDedicaPresetsAdmin();
       _assistPresetsCache=Array.isArray(s.settings.assist_presets)?[...s.settings.assist_presets]:[];
