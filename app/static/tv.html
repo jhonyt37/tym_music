@@ -1128,8 +1128,17 @@ function spawnReact(emoji,table){
 }
 
 // ---- Celebración: canción que entró al Top de Hoy ----
+// Reportado en vivo: "/tv se traba cuando una canción entra al top loved" — la lluvia lanzaba
+// un emoji nuevo cada 110ms hasta 45 en total, cada uno vivo 3-5.2s, así que en el pico había
+// ~35-40 elementos animándose a la vez sobre el video. Mismo motivo/fix que ya se aplicó a las
+// partículas de apoyo del duelo (tope de vivos a la vez) — acá se mantiene el mismo ritmo de
+// intentos (se ve igual de "lluvia" en pantalla) pero se topa cuántos pueden estar vivos juntos.
 const RAIN_EMOJIS=['❤️','🔥','👍','💃','🎉'];
+const RAIN_MAX_LIVE=8;
+let _rainLiveCount=0;
 function spawnRainDrop(){
+  if(_rainLiveCount>=RAIN_MAX_LIVE)return;
+  _rainLiveCount++;
   const s=document.createElement('div');s.className='rain-emoji';
   s.textContent=RAIN_EMOJIS[Math.floor(Math.random()*RAIN_EMOJIS.length)];
   s.style.left=(Math.random()*94)+'%';
@@ -1137,7 +1146,7 @@ function spawnRainDrop(){
   const dur=3+Math.random()*2.2;
   s.style.animationDuration=dur+'s';
   document.body.appendChild(s);
-  setTimeout(()=>s.remove(),dur*1000+300);
+  setTimeout(()=>{s.remove();_rainLiveCount--;},dur*1000+300);
 }
 let _lastLovedCelebrationTs=0,_rainTimer=null;
 function showLovedCelebration(c){
