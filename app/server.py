@@ -4197,8 +4197,13 @@ class H(BaseHTTPRequestHandler):
                     if reason:  # si insiste con un motivo nuevo (ej. ya no es la ronda, ahora es la cuenta), se actualiza
                         a["reason"] = reason
                     body = a.get("reason") or "Llevan esperando desde hace un rato — atiéndelos."
-                    _send_owner_push(vid, "🔔 " + a["table"] + " insiste en pedir ayuda",
-                                      body, "/admin?open=assist")
+                    # En hilo aparte — _send_owner_push() llama webpush() de verdad (HTTPS
+                    # síncrono a Google/Mozilla, uno por dispositivo suscrito) DENTRO del LOCK
+                    # global: si el servicio de push tarda, esto congelaba TODOS los requests de
+                    # TODOS los venues, no solo esta campana (bug real reportado en vivo: "tanto
+                    # admin como cliente... se demoran 4 segundos o más en responder").
+                    threading.Thread(target=_send_owner_push, args=(vid, "🔔 " + a["table"] + " insiste en pedir ayuda",
+                                      body, "/admin?open=assist"), daemon=True).start()
                     return self._send(200, {"ok": True, "buzzed": True, "id": a["id"]})
                 if d.get("buzz"):
                     for a in STATE.get("assists", []):
@@ -4219,8 +4224,9 @@ class H(BaseHTTPRequestHandler):
                 TYM["events"].append({"venue": CUR_VID, "table": table,
                                        "account": tok, "ts": time.time(),
                                        "ev": "assist_requested"})
-                _send_owner_push(vid, "🔔 " + table + " pide ayuda",
-                                  reason or "Toca para ver qué necesitan.", "/admin?open=assist")
+                # En hilo aparte — ver comentario en _do_buzz() arriba (mismo motivo).
+                threading.Thread(target=_send_owner_push, args=(vid, "🔔 " + table + " pide ayuda",
+                                  reason or "Toca para ver qué necesitan.", "/admin?open=assist"), daemon=True).start()
                 return self._send(200, {"ok": True, "id": aid})
 
             if path == "/api/admin/assist_resolve":
@@ -4491,7 +4497,12 @@ class H(BaseHTTPRequestHandler):
                     STATE.setdefault("announcements", []).append(ann)
                     if notify:
                         venue_name = STATE["settings"].get("venue_name", "TYM Music")
-                        _send_venue_push(vid, f"📢 {venue_name}", text, url=f"/?v={vid}#ahora")
+                        # En hilo aparte — mismo motivo que _do_buzz()/asistencia: notify_clients
+                        # puede mandar a MUCHOS clientes suscritos (todo el bar), cada uno un
+                        # webpush() síncrono — reportado en vivo: "esto mismo pasa cuando se
+                        # envían mensajes del admin a los clientes... en anuncios para el TV".
+                        threading.Thread(target=_send_venue_push, args=(vid, f"📢 {venue_name}", text,
+                                          f"/?v={vid}#ahora"), daemon=True).start()
                 elif act == "toggle":
                     aid = d.get("id")
                     turning_on = None
