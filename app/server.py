@@ -1829,7 +1829,15 @@ def promote_next(manual=False):
             featured_pool = [c for c in local_pool if c.get("featured")]
             base_pool = featured_pool if featured_pool else local_pool
         else:
-            base_pool = STATE["curated"] if STATE["curated"] else CATALOG
+            # BUG REAL relacionado, encontrado investigando el consumo de banda ancha: entradas
+            # locales (local:xxxx) de una prueba anterior en Modo catálogo local se quedan en
+            # STATE["curated"] para siempre — cambiar content_mode nunca las limpia (ver el
+            # bloque de arriba, solo hace limpieza al entrar A modo local, no al salir). En modo
+            # YouTube, esas entradas colándose en el fallback de fondo intentarían "reproducir"
+            # un id que el iframe de YouTube no puede resolver — nunca cargarían. Se filtran acá
+            # mismo, igual que el branch de arriba filtra a PROPÓSITO solo entradas locales.
+            _yt_curated = [c for c in STATE["curated"] if not is_local_id(c.get("yt"))]
+            base_pool = _yt_curated if _yt_curated else CATALOG
         shuffle = STATE["settings"].get("fallback_shuffle", True)
         if shuffle:
             # Usa una copia barajada; cuando se agota, baraja de nuevo
