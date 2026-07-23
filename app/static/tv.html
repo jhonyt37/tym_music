@@ -1464,7 +1464,7 @@ function _watchdogStuck(hasNp,synced,targetIsLocal){
   if((!ready&&!targetIsLocal)||!authok||!hasNp){_stuckPolls=0;return;}
   if(synced){_stuckPolls=0;try{sessionStorage.removeItem('tym_tv_autoreload2');}catch(e){}return;}
   _stuckPolls++;
-  if(_stuckPolls<6)return; // ~12s de polls (cada 2s) sin lograr sincronizar
+  if(_stuckPolls<6)return; // ~24s de polls (cada 4s) sin lograr sincronizar
   _stuckPolls=0;
   // Mismo criterio que el watchdog de arriba: sin tope de reintentos — la música del local
   // no puede quedar dependiendo de que alguien note la pantalla trabada y refresque a mano.
@@ -1710,7 +1710,7 @@ setInterval(async()=>{
       mediaCtl.pause();
       // Solo se pregunta la primera vez (pantalla nueva). Si esta TV ya fue dueña y la
       // destronaron, o si el usuario ya eligió "no", se queda en espera silenciosa
-      // (evita pedir confirmación en loop cada 2s o un tira-y-afloja entre pantallas).
+      // (evita pedir confirmación en loop cada 4s o un tira-y-afloja entre pantallas).
       if(wasEverOwner||tvDeviceDecided){
         $('tvLockConfirm').style.display='none';
         $('tvLockOverlay').style.display='flex';
@@ -1861,7 +1861,7 @@ setInterval(async()=>{
        el.style.display='flex';$('skipVoteText').textContent=`${cnt}/${thr} quieren saltar`;
      }else{el.style.display='none';}}
   }catch(e){}
-},2000);
+},4000);
 
 setInterval(()=>{
   if(authok&&!tvBlocked&&curYt&&mediaCtl.ready()){

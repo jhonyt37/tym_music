@@ -1073,10 +1073,10 @@ function miniThumbHtml(yt,mediaType,cover){
   }
   return`<img class="mini" src="${img(yt)}" onerror="this.src='https://i.ytimg.com/vi/${yt}/hqdefault.jpg';this.onerror=null">`;
 }
-// Evita reconstruir una lista si no cambió de verdad — poll (tick(), cada 2s) llamaba a estos
+// Evita reconstruir una lista si no cambió de verdad — poll (tick(), cada 4s) llamaba a estos
 // renders SIEMPRE, reconstruyendo todas las filas así no hubiera cambiado nada, lo que
 // reiniciaba en simultáneo el ticker (banner que desplaza títulos largos) de cada fila visible
-// cada 2s — se veía como si toda la lista "parpadeara". Mismo fix ya aplicado en index.html
+// cada 4s — se veía como si toda la lista "parpadeara". Mismo fix ya aplicado en index.html
 // (b81c8ab) para Queridos/Pedidos/Mis likes/Historial/cola del cliente — acá faltaba portarlo
 // a las listas propias del admin (Pendientes, Sonando+cola, Historial reciente).
 function _renderIfChanged(box,sig){
@@ -2650,7 +2650,7 @@ async function saveLocalCatalogBatch(){
 function renderLocalCatalog(fullCurated){
   window._fullCurated=fullCurated||[];
   const box=$('localCatList'),hint=$('localCatEmptyHint');
-  // Bug reportado: tick() llama esto cada 2s (poll normal) y antes reconstruía toda la lista
+  // Bug reportado: tick() llama esto cada 4s (poll normal) y antes reconstruía toda la lista
   // de un tirón — si el admin estaba a mitad de escribir en un campo, el poll lo pisaba de
   // vuelta al valor viejo del servidor (se sentía como "a veces se pone el texto
   // predefinido"). Mientras el foco esté DENTRO de esta lista, no se re-dibuja nada — el
@@ -3179,7 +3179,7 @@ async function tick(){
     }
 
     // Mesas activas ahora (con sesión en las últimas 2h, mismo cálculo que el umbral de
-    // skip-vote) vs. total de mesas configuradas — siempre en vivo, cada 2.5s.
+    // skip-vote) vs. total de mesas configuradas — siempre en vivo, cada 4s.
     const atEl=$('activeTablesNum'),ttEl=$('totalTablesNum');
     if(atEl)atEl.textContent=s.active_sessions||0;
     if(ttEl)ttEl.textContent=(s.tables||[]).length;
@@ -4352,7 +4352,7 @@ async function manualRefresh(){
   // es ir ahí AHORA, no a lo último que se estaba viendo antes.
   if(new URLSearchParams(location.search).get('open')==='assist')focusAssist();
   setupAdminPwa();
-  loadTables();tick();setInterval(tick,2500);
+  loadTables();tick();setInterval(tick,4000);
   loadAnalytics();setInterval(loadAnalytics,15000);
 })();
 </script>

@@ -730,7 +730,7 @@ async function boot(){
   document.querySelectorAll('.nav button').forEach(b=>b.onclick=()=>showTab(b.dataset.tab));
   initBellDrag();
   loadReco();
-  poll(); setInterval(poll,2000);
+  poll(); setInterval(poll,4000);
   initPullToRefresh();
 }
 // Deslizar hacia abajo para actualizar (pedido explícito para la app instalada — sin barra
@@ -852,7 +852,7 @@ async function enterPin(){
     if((j.existing_tab||0)>0){
       // El gate (.gate, z-index:50) tapa el modal de confirmación (#confirmBg, z-index:30) —
       // hay que ocultarlo ANTES de abrir el modal. Antes esto se resolvía solo porque el token
-      // ya estaba guardado y poll() (cada 2s) terminaba ocultando el gate por su cuenta; ahora
+      // ya estaba guardado y poll() (cada 4s) terminaba ocultando el gate por su cuenta; ahora
       // que el token no se guarda hasta confirmar, sess sigue null y poll() lo vuelve a mostrar
       // en cada tick — sin este flag, el gate nunca cede y el modal queda inclicable (bug
       // reportado en vivo: "a veces no hace nada dándole click").
@@ -1323,7 +1323,7 @@ async function doReq(payMethod){
       // más canciones del mismo artista/búsqueda sin tener que escribir de nuevo.
       if(chosen.yt)_queueYts.add(chosen.yt);
       // Pedido explícito: "🆕 Nueva" debe apagarse apenas el cliente la pide, sin esperar el
-      // próximo poll (cada 2s) — el servidor ya deja de contarla como nueva desde este momento
+      // próximo poll (cada 4s) — el servidor ya deja de contarla como nueva desde este momento
       // (ver _ever_requested_yt_ids en server.py), esto solo adelanta la vista local para que
       // no se vea "🆕" en una canción que la propia persona acaba de pedir.
       if(lastList&&chosen.yt){
@@ -1913,9 +1913,9 @@ function applyClampTap(el,title,artist){
 }
 
 // ---------- Evitar reconstruir una lista si no cambió realmente ----------
-// poll() llama a todos los render*() de listas cada 2s así haya cambiado algo o no. Antes
+// poll() llama a todos los render*() de listas cada 4s así haya cambiado algo o no. Antes
 // cada uno hacía box.innerHTML='' + reconstruía todas las filas SIEMPRE, lo que reiniciaba
-// el ticker (rowTick) de cada título largo en simultáneo cada 2s — se veía como si todo el
+// el ticker (rowTick) de cada título largo en simultáneo cada 4s — se veía como si todo el
 // listado "parpadeara"/reiniciara junto. Con esta guarda, si la lista es idéntica a la ya
 // pintada, no se toca el DOM y los tickers en curso siguen su animación sin interrupción.
 function _renderIfChanged(box,sig){
@@ -2351,7 +2351,7 @@ async function poll(){
       // confuso para el cliente. Se actualiza junto con la vista por defecto de arriba.
       $('q').placeholder=CONTENT_MODE==='local'?'Buscar canción o artista…':'Buscar canción, artista o pega un link de YouTube…';
     }
-    // Chip "🆕 N canciones nuevas" — se actualiza en cada poll (cada 2s), sin request aparte;
+    // Chip "🆕 N canciones nuevas" — se actualiza en cada poll (cada 4s), sin request aparte;
     // si el conteo cae a 0 mientras el cliente está viendo esa vista filtrada (ej. el admin
     // las excluyó o ya pasó la ventana de "nueva"), vuelve sola al catálogo normal.
     if(CONTENT_MODE==='local'){
@@ -2363,7 +2363,7 @@ async function poll(){
       $('newLocalChip').style.display='none';
     }
     // Si el sheet de pedir está abierto, refresca el precio/cuenta regresiva del multiplicador
-    // en vivo (poll corre cada 2s) en vez de dejarlos congelados desde que se abrió el sheet.
+    // en vivo (poll corre cada 4s) en vez de dejarlos congelados desde que se abrió el sheet.
     if($('sheet').classList.contains('open'))updatePriOption();
     prepaidMode=!!s.settings.prepaid_mode;walletBalance=s.wallet_balance||0;
     VENUE_TZ=s.settings.timezone||'America/Bogota';
@@ -2391,7 +2391,7 @@ async function poll(){
     // silenciosa vía ensureAnonSession) — el registro de celular solo se pide cuando
     // se va a pagar algo de verdad (showNeedsRegistration, activado por el servidor).
     // registerGateOpen es la única señal que controla el gate de registro: así este
-    // poll() (cada 2s) nunca lo cierra solo mientras el cliente lo está completando
+    // poll() (cada 4s) nunca lo cierra solo mientras el cliente lo está completando
     // (bug ya corregido antes: "vuelve a login y salta de vuelta a home").
     if(prepaidMode){
       const stSel=$('regStation'),stations=s.stations||[];
