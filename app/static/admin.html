@@ -3030,15 +3030,22 @@ function filterCustomers(){
 let _lastBootId=null,_pendingBootId=null;
 // Checksum de /api/state (ver STATE_FAST_KEYS en server.py y el mismo patrón en index.html):
 // la parte pesada acá es curated (catálogo completo) — casi 75% del payload de admin medido en
-// pruebas reales, y casi nunca cambia dentro de una sesión.
+// pruebas reales. Tiene su PROPIO checksum (csig, ver _state_with_sig en server.py) separado
+// del resto de "lento" — así un pedido nuevo/reacción (frecuente) no fuerza reenviar el
+// catálogo completo (casi nunca cambia de verdad). Por eso el merge de abajo es SIEMPRE
+// (no solo cuando raw.same) — si el servidor omitió "curated" porque no cambió, Object.assign
+// deja intacto el que ya teníamos de la última vez.
 let _lastFullState=null;
 async function tick(){
   try{
     let _url='/api/state?admin=1';
-    if(_lastFullState&&_lastFullState.sig)_url+='&sig='+encodeURIComponent(_lastFullState.sig);
+    if(_lastFullState){
+      if(_lastFullState.sig)_url+='&sig='+encodeURIComponent(_lastFullState.sig);
+      if(_lastFullState.csig)_url+='&csig='+encodeURIComponent(_lastFullState.csig);
+    }
     const raw=await (await fetch(_url)).json();
     let s;
-    if(raw.same&&_lastFullState){s=_lastFullState;Object.assign(s,raw);}else{s=raw;}
+    if(_lastFullState){s=_lastFullState;Object.assign(s,raw);}else{s=raw;}
     _lastFullState=s;
     // Redeploy detectado (mismo patrón que ya usan /tv e index.html) — pedido explícito tras
     // un reporte real: "la PWA en iPhone no se actualiza si no se reinstala el bookmark". Esta

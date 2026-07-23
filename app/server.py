@@ -138,6 +138,8 @@ def _bw_track(path, nbytes):
             key = "/api/state[client]"
     elif key.startswith("/api/local_cover/"):
         key = "/api/local_cover/*"
+    elif key.startswith("/api/logo/venue/"):
+        key = "/api/logo/venue/*"
     with _BW_LOCK:
         e = _BW_STATS.setdefault(key, {"count": 0, "bytes": 0})
         e["count"] += 1
@@ -1569,6 +1571,17 @@ def _cover_ref(cover, yt):
         return f"/api/local_cover/{yt}?v={CUR_VID}"
     return cover
 
+# ---- Mismo bug, encontrado de nuevo (pedido explícito: "analiza si hay algo por mejorar" tras
+# ver /api/state[admin] pesando de más) — venue_logo/tym_logo se guardan como data: URI base64
+# (remove_solid_bg, hasta 700000 caracteres) y viajaban COMPLETOS dentro de "settings" en CADA
+# /api/state — settings es parte del bloque "lento" del checksum, pero durante uso activo
+# (pedidos/moderación seguidos) igual se reenvía seguido, a TODOS los clientes conectados
+# (admin+TV+cada celular). Mismo fix que _cover_ref(): URL liviana con cache largo.
+def _logo_ref(data_uri, kind, vid=None):
+    if data_uri and isinstance(data_uri, str) and data_uri.startswith("data:"):
+        return f"/api/logo/venue/{vid}" if kind == "venue" else "/api/logo/tym"
+    return data_uri
+
 # ---- Sugerencias de carátula vía Google Images (respaldo cuando iTunes no tiene nada bueno) —
 # pedido explícito, "combinadas": iTunes primero (oficial, sin riesgo de derechos), Google
 # como respaldo con disclaimer claro en la UI de que NO es oficial y es responsabilidad del
@@ -2391,18 +2404,39 @@ def _state_signature(slow_dict):
     except Exception:
         return None
 
-def _state_with_sig(out, client_sig):
+def _state_with_sig(out, client_sig, client_csig=None):
     """Envuelve la salida de public_state(): si el cliente ya tiene la misma versión de la
-    parte 'lenta' (mismo sig), responde solo lo rápido + sig; si no, manda todo + el sig nuevo."""
-    slow = {k: v for k, v in out.items() if k not in STATE_FAST_KEYS}
+    parte 'lenta' (mismo sig), responde solo lo rápido + sig; si no, manda todo + el sig nuevo.
+
+    'curated' (el catálogo, SOLO admin) se cachea APARTE con su propio checksum (csig) — es,
+    con mucha diferencia, el campo más pesado (74% del payload de admin medido en pruebas
+    reales) y casi nunca cambia de verdad, pero antes vivía adentro del mismo hash que TODO lo
+    demás — un pedido nuevo, una reacción, cualquier cambio de cola (mucho más frecuente que
+    editar el catálogo) invalidaba el hash general y reenviaba el catálogo completo de nuevo
+    sin necesidad. Pedido explícito tras medir esto en vivo."""
+    slow = {k: v for k, v in out.items() if k not in STATE_FAST_KEYS and k != "curated"}
     sig = _state_signature(slow)
     out["sig"] = sig
-    if sig and client_sig == sig:
+    csig = None
+    has_curated = "curated" in out
+    if has_curated:
+        csig = _state_signature({"curated": out["curated"]})
+        out["csig"] = csig
+    same_slow = bool(sig) and client_sig == sig
+    # same_curated en True cuando NO aplica (no es admin) — así el "atajo" de abajo no depende
+    # de un campo que ni siquiera existe para esa vista.
+    same_curated = (not has_curated) or (bool(csig) and client_csig == csig)
+    if same_slow and same_curated:
         fast = {k: out[k] for k in STATE_FAST_KEYS if k in out}
         fast["sig"] = sig
+        if csig:
+            fast["csig"] = csig
         fast["same"] = True
         return fast
-    return out
+    result = dict(out)
+    if same_curated and has_curated:
+        result.pop("curated", None)
+    return result
 
 def public_item(it, token):
     counts, mine, total = react_counts(it["id"], token)
@@ -2702,9 +2736,7 @@ def public_state(token=None, admin=False, mark_dedica=None):
     else:
         jump_reason = None
 
-    out = {
-        "boot_id": BOOT_ID,
-        "settings": dict({k: s.get(k) for k in ("venue_name", "price_priority", "style", "auto_approve",
+    _settings_out = dict({k: s.get(k) for k in ("venue_name", "price_priority", "style", "auto_approve",
                                        "genre", "credit_packages", "time_pass",
                                        "repeat_block_min", "repeat_block_songs", "trim_end_secs",
                                        "free_per_window", "free_window_min", "jump_multiplier",
@@ -2721,7 +2753,12 @@ def public_state(token=None, admin=False, mark_dedica=None):
                                        "song_msg_display_secs", "song_msg_gap_secs",
                                        "dedica_presets", "allow_self_react", "dedica_code_expiry_min",
                                        "assist_presets", "announcement_presets")},
-                                       socials=TYM["socials"], tym_logo=TYM["tym_logo"]),
+                                       socials=TYM["socials"], tym_logo=TYM["tym_logo"])
+    _settings_out["venue_logo"] = _logo_ref(_settings_out.get("venue_logo"), "venue", CUR_VID)
+    _settings_out["tym_logo"] = _logo_ref(_settings_out.get("tym_logo"), "tym")
+    out = {
+        "boot_id": BOOT_ID,
+        "settings": _settings_out,
         "active_genre": _active_genre,
         "active_slot": _active_slot,
         "announcements": [a for a in STATE.get("announcements", [])
@@ -3067,6 +3104,25 @@ class H(BaseHTTPRequestHandler):
             except Exception:
                 return self._send(404, {"error": "not found"})
             return self._send(200, raw, ctype, cache="public, max-age=604800, immutable")
+        if path.startswith("/api/logo/venue/") or path == "/api/logo/tym":
+            # Ver _logo_ref() para el motivo (mismo bug de banda ancha que las carátulas, pero
+            # con el logo del bar/de TYM).
+            if path == "/api/logo/tym":
+                logo = TYM.get("tym_logo")
+            else:
+                vid = path[len("/api/logo/venue/"):]
+                venue = VENUES.get(vid)
+                logo = (venue or {}).get("settings", {}).get("venue_logo")
+            if not logo or not isinstance(logo, str) or not logo.startswith("data:"):
+                return self._send(404, {"error": "not found"})
+            try:
+                import base64
+                header, _, b64 = logo.partition(",")
+                raw = base64.b64decode(b64)
+                ctype = "image/png" if "png" in header else ("image/jpeg" if "jpeg" in header else "image/png")
+            except Exception:
+                return self._send(404, {"error": "not found"})
+            return self._send(200, raw, ctype, cache="public, max-age=604800, immutable")
         if path == "/api/qr":
             vid = self.resolve_vid()
             base = PUBLIC_URL.rstrip("/") if PUBLIC_URL else f"http://{lan_ip()}:{PORT}"
@@ -3238,6 +3294,7 @@ class H(BaseHTTPRequestHandler):
         if path == "/api/state":
             admin = self._q("admin") == "1"
             client_sig = self._q("sig") or None
+            client_csig = self._q("csig") or None
             with LOCK:
                 if admin:
                     av = self.authed_venue()
@@ -3248,7 +3305,7 @@ class H(BaseHTTPRequestHandler):
                     self.set_venue(self.resolve_vid())
                 out = public_state(self._q("token") or None, admin,
                                     mark_dedica=self._q("mark_dedica") or None)
-                return self._send(200, _state_with_sig(out, client_sig))
+                return self._send(200, _state_with_sig(out, client_sig, client_csig))
         if path == "/api/admin/tables":
             av = self.authed_venue()
             if not av or av not in VENUES:
@@ -4463,7 +4520,11 @@ class H(BaseHTTPRequestHandler):
                         except Exception:
                             pass
                     s["schedule"] = slots
-                return self._send(200, {"ok": True, "settings": s})
+                # Mismo fix que en public_state(): no reflejar el logo en base64 completo en el
+                # eco de esta respuesta (copia, nunca se toca lo GUARDADO en STATE["settings"]).
+                _s_echo = dict(s)
+                _s_echo["venue_logo"] = _logo_ref(_s_echo.get("venue_logo"), "venue", vid)
+                return self._send(200, {"ok": True, "settings": _s_echo})
 
             # ---- Admin: anuncios para TV ----
             if path == "/api/admin/announcement":
