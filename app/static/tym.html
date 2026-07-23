@@ -95,6 +95,20 @@
     <button class="btn ghost block sm" onclick="syncRedisNow()">💾 Sincronizar catálogo completo ahora</button>
   </div>
 
+  <!-- Pedido explícito: "ayúdame a analizar cuáles funcionalidades consumen ancho de banda...
+       en orden de frecuencia... al estilo métrica en /tym". El dashboard de Render ya muestra
+       el TOTAL — esto desglosa POR ENDPOINT para saber en qué se va. Se resetea en cada
+       redeploy a propósito (ver _BW_STATS en server.py) — es "qué está pesando ahora mismo",
+       no un histórico largo que habría que guardar aparte. -->
+  <div class="card">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+      <h2 style="margin:0">📊 Banda ancha por endpoint</h2>
+      <button class="btn ghost sm" style="margin-left:auto" onclick="loadBandwidthStats()">🔄 Actualizar</button>
+    </div>
+    <div class="small" style="color:var(--mut);margin-bottom:10px" id="bwSince"></div>
+    <div id="bwStats"><div class="empty">Cargando…</div></div>
+  </div>
+
   <div class="card">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
       <h2 style="margin:0">📋 Historial de pedidos</h2>
@@ -210,6 +224,25 @@ async function syncRedisNow(){
   if(r.ok)alert('✅ Catálogo completo sincronizado a Redis ('+((j.sent_bytes||0)/1024/1024).toFixed(2)+' MB).');
   else alert('❌ '+(j.error||'Error al sincronizar'));
 }
+const fmtBytes=n=>{n=n||0;if(n<1024)return n+' B';if(n<1024*1024)return (n/1024).toFixed(1)+' KB';return (n/1024/1024).toFixed(2)+' MB';};
+async function loadBandwidthStats(){
+  const box=$('bwStats');
+  const r=await fetch('/api/tym/bandwidth_stats');
+  if(!r.ok){box.innerHTML='<div class="empty">Sin datos aún.</div>';return;}
+  const j=await r.json();
+  const sinceH=((Date.now()/1000-(j.since||0))/3600).toFixed(1);
+  $('bwSince').textContent='Desde el último redeploy (hace ~'+sinceH+'h) · boot '+esc((j.boot_id||'').slice(0,8))+' · total '+fmtBytes(j.total_bytes)+' — se reinicia con cada deploy, es "qué pesa ahora", no un histórico.';
+  const rows=j.rows||[];
+  if(!rows.length){box.innerHTML='<div class="empty">Aún no hay tráfico registrado.</div>';return;}
+  const max=Math.max(1,...rows.map(x=>x.bytes));
+  box.innerHTML='';
+  rows.forEach(row=>{
+    const pct=Math.round(100*row.bytes/j.total_bytes)||0;
+    const e=document.createElement('div');e.className='barrow';
+    e.innerHTML=`<span class="lbl" style="min-width:220px;font-family:monospace;font-size:12px">${esc(row.path)}</span><div class="bar" style="width:${Math.round(180*row.bytes/max)}px"></div><span>${fmtBytes(row.bytes)} · ${row.count} req · ${pct}%</span>`;
+    box.appendChild(e);
+  });
+}
 
 const MODE_LABEL={normal:'🆓 Gratis',credito:'⚡ Crédito',pase:'⚡ Pase',salto:'⏫ Salto',single:'💰 Cobrado'};
 const hm2=ts=>{const d=new Date(ts*1000);return d.toLocaleString('es-CO',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'short'});};
@@ -324,6 +357,7 @@ async function load(){
   while(sel.options.length>1)sel.remove(1);
   venues.forEach(([vid,info])=>{const o=document.createElement('option');o.value=vid;o.textContent=info.name||vid;sel.appendChild(o);});
   loadTymLog();
+  loadBandwidthStats();
 }
 async function changeMasterPassword(){
   const np=($('mpNew').value||'').trim(),nc=($('mpConfirm').value||'').trim();

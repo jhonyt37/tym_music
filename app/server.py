@@ -106,6 +106,26 @@ def _next_loved_reset_boundary(now_ts):
     return anchor_ts
 
 LOCK = threading.Lock()
+
+# ---- Estadísticas de banda ancha por endpoint (pedido explícito, "ayúdame a analizar cuáles
+# funcionalidades consumirían el ancho de banda... en orden de frecuencia") — para saber EN QUÉ
+# se va la cuota gratis de Render, no solo CUÁNTO en total (eso ya lo muestra el dashboard de
+# Render). Lock propio y liviano (nunca el LOCK principal de negocio, que se usa mucho más y no
+# debe esperar por esto) — es puramente informativo, se resetea en cada redeploy (no se guarda
+# en data.json/Redis a propósito, sería una escritura extra en cada request).
+_BW_LOCK = threading.Lock()
+_BW_STATS = {}       # {path_normalizado: {"count": int, "bytes": int}}
+_BW_STARTED_AT = time.time()
+
+def _bw_track(path, nbytes):
+    key = path.split("?", 1)[0]
+    if key.startswith("/api/local_cover/"):
+        key = "/api/local_cover/*"
+    with _BW_LOCK:
+        e = _BW_STATS.setdefault(key, {"count": 0, "bytes": 0})
+        e["count"] += 1
+        e["bytes"] += nbytes
+
 _id = [0]
 FB_IDX = [0]   # índice para recorrer la lista sugerida en orden (nunca silencio)
 def nid():
@@ -2842,6 +2862,10 @@ class H(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
         self.end_headers()
         self.wfile.write(body)
+        try:
+            _bw_track(urlparse(self.path).path, len(body))
+        except Exception:
+            pass
 
     def _file(self, name, ctype):
         p = os.path.join(STATIC, name)
@@ -3098,6 +3122,20 @@ class H(BaseHTTPRequestHandler):
                 return self._send(401, {"error": "Solo TYM"})
             with LOCK:
                 return self._send(200, tym_analytics())
+        if path == "/api/tym/bandwidth_stats":
+            # Pedido explícito: "en dónde estamos consumiendo la capa free" — desglose por
+            # endpoint, no solo el total (eso ya lo muestra el dashboard de Render). Se resetea
+            # en cada redeploy a propósito (ver comentario junto a _BW_STATS) — sirve para ver
+            # qué está pesando AHORA, no un histórico largo.
+            if not self.authed_master():
+                return self._send(401, {"error": "Solo TYM"})
+            with _BW_LOCK:
+                rows = [{"path": k, "count": v["count"], "bytes": v["bytes"]}
+                        for k, v in _BW_STATS.items()]
+            rows.sort(key=lambda r: -r["bytes"])
+            total_bytes = sum(r["bytes"] for r in rows)
+            return self._send(200, {"rows": rows, "total_bytes": total_bytes,
+                                    "since": _BW_STARTED_AT, "boot_id": BOOT_ID})
         if path == "/api/recommendations":
             with LOCK:
                 self.set_venue(self.resolve_vid())
