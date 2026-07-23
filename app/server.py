@@ -7,7 +7,7 @@ Novedades: sesion de mesa por PIN, paquetes (creditos + pase), progreso de
 reproduccion, recomendadas (mas pedido / del local / populares / genero).
 """
 import json, os, re, socket, threading, time, random, datetime, struct, zlib, gzip
-import unicodedata, difflib
+import unicodedata, difflib, signal, atexit
 import hashlib, hmac, secrets, smtplib
 from email.mime.text import MIMEText
 import urllib.request, urllib.parse
@@ -111,11 +111,15 @@ LOCK = threading.Lock()
 # funcionalidades consumirían el ancho de banda... en orden de frecuencia") — para saber EN QUÉ
 # se va la cuota gratis de Render, no solo CUÁNTO en total (eso ya lo muestra el dashboard de
 # Render). Lock propio y liviano (nunca el LOCK principal de negocio, que se usa mucho más y no
-# debe esperar por esto) — es puramente informativo, se resetea en cada redeploy (no se guarda
-# en data.json/Redis a propósito, sería una escritura extra en cada request).
+# debe esperar por esto) — es puramente informativo, NO se guarda en cada request (sería una
+# escritura extra por request). Sí se incluye en el snapshot periódico que ya escribe
+# autosave_loop cada 3s (ver save_state) — así una ventana de datos de máx. 1h sobrevive a un
+# reinicio corto del proceso (ej. el plan gratis de Render duerme por inactividad y despierta
+# solo con el siguiente request) en vez de perderse por completo cada vez.
 _BW_LOCK = threading.Lock()
 _BW_STATS = {}       # {path_normalizado: {"count": int, "bytes": int}}
 _BW_STARTED_AT = time.time()
+_BW_RETAIN_SECS = 3600   # ventana mínima que se intenta conservar entre reinicios cortos
 
 def _bw_track(path, nbytes):
     key = path.split("?", 1)[0]
@@ -125,6 +129,42 @@ def _bw_track(path, nbytes):
         e = _BW_STATS.setdefault(key, {"count": 0, "bytes": 0})
         e["count"] += 1
         e["bytes"] += nbytes
+
+# ---- Correo de banda ancha antes de un reinicio (pedido explícito: "que me mande un correo
+# cada vez que se va a terminar el proceso, para ver esas métricas antes de que se borren") —
+# LISTO pero APAGADO por defecto ("dejemos apagado el trigger mientras decidimos" — el usuario
+# aún no eligió cuál de los 3 disparadores posibles quiere: solo en deploy manual, también en
+# el reinicio automático por inactividad, o un correo programado cada hora sin importar el
+# motivo). Se activa así, sin tocar código: variable de entorno TYM_BW_EMAIL_ON_SHUTDOWN=1 en
+# Render — mismo patrón que RESEND_API_KEY/SMTP_USER (activar solo con env var, no con un
+# redeploy de código).
+TYM_BW_EMAIL_ON_SHUTDOWN = os.environ.get("TYM_BW_EMAIL_ON_SHUTDOWN", "0") == "1"
+_bw_shutdown_email_sent = [False]
+
+def _format_bw_stats_email():
+    with _BW_LOCK:
+        rows = sorted(_BW_STATS.items(), key=lambda kv: -kv[1]["bytes"])
+    total = sum(v["bytes"] for _, v in rows)
+    window_h = (time.time() - _BW_STARTED_AT) / 3600
+    lines = [f"Banda ancha por endpoint — ventana de ~{window_h:.1f}h, total {total/1024/1024:.2f} MB\n"]
+    for path, v in rows:
+        pct = (100 * v["bytes"] / total) if total else 0
+        lines.append(f"{path}: {v['bytes']/1024:.1f} KB · {v['count']} req · {pct:.0f}%")
+    return "\n".join(lines)
+
+def _send_bw_shutdown_email():
+    if not TYM_BW_EMAIL_ON_SHUTDOWN or _bw_shutdown_email_sent[0] or not _BW_STATS:
+        return
+    _bw_shutdown_email_sent[0] = True
+    try:
+        to_addr = TYM["owners"].get("tym", {}).get("email", "")
+        send_email(to_addr, "TYM — banda ancha antes del reinicio", _format_bw_stats_email())
+    except Exception as e:
+        print("Error enviando correo de banda ancha:", e, flush=True)
+
+def _handle_shutdown_signal(signum, frame):
+    _send_bw_shutdown_email()
+    raise SystemExit(0)
 
 _id = [0]
 FB_IDX = [0]   # índice para recorrer la lista sugerida en orden (nunca silencio)
@@ -5605,6 +5645,13 @@ def _redis_light_snapshot(data):
 def save_state():
     """{version:3, tym:{...global...}, venues:{id:{...bar...}}} — multi-bar; listo para DB."""
     try:
+        # Snapshot liviano de banda ancha (ver _BW_STATS) — viaja dentro de TYM en el mismo
+        # guardado periódico que ya corre cada 3s, sin escritura extra por request. Permite que
+        # un reinicio corto (< _BW_RETAIN_SECS) del proceso siga la ventana en vez de perderla
+        # de golpe — ver load_state().
+        with _BW_LOCK:
+            TYM["bandwidth"] = {"stats": {k: dict(v) for k, v in _BW_STATS.items()},
+                                 "started_at": _BW_STARTED_AT}
         data = {"version": 3, "ids": {"_id": _id[0], "_fb": FB_IDX[0]},
                 "tym": TYM, "venues": {vid: venue_snapshot(v) for vid, v in VENUES.items()},
                 "auth": AUTH}   # sesiones de dueño (cookie tymauth) — sobreviven a un redeploy
@@ -5702,6 +5749,18 @@ def load_state():
                 od.setdefault("email", "jhonyt37@gmail.com")
                 od.setdefault("blocked", False)
                 TYM["owners"][uname] = od
+            # Retención de banda ancha entre reinicios cortos (ver _BW_STATS/save_state) —
+            # solo se retoma si la ventana guardada tiene menos de _BW_RETAIN_SECS; más vieja
+            # que eso, se descarta y arranca de cero (es "al menos la última hora", no un
+            # histórico indefinido).
+            bw = d["tym"].get("bandwidth")
+            if bw and time.time() - bw.get("started_at", 0) < _BW_RETAIN_SECS:
+                global _BW_STARTED_AT
+                _BW_STARTED_AT = bw["started_at"]
+                with _BW_LOCK:
+                    _BW_STATS.clear()
+                    for k, v in bw.get("stats", {}).items():
+                        _BW_STATS[k] = {"count": v.get("count", 0), "bytes": v.get("bytes", 0)}
         for vid, snap in d.get("venues", {}).items():
             tvid = "bardemo" if vid == "default" else vid          # migra venue v2 "default"
             if tvid not in VENUES:
@@ -5744,6 +5803,8 @@ if __name__ == "__main__":
     load_state()
     _ensure_owner_passwords()
     _ensure_vapid_keys()
+    signal.signal(signal.SIGTERM, _handle_shutdown_signal)
+    atexit.register(_send_bw_shutdown_email)
     threading.Thread(target=autosave_loop, daemon=True).start()
     ip = lan_ip()
     url = PUBLIC_URL.rstrip("/") + "/" if PUBLIC_URL else f"http://{ip}:{PORT}/"

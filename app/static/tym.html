@@ -231,7 +231,7 @@ async function loadBandwidthStats(){
   if(!r.ok){box.innerHTML='<div class="empty">Sin datos aún.</div>';return;}
   const j=await r.json();
   const sinceH=((Date.now()/1000-(j.since||0))/3600).toFixed(1);
-  $('bwSince').textContent='Desde el último redeploy (hace ~'+sinceH+'h) · boot '+esc((j.boot_id||'').slice(0,8))+' · total '+fmtBytes(j.total_bytes)+' — se reinicia con cada deploy, es "qué pesa ahora", no un histórico.';
+  $('bwSince').textContent='Ventana de ~'+sinceH+'h · boot actual '+esc((j.boot_id||'').slice(0,8))+' · total '+fmtBytes(j.total_bytes)+' — sobrevive a un reinicio corto (máx. 1h), se resetea si el proceso estuvo apagado más tiempo que eso.';
   const rows=j.rows||[];
   if(!rows.length){box.innerHTML='<div class="empty">Aún no hay tráfico registrado.</div>';return;}
   const max=Math.max(1,...rows.map(x=>x.bytes));
