@@ -5360,6 +5360,13 @@ class H(BaseHTTPRequestHandler):
                                  "ends_at": now + duration,
                                  "triggered_by_np_id": np_id, "auto": False}
                 STATE["poll_launched_for_id"] = np_id
+                # Pedido explícito: la votación lanzada A MANO desde /social no avisaba a los
+                # clientes — solo la automática lo hacía (_auto_create_poll_bg). Mismo mensaje,
+                # en hilo aparte (ver fix de push síncrono bajo el LOCK global, misma sesión).
+                venue_name = STATE["settings"].get("venue_name", "TYM Music")
+                body = "Elige entre: " + ", ".join(o["title"] for o in valid_opts[:3])
+                threading.Thread(target=_send_venue_push, args=(vid, f"🗳️ ¡Nueva votación en {venue_name}!",
+                                  body, f"/?v={vid}#social"), daemon=True).start()
                 return self._send(200, {"ok": True})
 
             # ---- Admin: cerrar votación ----
@@ -5392,6 +5399,13 @@ class H(BaseHTTPRequestHandler):
                     "triggered_by_np_id": duelo_np_id,
                     "winner_yt": None,
                 }
+                # Mismo fix que la votación manual de arriba: avisar a los clientes también
+                # cuando el duelo lo lanza el admin a mano, no solo el automático.
+                venue_name = STATE["settings"].get("venue_name", "TYM Music")
+                _dteams = STATE["duelo"]["teams"]
+                body = f"{_dteams[0]['title']} 🆚 {_dteams[1]['title']}"
+                threading.Thread(target=_send_venue_push, args=(vid, f"⚔️ ¡Nuevo duelo en {venue_name}!",
+                                  body, f"/?v={vid}#social"), daemon=True).start()
                 return self._send(200, {"ok": True})
 
             # ---- Admin: cerrar duelo ----
