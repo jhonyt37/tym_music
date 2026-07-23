@@ -33,6 +33,7 @@
   <div class="logo">TY<b>M</b> Music</div>
   <div class="tag">Dashboard global</div>
   <div class="spacer"></div>
+  <a class="tag" href="#" onclick="load();return false">🔄 Actualizar</a>
   <a class="tag" href="#" onclick="logout();return false">Salir</a>
 </header>
 
@@ -396,7 +397,12 @@ async function createVenue(){
   if(j.ok){$('nVid').value='';$('nName').value='';$('nUser').value='';$('nPass').value='';$('nEmail').value='';load();}
   else $('nErr').textContent=j.error||'Error';
 }
-load();setInterval(load,4000);
+// Pedido explícito: este dashboard hacía polling automático cada 4s (heredado del mismo
+// patrón que /admin y el cliente) — pero acá nadie necesita verlo "en vivo" segundo a segundo,
+// y /api/tym/analytics + /api/tym/request_log salieron pesando bastante en el panel de banda
+// ancha de arriba (491 requests en 36 min desde una sola pestaña abierta). Se carga una vez al
+// entrar y de ahí en más solo por el botón "🔄 Actualizar" del header.
+load();
 </script>
 </body>
 </html>
