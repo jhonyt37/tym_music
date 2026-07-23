@@ -3662,9 +3662,15 @@ class H(BaseHTTPRequestHandler):
                 charge = charge * abuse_mult
                 # Dedicatoria (mensaje al pedir): cargo fijo adicional si el local lo configuró
                 # — se SUMA al precio de la canción (gratis/prioridad/salto), no lo reemplaza,
-                # y queda fuera del anti-abuso de arriba (son cargos independientes).
+                # y queda fuera del anti-abuso de arriba (son cargos independientes). Pedido
+                # explícito: "dedicatorias sin personalización no tienen costo, solo las que son
+                # con texto personalizado" — antes se cobraba por CUALQUIER mensaje, incluidos
+                # los predeterminados del bar (dedica_presets), que están pensados para pasar
+                # siempre gratis. dedica_code_entry solo existe cuando el mensaje NO es uno de
+                # los predeterminados (necesitó un código de un solo uso) — es la señal exacta
+                # de "esto es texto personalizado", ya calculada arriba, sin repetir el chequeo.
                 dedica_price = int(STATE["settings"].get("dedica_price", 0) or 0)
-                if req_msg and dedica_price > 0:
+                if req_msg and dedica_price > 0 and dedica_code_entry is not None:
                     ckind = (ckind + " + dedicatoria") if charge > 0 else "dedicatoria"
                     charge += dedica_price
                 charge_via, paid_amount = None, 0
